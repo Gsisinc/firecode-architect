@@ -349,6 +349,36 @@
         "type": "object"
       }
     },
+    "wires": {
+      "type": "array",
+      "description": "Manual field wiring segments drawn between devices",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "floor": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "circuit": {
+            "type": "string"
+          },
+          "length_ft": {
+            "type": "number"
+          }
+        }
+      }
+    },
     "status": {
       "type": "string",
       "enum": [

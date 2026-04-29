@@ -5,8 +5,7 @@
  * and circuit paths (as polylines).
  */
 
-// Scale factor: canvas pixels → DXF drawing units (1 unit = 1 foot, 1 px ≈ 0.1 ft)
-const PX_TO_FT = 0.1;
+import { DEFAULT_PX_PER_FT, getFloorScale } from "./designScale";
 
 const DEVICE_LAYERS = {
   smoke_detector:   { layer: "FA-SMKE", color: 1 },  // red
@@ -38,8 +37,8 @@ const DEVICE_SYMBOL = {
   elevator_recall:  "SD-E",
 };
 
-function px(val) {
-  return (val * PX_TO_FT).toFixed(4);
+function px(val, pxPerFt = DEFAULT_PX_PER_FT) {
+  return (val / pxPerFt).toFixed(4);
 }
 
 // ── HEADER ───────────────────────────────────────────────────────────────────
@@ -100,13 +99,13 @@ function dxfText(x, y, text, height, layer, color = 256) {
 }
 
 // ── ROOM → DXF ───────────────────────────────────────────────────────────────
-function roomsToEntities(rooms, floor) {
+function roomsToEntities(rooms, floor, pxPerFt) {
   let out = "";
   rooms.filter((r) => r.floor === floor).forEach((room) => {
-    const x1 = parseFloat(px(room.x));
-    const y1 = parseFloat(px(room.y));
-    const x2 = parseFloat(px(room.x + room.width));
-    const y2 = parseFloat(px(room.y + room.height));
+    const x1 = parseFloat(px(room.x, pxPerFt));
+    const y1 = parseFloat(px(room.y, pxPerFt));
+    const x2 = parseFloat(px(room.x + room.width, pxPerFt));
+    const y2 = parseFloat(px(room.y + room.height, pxPerFt));
     // Invert Y for DXF (canvas Y grows down, DXF Y grows up)
     const pts = [
       [x1.toFixed(4), (-y1).toFixed(4)],
@@ -127,11 +126,11 @@ function roomsToEntities(rooms, floor) {
 }
 
 // ── DEVICE → DXF ─────────────────────────────────────────────────────────────
-function devicesToEntities(devices, floor) {
+function devicesToEntities(devices, floor, pxPerFt) {
   let out = "";
   devices.filter((d) => d.floor === floor).forEach((dev) => {
-    const cx = parseFloat(px(dev.x)).toFixed(4);
-    const cy = (-parseFloat(px(dev.y))).toFixed(4);
+    const cx = parseFloat(px(dev.x, pxPerFt)).toFixed(4);
+    const cy = (-parseFloat(px(dev.y, pxPerFt))).toFixed(4);
     const cfg = DEVICE_LAYERS[dev.type] || { layer: "FA-SMKE", color: 1 };
     const symbol = DEVICE_SYMBOL[dev.type] || "?";
     const r = "0.8"; // ~1ft radius symbol
@@ -156,8 +155,22 @@ function devicesToEntities(devices, floor) {
 }
 
 // ── CIRCUIT PATHS → DXF ──────────────────────────────────────────────────────
-function circuitsToEntities(devices, floor) {
+function circuitsToEntities(devices, floor, pxPerFt, wires = []) {
   let out = "";
+  const floorWires = wires.filter((wire) => wire.floor === floor);
+  if (floorWires.length) {
+    floorWires.forEach((wire) => {
+      const a = devices.find((d) => d.id === wire.from);
+      const b = devices.find((d) => d.id === wire.to);
+      if (!a || !b) return;
+      out += dxfPolyline([
+        [parseFloat(px(a.x, pxPerFt)).toFixed(4), (-parseFloat(px(a.y, pxPerFt))).toFixed(4)],
+        [parseFloat(px(b.x, pxPerFt)).toFixed(4), (-parseFloat(px(b.y, pxPerFt))).toFixed(4)],
+      ], false, "FA-CIRC", wire.type === "NAC" ? 30 : 5);
+    });
+    return out;
+  }
+
   const byCircuit = {};
   devices
     .filter((d) => d.floor === floor && d.circuit)
@@ -169,8 +182,8 @@ function circuitsToEntities(devices, floor) {
   Object.values(byCircuit).forEach((group) => {
     if (group.length < 2) return;
     const pts = group.map((d) => [
-      parseFloat(px(d.x)).toFixed(4),
-      (-parseFloat(px(d.y))).toFixed(4),
+      parseFloat(px(d.x, pxPerFt)).toFixed(4),
+      (-parseFloat(px(d.y, pxPerFt))).toFixed(4),
     ]);
     out += dxfPolyline(pts, false, "FA-CIRC", 8);
   });
@@ -178,7 +191,7 @@ function circuitsToEntities(devices, floor) {
 }
 
 // ── TITLE BLOCK ──────────────────────────────────────────────────────────────
-function dxfTitleBlock(project, floor) {
+function dxfTitleBlock(project, floor, pxPerFt) {
   const x = 0;
   const y = -550;
   let out = "";
@@ -190,17 +203,18 @@ function dxfTitleBlock(project, floor) {
   out += dxfText((x + 2).toFixed(1), (y - 8).toFixed(1), `PROJECT: ${project?.name || "Fire Alarm Design"}`, "2.0", "FA-TITLE");
   out += dxfText((x + 2).toFixed(1), (y - 14).toFixed(1), `ADDRESS: ${project?.address || ""}`, "1.5", "FA-TITLE", 8);
   out += dxfText((x + 2).toFixed(1), (y - 20).toFixed(1), `OCC. GROUP: ${project?.occupancy_group || ""} | FLOOR: ${floor}`, "1.5", "FA-TITLE", 8);
-  out += dxfText((x + 2).toFixed(1), (y - 26).toFixed(1), `NFPA 72 (2022) | NEC (2023) | IBC (2021)  |  Generated ${new Date().toLocaleDateString()}`, "1.2", "FA-TITLE", 8);
+  out += dxfText((x + 2).toFixed(1), (y - 26).toFixed(1), `SCALE: ${pxPerFt.toFixed(2)} px/ft | NFPA 72 (2022) | NEC (2023) | IBC (2021) | ${new Date().toLocaleDateString()}`, "1.2", "FA-TITLE", 8);
   return out;
 }
 
 // ── MAIN EXPORT ──────────────────────────────────────────────────────────────
-export function exportToDXF(project, rooms, devices, floor = 1) {
+export function exportToDXF(project, rooms, devices, floor = 1, options = {}) {
+  const pxPerFt = options.pxPerFt || getFloorScale(project?.floor_plans, floor);
   const entities =
-    roomsToEntities(rooms, floor) +
-    devicesToEntities(devices, floor) +
-    circuitsToEntities(devices, floor) +
-    dxfTitleBlock(project, floor);
+    roomsToEntities(rooms, floor, pxPerFt) +
+    devicesToEntities(devices, floor, pxPerFt) +
+    circuitsToEntities(devices, floor, pxPerFt, options.wires || project?.wires || []) +
+    dxfTitleBlock(project, floor, pxPerFt);
 
   const dxf =
     dxfHeader(project?.name) +
@@ -212,8 +226,8 @@ export function exportToDXF(project, rooms, devices, floor = 1) {
   return dxf;
 }
 
-export function downloadDXF(project, rooms, devices, floor = 1) {
-  const dxf = exportToDXF(project, rooms, devices, floor);
+export function downloadDXF(project, rooms, devices, floor = 1, options = {}) {
+  const dxf = exportToDXF(project, rooms, devices, floor, options);
   const blob = new Blob([dxf], { type: "application/dxf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

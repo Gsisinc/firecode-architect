@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import jsPDF from 'jspdf';
+import { calculateWireLengthSummary } from '@/lib/designValidation';
 
 const DEVICE_TYPE_LABELS = {
   smoke_detector: 'Smoke Detector',
@@ -52,8 +53,12 @@ function buildBOM(devices) {
   );
 }
 
-export default function BillOfMaterials({ project, devices, onClose }) {
+export default function BillOfMaterials({ project, devices, floorPlans = [], wires = [], onClose }) {
   const bom = useMemo(() => buildBOM(devices), [devices]);
+  const wireSummary = useMemo(
+    () => calculateWireLengthSummary({ devices, wires, floorPlans }),
+    [devices, wires, floorPlans]
+  );
   const totalDevices = devices.length;
 
   const exportCSV = () => {
@@ -91,6 +96,11 @@ export default function BillOfMaterials({ project, devices, onClose }) {
       '=== DEVICE DETAIL ===',
       detailHeaders.join(','),
       ...detailRows.map(r => r.join(',')),
+      '',
+      '=== FIELD WIRE ===',
+      'Circuit,Floor,Segments,Estimated Feet',
+      ...wireSummary.byCircuit.map(w => [w.circuit, w.floor, w.segments, w.feet].join(',')),
+      `TOTAL,,${wires.length},${wireSummary.totalFeet}`,
     ].join('\n');
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -210,6 +220,24 @@ export default function BillOfMaterials({ project, devices, onClose }) {
       y += 6;
     });
 
+    if (wireSummary.byCircuit.length) {
+      doc.addPage();
+      y = 20;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42);
+      doc.text('Field Wire Summary', 14, y);
+      y += 8;
+      doc.setFontSize(7.5);
+      doc.setTextColor(71, 85, 105);
+      wireSummary.byCircuit.forEach(w => {
+        doc.text(`${w.circuit} | Floor ${w.floor} | ${w.segments} segment(s) | ${w.feet} ft`, 16, y);
+        y += 6;
+      });
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Total estimated field wire: ${wireSummary.totalFeet} ft`, 16, y + 4);
+    }
+
     doc.save(`${(project?.name || 'project').replace(/\s+/g, '_')}_BOM.pdf`);
   };
 
@@ -247,6 +275,11 @@ export default function BillOfMaterials({ project, devices, onClose }) {
                 </div>
               ))}
             </div>
+            {wireSummary.totalFeet > 0 && (
+              <p className="text-xs text-muted-foreground mt-3">
+                Field wire: <span className="font-mono font-semibold text-slate-800">{wireSummary.totalFeet} ft</span> across {wires.length} saved segment{wires.length === 1 ? '' : 's'}
+              </p>
+            )}
           </div>
 
           {/* Detail table */}

@@ -22,6 +22,12 @@ import ProjectDashboard from "@/components/designer/ProjectDashboard";
 import RiserDiagram from "@/components/designer/RiserDiagram";
 import MarkupsList from "@/components/designer/MarkupsList";
 import { downloadDXF } from "@/lib/dxfExport";
+import {
+  deriveDetectionGeometry,
+  normalizeDetectedRooms,
+} from "@/lib/floorPlanDetection";
+import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale";
+import { mergeGeneratedDevices } from "@/lib/designValidation";
 
 import {
   determineSystemRequirements,
@@ -80,7 +86,7 @@ export default function ProjectDesigner() {
   const [localMarkups, setLocalMarkups] = useState(null);
   const [localDocumentWorkspace, setLocalDocumentWorkspace] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
-  const [wires, setWires] = useState([]);
+  const [localWires, setLocalWires] = useState(null);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -94,6 +100,7 @@ export default function ProjectDesigner() {
   const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
   const markups = localMarkups ?? project?.markups ?? [];
   const documentWorkspace = localDocumentWorkspace ?? project?.document_workspace ?? null;
+  const wires = localWires ?? project?.wires ?? [];
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
@@ -110,6 +117,7 @@ export default function ProjectDesigner() {
       markups,
       floor_plans: floorPlans,
       document_workspace: documentWorkspace,
+      wires,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
@@ -128,6 +136,7 @@ export default function ProjectDesigner() {
       markups,
       floor_plans: updated,
       document_workspace: documentWorkspace,
+      wires,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
@@ -151,7 +160,6 @@ export default function ProjectDesigner() {
     let pass1;
     try {
       pass1 = await base44.integrations.Core.InvokeLLM({
-        model: "gemini_3_1_pro",
         prompt: `This is an architectural floor plan blueprint image (${imgW}x${imgH} pixels).
 
 YOUR ONLY JOB: Find the dimension annotation lines printed on the drawing and read the scale.
@@ -169,7 +177,7 @@ YOUR ONLY JOB: Find the dimension annotation lines printed on the drawing and re
 3. Find the OUTER WALLS of the building floor plan (ignore title block, notes, legend outside the building):
    - left_px, top_px, right_px, bottom_px (pixels from image top-left)
 
-Be extremely precise about pixel coordinates. Look carefully at where dimension lines START and END.`,
+If a dimension line cannot be read confidently, return null for that dimension. Be extremely precise about pixel coordinates. Look carefully at where dimension lines START and END.`,
         file_urls: [plan.image_url],
         response_json_schema: {
           type: "object",
@@ -195,45 +203,38 @@ Be extremely precise about pixel coordinates. Look carefully at where dimension 
 
     console.log("Pass 1 (scale):", JSON.stringify(pass1, null, 2));
 
-    // Calculate px/ft scale from the dimension lines
-    const h = pass1?.horiz_dim;
-    const v = pass1?.vert_dim;
-    const b = pass1?.building;
+    const geometry = deriveDetectionGeometry({
+      pass1,
+      imgW,
+      imgH,
+      project,
+      floor: activeFloor,
+    });
+    const { buildingBounds, pxPerFt, scaleSource } = geometry;
 
-    const pxPerFtH = h?.feet > 0 ? Math.abs(h.x2_px - h.x1_px) / h.feet : null;
-    const pxPerFtV = v?.feet > 0 ? Math.abs(v.y2_px - v.y1_px) / v.feet : null;
-    // Use average of both axes if available, otherwise fall back to the one we have
-    const pxPerFt = pxPerFtH && pxPerFtV ? (pxPerFtH + pxPerFtV) / 2 : pxPerFtH || pxPerFtV || 10;
+    console.log(`Scale: ${pxPerFt.toFixed(2)}px/ft from ${scaleSource}`);
 
-    console.log(`Scale: H=${pxPerFtH?.toFixed(1)}px/ft, V=${pxPerFtV?.toFixed(1)}px/ft, avg=${pxPerFt.toFixed(1)}px/ft`);
-
-    const buildingLeft = b?.left_px || 0;
-    const buildingTop = b?.top_px || 0;
-    const buildingRight = b?.right_px || imgW;
-    const buildingBottom = b?.bottom_px || imgH;
-
-    toast.info(`Scale detected: ~${pxPerFt.toFixed(1)}px/ft. Mapping rooms — step 2 of 2...`);
+    toast.info(`Scale detected: ~${pxPerFt.toFixed(1)}px/ft (${scaleSource}). Mapping rooms — step 2 of 2...`);
 
     // ── PASS 2: Read each room's real-world dimensions in FEET from the drawing ──
     let pass2;
     try {
       pass2 = await base44.integrations.Core.InvokeLLM({
-        model: "gemini_3_1_pro",
         prompt: `This is an architectural floor plan blueprint image (${imgW}x${imgH} pixels).
 
-The building's outer walls are at: left=${buildingLeft}px, top=${buildingTop}px, right=${buildingRight}px, bottom=${buildingBottom}px.
+The building's outer walls are at: left=${buildingBounds.left}px, top=${buildingBounds.top}px, right=${buildingBounds.right}px, bottom=${buildingBounds.bottom}px.
 The drawing scale is approximately ${pxPerFt.toFixed(1)} pixels per foot.
 
 YOUR JOB: For every labeled enclosed room/space inside the building walls, report:
 1. The room's TEXT LABEL as written on the plan (e.g. "ELECTRICAL ROOM", "STORAGE ROOM", "RESTROOM", "SALES FLOOR")
 2. The room_type (office|corridor|conference_room|bathroom|storage|lobby|stairwell|mechanical_room|sales_floor|other)
-3. The room's WIDTH in feet — read from dimension callouts inside or adjacent to the room, OR estimate from the scale
-4. The room's HEIGHT (depth) in feet — same
-5. The pixel coordinate of the room's TOP-LEFT corner (px, py) measured from image top-left
+3. The pixel bounding box of the room: x1_px, y1_px, x2_px, y2_px measured from image top-left
+4. The room's WIDTH in feet — read from dimension callouts inside or adjacent to the room, OR estimate from the scale
+5. The room's HEIGHT (depth) in feet — same
 
 IMPORTANT: Width and height should be the REAL-WORLD feet dimensions readable from the drawing.
 If a room has a dimension callout like "9'-0\"" that is its actual size — use that, don't guess.
-For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.`,
+For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale. Only include enclosed rooms/spaces, not title blocks, notes, legends, or exterior annotations.`,
         file_urls: [plan.image_url],
         response_json_schema: {
           type: "object",
@@ -245,10 +246,12 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 properties: {
                   name: { type: "string" },
                   room_type: { type: "string" },
+                  x1_px: { type: "number" },
+                  y1_px: { type: "number" },
+                  x2_px: { type: "number" },
+                  y2_px: { type: "number" },
                   width_ft: { type: "number" },
-                  height_ft: { type: "number" },
-                  px: { type: "number" },
-                  py: { type: "number" }
+                  height_ft: { type: "number" }
                 }
               }
             }
@@ -263,40 +266,33 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
 
     console.log("Pass 2 (rooms):", JSON.stringify(pass2, null, 2));
 
-    // Convert feet → pixels using our calibrated scale
-    const detectedRooms = (pass2?.rooms || []).map(r => {
-      const widthPx = Math.round((r.width_ft || 10) * pxPerFt);
-      const heightPx = Math.round((r.height_ft || 10) * pxPerFt);
-      const sqft = Math.round((r.width_ft || 10) * (r.height_ft || 10));
-      return {
-        id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        floor: activeFloor,
-        name: r.name || 'Room',
-        room_type: r.room_type || 'other',
-        x: Math.max(0, Math.round(r.px || buildingLeft)),
-        y: Math.max(0, Math.round(r.py || buildingTop)),
-        width: Math.max(20, widthPx),
-        height: Math.max(20, heightPx),
-        sqft,
-        ceiling_height: project.default_ceiling_height || 9,
-        ceiling_type: project.default_ceiling_type || 'smooth_flat',
-      };
+    const detectedRooms = normalizeDetectedRooms({
+      pass2,
+      activeFloor,
+      project,
+      geometry,
+      imgW,
+      imgH,
     });
 
     if (detectedRooms.length === 0) {
-      toast.error("Could not detect rooms — try a clearer floor plan image");
+      toast.error("Could not detect rooms. Try a clearer plan, or draw rooms manually and use Auto-Place Devices.");
     } else {
       const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
+      const updatedFloorPlans = updateFloorPlanScale(floorPlans, activeFloor, geometry);
       setLocalRooms(newRooms);
+      setLocalFloorPlans(updatedFloorPlans);
       saveMutation.mutate({
         rooms: newRooms,
         devices,
         markups,
-        floor_plans: floorPlans,
+        floor_plans: updatedFloorPlans,
+        wires,
+        document_workspace: documentWorkspace,
         analysis_results: analysisResults,
         status: devices.length > 0 ? "in_progress" : "draft",
       });
-      toast.success(`Detected ${detectedRooms.length} rooms at ${pxPerFt.toFixed(1)}px/ft scale. Room sizes are based on blueprint dimensions.`);
+      toast.success(`Detected ${detectedRooms.length} rooms at ${pxPerFt.toFixed(1)}px/ft scale (${scaleSource}).`);
     }
     setAnalyzingFloor(false);
   };
@@ -318,38 +314,39 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
     if (!analysisResults) setAnalysisResults(analysis);
 
     let allDevices = [];
+    const floorRooms = rooms.filter((r) => r.floor === activeFloor);
 
     // Smoke detectors — codeEngine returns camelCase (fireAlarmRequired)
     const needsAlarm = analysis.fireAlarmRequired || analysis.fire_alarm_required;
     if (needsAlarm) {
       const smokeRooms = rooms.filter(
-        (r) => r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
+        (r) => r.floor === activeFloor && r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
       );
       allDevices.push(...calculateSmokeDetectorPlacement(smokeRooms, project.default_ceiling_height));
     }
 
     // Heat detectors
-    allDevices.push(...calculateHeatDetectorPlacement(rooms, project.default_ceiling_height));
+    allDevices.push(...calculateHeatDetectorPlacement(floorRooms, project.default_ceiling_height));
 
     // Pull stations
-    allDevices.push(...calculatePullStationPlacement(rooms, analysis));
+    allDevices.push(...calculatePullStationPlacement(floorRooms, analysis));
 
     // Strobes
     if (needsAlarm) {
-      allDevices.push(...calculateStrobePlacement(rooms));
+      allDevices.push(...calculateStrobePlacement(floorRooms));
     }
 
     // Horn/strobes
     if (needsAlarm) {
-      allDevices.push(...calculateHornPlacement(rooms));
+      allDevices.push(...calculateHornPlacement(floorRooms));
     }
 
     // Elevator recall
-    const elevDevices = calculateElevatorRecallDetectors(project);
+    const elevDevices = calculateElevatorRecallDetectors(project).filter((d) => d.floor === activeFloor);
     allDevices.push(...elevDevices);
 
     // Sprinkler monitoring
-    const sprinklerDevices = calculateSprinklerMonitoring(project);
+    const sprinklerDevices = calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor);
     allDevices.push(...sprinklerDevices);
 
     // Assign addresses
@@ -357,11 +354,13 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       ...d,
       address: d.address || `${d.type === "smoke_detector" ? "SD" : d.type === "heat_detector" ? "HD" : d.type === "pull_station" ? "PS" : d.type === "horn_strobe" ? "HS" : d.type === "strobe" ? "STR" : d.type === "waterflow_switch" ? "WF" : d.type === "valve_tamper" ? "VS" : "DEV"}-${String(i + 1).padStart(3, "0")}`,
       zone: d.zone || `Floor ${d.floor || 1}`,
+      generated_by: "auto_place",
     }));
 
-    setLocalDevices(allDevices);
-    toast.success(`Auto-placed ${allDevices.length} devices`);
-  }, [project, rooms, analysisResults]);
+    const mergedDevices = mergeGeneratedDevices(devices, allDevices, activeFloor);
+    setLocalDevices(mergedDevices);
+    toast.success(`Auto-placed ${allDevices.length} generated devices on floor ${activeFloor}; manual devices were preserved`);
+  }, [project, rooms, devices, activeFloor, analysisResults]);
 
   const handleAddRoom = (roomData) => {
     const newRoom = {
@@ -370,7 +369,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       name: roomData.room_type.replace(/_/g, " "),
       ceiling_height: project.default_ceiling_height,
       ceiling_type: project.default_ceiling_type,
-      sqft: Math.round((roomData.width * roomData.height) / (10 * 10)), // approx scale
+      sqft: roomSqft(roomData, getFloorScale(floorPlans, activeFloor)),
     };
     setLocalRooms([...rooms, newRoom]);
   };
@@ -415,7 +414,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       floor: activeFloor,
       name: pendingRoomName || 'Room',
       ...pendingRoom,
-      sqft: Math.round(pendingRoom.width * pendingRoom.height / 9),
+      sqft: roomSqft(pendingRoom, getFloorScale(floorPlans, activeFloor)),
       ceiling_height: project?.default_ceiling_height || 9,
       ceiling_type: project?.default_ceiling_type || 'smooth_flat',
     };
@@ -505,6 +504,8 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 project={project}
                 devices={devices}
                 rooms={rooms}
+                wires={wires}
+                floorPlans={floorPlans}
                 analysisResults={analysisResults}
               />
             </div>
@@ -600,7 +601,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                     <ToolbarBtn active={rightPanel === 'battery'} onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')} icon={<Battery className="h-3 w-3" />} label="Battery" />
                     <ToolbarBtn active={rightPanel === 'voltagedrop'} onClick={() => setRightPanel(p => p === 'voltagedrop' ? null : 'voltagedrop')} icon={<Zap className="h-3 w-3" />} label="V-Drop" />
                     <ToolbarBtn active={rightPanel === 'markups'} onClick={() => setRightPanel(p => p === 'markups' ? null : 'markups')} icon={<MessageSquare className="h-3 w-3" />} label="Markups" />
-                    <ToolbarBtn onClick={() => downloadDXF(project, rooms, devices, activeFloor)} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
+                    <ToolbarBtn onClick={() => downloadDXF(project, rooms, devices, activeFloor, { wires })} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
                     <ToolbarBtn onClick={() => setShowSubmittal(true)} icon={<BookOpen className="h-3 w-3" />} label="Submittal PDF" orange />
                   </div>
                 </div>
@@ -648,13 +649,15 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                   devices={devices}
                   analysisResults={analysisResults}
                   rooms={rooms}
+                  wires={wires}
+                  floorPlans={floorPlans}
                 />
               )}
               {rightPanel === 'battery' && (
                 <BatteryPanel devices={devices} />
               )}
               {rightPanel === 'voltagedrop' && (
-                <VoltageDropCalculator devices={devices} />
+                <VoltageDropCalculator devices={devices} floorPlans={floorPlans} wires={wires} />
               )}
               {rightPanel === 'markups' && (
                 <MarkupsList
@@ -684,6 +687,8 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
         <BillOfMaterials
           project={project}
           devices={devices}
+          wires={wires}
+          floorPlans={floorPlans}
           onClose={() => setShowBOM(false)}
         />
       )}
@@ -693,6 +698,8 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
           project={project}
           devices={devices}
           rooms={rooms}
+          wires={wires}
+          floorPlans={floorPlans}
           analysisResults={analysisResults}
           canvasRef={canvasRef}
           onClose={() => setShowSubmittal(false)}
