@@ -38,6 +38,7 @@ export default function ProjectDesigner() {
   const [drawingRoom, setDrawingRoom] = useState(false);
   const [roomDrawType, setRoomDrawType] = useState("office");
   const [selectedDevice, setSelectedDevice] = useState(null);
+  const [activeTab, setActiveTab] = useState('canvas');
   const [showCalculations, setShowCalculations] = useState(false);
   const [showBOM, setShowBOM] = useState(false);
   const [snapGrid, setSnapGrid] = useState(false);
@@ -213,12 +214,10 @@ export default function ProjectDesigner() {
     <div className="h-screen flex flex-col overflow-hidden">
       <DesignerTopBar
         project={project}
-        saving={saveMutation.isPending}
+        isSaving={saveMutation.isPending}
         onSave={handleSave}
-        onExportPDF={handleExportPDF}
-        onExportDeviceSchedule={handleExportDeviceSchedule}
-        onExportSequence={handleExportSequence}
-        deviceCount={devices.length}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -243,59 +242,77 @@ export default function ProjectDesigner() {
         />
 
         <div className="flex-1 relative overflow-hidden">
-          <FloorPlanCanvas
-            floorPlan={currentFloorPlan}
-            rooms={rooms}
-            devices={devices}
-            activeFloor={activeFloor}
-            showGrid={showGrid}
-            showCircuits={showCircuits}
-            showLabels={showLabels}
-            drawingRoom={drawingRoom}
-            roomDrawType={roomDrawType}
-            snapGrid={snapGrid}
-            onAddRoom={handleAddRoom}
-            onDeviceDrag={handleDeviceDrag}
-            selectedDevice={selectedDevice}
-            onSelectDevice={setSelectedDevice}
-            scale={10}
-          />
-
-          <DevicePanel
-            device={selectedDevice}
-            onClose={() => setSelectedDevice(null)}
-            onUpdate={handleUpdateDevice}
-            onDelete={handleDeleteDevice}
-          />
-
-          {/* Bottom toolbar */}
-          <div className="absolute bottom-4 left-4 flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5 h-8 text-xs shadow-sm"
-              onClick={() => setShowCalculations(true)}
-            >
-              <Calculator className="h-3 w-3" /> Calculations
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5 h-8 text-xs shadow-sm"
-              onClick={() => setShowBOM(true)}
-            >
-              <Package className="h-3 w-3" /> BOM
-            </Button>
-            <Button
-              size="sm"
-              variant={snapGrid ? "default" : "outline"}
-              className="gap-1.5 h-8 text-xs shadow-sm"
-              onClick={() => setSnapGrid(s => !s)}
-              title="Toggle snap-to-grid"
-            >
-              <Grid3x3 className="h-3 w-3" /> {snapGrid ? 'Snap ON' : 'Snap OFF'}
-            </Button>
-          </div>
+          {activeTab === 'riser' && (
+            <div className="w-full h-full overflow-auto bg-white p-6">
+              <p className="text-slate-500 text-sm">Riser Diagram — switch to the Riser Diagram tab view here.</p>
+            </div>
+          )}
+          {activeTab === 'calculations' && (
+            <div className="w-full h-full overflow-auto">
+              <CalculationsPanel
+                project={project}
+                devices={devices}
+                analysisResults={analysisResults}
+                onClose={() => setActiveTab('canvas')}
+                inline
+              />
+            </div>
+          )}
+          {activeTab === 'canvas' && (
+            <>
+              <FloorPlanCanvas
+                floorPlan={currentFloorPlan}
+                rooms={rooms}
+                devices={devices}
+                activeFloor={activeFloor}
+                showGrid={showGrid}
+                showCircuits={showCircuits}
+                showLabels={showLabels}
+                drawingRoom={drawingRoom}
+                roomDrawType={roomDrawType}
+                snapGrid={snapGrid}
+                onAddRoom={handleAddRoom}
+                onDeviceDrag={handleDeviceDrag}
+                selectedDevice={selectedDevice}
+                onSelectDevice={setSelectedDevice}
+                scale={10}
+              />
+              <DevicePanel
+                device={selectedDevice}
+                onClose={() => setSelectedDevice(null)}
+                onUpdate={handleUpdateDevice}
+                onDelete={handleDeleteDevice}
+              />
+              {/* Bottom toolbar */}
+              <div className="absolute bottom-4 left-4 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 h-8 text-xs shadow-sm"
+                  onClick={() => setShowCalculations(true)}
+                >
+                  <Calculator className="h-3 w-3" /> Calculations
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 h-8 text-xs shadow-sm"
+                  onClick={() => setShowBOM(true)}
+                >
+                  <Package className="h-3 w-3" /> BOM
+                </Button>
+                <Button
+                  size="sm"
+                  variant={snapGrid ? "default" : "outline"}
+                  className="gap-1.5 h-8 text-xs shadow-sm"
+                  onClick={() => setSnapGrid(s => !s)}
+                  title="Toggle snap-to-grid"
+                >
+                  <Grid3x3 className="h-3 w-3" /> {snapGrid ? 'Snap ON' : 'Snap OFF'}
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
