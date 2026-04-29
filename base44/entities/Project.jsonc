@@ -260,6 +260,41 @@
         }
       }
     },
+    "documents": {
+      "type": "array",
+      "description": "Uploaded drawing sheets and PDF/image document records",
+      "items": {
+        "type": "object"
+      }
+    },
+    "document_sets": {
+      "type": "array",
+      "description": "Ordered drawing packages with revisions and sheet membership",
+      "items": {
+        "type": "object"
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "description": "Per-user project/document permissions",
+      "items": {
+        "type": "object"
+      }
+    },
+    "collaboration_sessions": {
+      "type": "array",
+      "description": "Review sessions, comments, and audit records",
+      "items": {
+        "type": "object"
+      }
+    },
+    "batch_jobs": {
+      "type": "array",
+      "description": "Queued and completed batch document operations",
+      "items": {
+        "type": "object"
+      }
+    },
     "status": {
       "type": "string",
       "enum": [

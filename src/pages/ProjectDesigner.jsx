@@ -20,6 +20,7 @@ import SubmittalPackage from "@/components/designer/SubmittalPackage";
 import VoltageDropCalculator from "@/components/designer/VoltageDropCalculator";
 import ProjectDashboard from "@/components/designer/ProjectDashboard";
 import RiserDiagram from "@/components/designer/RiserDiagram";
+import DocumentWorkspace from "@/components/designer/DocumentWorkspace";
 import { downloadDXF } from "@/lib/dxfExport";
 
 import {
@@ -63,6 +64,7 @@ export default function ProjectDesigner() {
   const [localRooms, setLocalRooms] = useState(null);
   const [localDevices, setLocalDevices] = useState(null);
   const [localFloorPlans, setLocalFloorPlans] = useState(null);
+  const [localDocumentWorkspace, setLocalDocumentWorkspace] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
   const [wires, setWires] = useState([]);
 
@@ -76,6 +78,7 @@ export default function ProjectDesigner() {
   const rooms = localRooms ?? project?.rooms ?? [];
   const devices = localDevices ?? project?.devices ?? [];
   const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
+  const documentWorkspace = localDocumentWorkspace ?? project?.document_workspace ?? null;
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
@@ -90,6 +93,7 @@ export default function ProjectDesigner() {
       rooms,
       devices,
       floor_plans: floorPlans,
+      document_workspace: documentWorkspace,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
@@ -106,6 +110,7 @@ export default function ProjectDesigner() {
       rooms,
       devices,
       floor_plans: updated,
+      document_workspace: documentWorkspace,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
@@ -490,6 +495,24 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 inline
               />
             </div>
+          )}
+          {activeTab === 'documents' && (
+            <DocumentWorkspace
+              project={project}
+              workspace={documentWorkspace}
+              onWorkspaceChange={setLocalDocumentWorkspace}
+              onSave={(workspace) => {
+                setLocalDocumentWorkspace(workspace);
+                saveMutation.mutate({
+                  rooms,
+                  devices,
+                  floor_plans: floorPlans,
+                  document_workspace: workspace,
+                  analysis_results: analysisResults,
+                  status: devices.length > 0 ? "in_progress" : "draft",
+                });
+              }}
+            />
           )}
           {activeTab === 'canvas' && (
             <>
