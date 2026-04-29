@@ -51,8 +51,11 @@ export default function ProjectDesigner() {
   const [snapGrid, setSnapGrid] = useState(false);
   const [selectedTool, setSelectedTool] = useState('select');
   const [layers, setLayers] = useState({ grid: false, rooms: true, circuits: true, labels: true });
-  const [rightPanel, setRightPanel] = useState(null); // 'checklist' | 'battery' | 'voltagedrop' | null
+  const [rightPanel, setRightPanel] = useState(null);
   const [showSubmittal, setShowSubmittal] = useState(false);
+  const [toolbarOpen, setToolbarOpen] = useState(false);
+  const [pendingRoom, setPendingRoom] = useState(null); // { x, y, width, height }
+  const [pendingRoomName, setPendingRoomName] = useState('');
   const canvasRef = useRef(null);
   const [analysisResults, setAnalysisResults] = useState(null);
   const [localRooms, setLocalRooms] = useState(null);
@@ -102,20 +105,23 @@ export default function ProjectDesigner() {
     if (!plan?.image_url) { toast.error("Upload a floor plan first"); return; }
     setAnalyzingFloor(true);
     toast.info("AI is analyzing the floor plan — this may take 15–30 seconds...");
-    const canvasW = 900, canvasH = 700;
     const result = await base44.integrations.Core.InvokeLLM({
-      prompt: `You are a fire alarm design expert. Analyze this architectural floor plan image and identify all rooms/spaces visible.
+      prompt: `You are an architectural expert analyzing a floor plan image.
 
-For each room, return:
-- name: room name/type (e.g. "Office", "Corridor", "Conference Room", "Restroom", "Storage", "Lobby", "Stairwell", "Mechanical Room", "Kitchen")
+Carefully examine this floor plan and identify ALL distinct rooms and spaces visible.
+
+For EACH room/space, return:
+- name: descriptive name (e.g. "Office 101", "Main Corridor", "Conference Room", "Restroom", "Storage", "Lobby", "Stairwell", "Mechanical Room", "Break Room", "Reception")
 - room_type: one of: office, corridor, conference_room, bathroom, kitchen, lobby, stairwell, mechanical_room, storage, bedroom, other
-- x, y: top-left corner position (0–${canvasW} range, scaled proportionally to where the room appears in the image)
-- width, height: room dimensions in canvas pixels (estimate based on relative size, rooms should range from 60–400px)
-- sqft: estimated square footage based on typical room sizes for this type
+- x: left edge position as a fraction 0.0–1.0 of total image width
+- y: top edge position as a fraction 0.0–1.0 of total image height  
+- w: room width as a fraction 0.0–1.0 of total image width
+- h: room height as a fraction 0.0–1.0 of total image height
+- sqft: estimated square footage (typical: office=150, conference=300, corridor=80, bathroom=60, lobby=400, storage=100)
 
-The floor plan canvas is ${canvasW}×${canvasH} pixels. Map room positions proportionally.
-Try to identify 3–15 rooms. Focus on clearly visible spaces.
-Return ONLY a JSON array of room objects, no explanation.`,
+Use FRACTIONS (0.0 to 1.0) for all position/size values — NOT pixel values.
+Identify every visible labeled space. Aim for 5–20 rooms.
+Return ONLY a JSON object with a "rooms" array.`,
       file_urls: [plan.image_url],
       response_json_schema: {
         type: "object",
@@ -129,8 +135,8 @@ Return ONLY a JSON array of room objects, no explanation.`,
                 room_type: { type: "string" },
                 x: { type: "number" },
                 y: { type: "number" },
-                width: { type: "number" },
-                height: { type: "number" },
+                w: { type: "number" },
+                h: { type: "number" },
                 sqft: { type: "number" }
               }
             }
@@ -139,13 +145,34 @@ Return ONLY a JSON array of room objects, no explanation.`,
       }
     });
 
-    const detectedRooms = (result?.rooms || []).map(r => ({
-      ...r,
-      id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      floor: activeFloor,
-      ceiling_height: project.default_ceiling_height || 9,
-      ceiling_type: project.default_ceiling_type || 'smooth_flat',
-    }));
+    // Convert fractions to canvas pixel coords using the actual floor plan image size
+    const fp = plan;
+    // We need to know the rendered image size — use a temp image to get natural dims
+    const imgEl = new window.Image();
+    imgEl.src = fp.image_url;
+    await new Promise(res => { imgEl.onload = res; imgEl.onerror = res; });
+    const imgW = imgEl.naturalWidth || 900;
+    const imgH = imgEl.naturalHeight || 700;
+
+    const detectedRooms = (result?.rooms || []).map(r => {
+      const x = Math.round((r.x || 0) * imgW);
+      const y = Math.round((r.y || 0) * imgH);
+      const width = Math.round((r.w || 0.1) * imgW);
+      const height = Math.round((r.h || 0.1) * imgH);
+      return {
+        id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        floor: activeFloor,
+        name: r.name || 'Room',
+        room_type: r.room_type || 'other',
+        x: Math.max(0, x),
+        y: Math.max(0, y),
+        width: Math.max(20, width),
+        height: Math.max(20, height),
+        sqft: r.sqft || Math.round(width * height / 9),
+        ceiling_height: project.default_ceiling_height || 9,
+        ceiling_type: project.default_ceiling_type || 'smooth_flat',
+      };
+    });
 
     if (detectedRooms.length === 0) {
       toast.error("Could not detect rooms — try a clearer floor plan image");
@@ -174,8 +201,9 @@ Return ONLY a JSON array of room objects, no explanation.`,
 
     let allDevices = [];
 
-    // Smoke detectors
-    if (analysis.fire_alarm_required) {
+    // Smoke detectors — codeEngine returns camelCase (fireAlarmRequired)
+    const needsAlarm = analysis.fireAlarmRequired || analysis.fire_alarm_required;
+    if (needsAlarm) {
       const smokeRooms = rooms.filter(
         (r) => r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
       );
@@ -189,12 +217,12 @@ Return ONLY a JSON array of room objects, no explanation.`,
     allDevices.push(...calculatePullStationPlacement(rooms, analysis));
 
     // Strobes
-    if (analysis.fire_alarm_required) {
+    if (needsAlarm) {
       allDevices.push(...calculateStrobePlacement(rooms));
     }
 
     // Horn/strobes
-    if (analysis.fire_alarm_required) {
+    if (needsAlarm) {
       allDevices.push(...calculateHornPlacement(rooms));
     }
 
@@ -244,6 +272,27 @@ Return ONLY a JSON array of room objects, no explanation.`,
   const handleDeleteDevice = (deviceId) => {
     setLocalDevices(devices.filter((d) => d.id !== deviceId));
     setSelectedDevice(null);
+  };
+
+  const handleRoomNameRequest = (rect) => {
+    setPendingRoom(rect);
+    setPendingRoomName('Room');
+  };
+
+  const handleRoomNameConfirm = () => {
+    if (!pendingRoom) return;
+    const newRoom = {
+      id: `room-${Date.now()}-${Math.random().toString(36).substr(2,6)}`,
+      floor: activeFloor,
+      name: pendingRoomName || 'Room',
+      ...pendingRoom,
+      sqft: Math.round(pendingRoom.width * pendingRoom.height / 9),
+      ceiling_height: project?.default_ceiling_height || 9,
+      ceiling_type: project?.default_ceiling_type || 'smooth_flat',
+    };
+    setLocalRooms([...rooms, newRoom]);
+    setPendingRoom(null);
+    setPendingRoomName('');
   };
 
   // Export functions
@@ -352,6 +401,7 @@ Return ONLY a JSON array of room objects, no explanation.`,
                 selectedDevice={selectedDevice}
                 currentFloor={activeFloor}
                 canvasRef={canvasRef}
+                onRoomNameRequest={handleRoomNameRequest}
               />
               <FloorPlanUploader
                 floorNumber={activeFloor}
@@ -366,62 +416,29 @@ Return ONLY a JSON array of room objects, no explanation.`,
                 onUpdate={handleUpdateDevice}
                 onDelete={handleDeleteDevice}
               />
-              {/* Bottom toolbar */}
-              <div className="absolute bottom-4 left-4 flex items-center gap-2 flex-wrap">
-                <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs shadow-sm" onClick={() => setShowCalculations(true)}>
-                  <Calculator className="h-3 w-3" /> Calculations
-                </Button>
-                <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs shadow-sm" onClick={() => setShowBOM(true)}>
-                  <Package className="h-3 w-3" /> BOM
-                </Button>
-                <Button
-                  size="sm"
-                  variant={snapGrid ? "default" : "outline"}
-                  className="gap-1.5 h-8 text-xs shadow-sm"
-                  onClick={() => setSnapGrid(s => !s)}
+              {/* Collapsible bottom toolbar */}
+              <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center pointer-events-none">
+                {/* Toggle tab */}
+                <button
+                  className="pointer-events-auto mb-0 px-4 py-1 bg-slate-800 text-white/70 text-xs rounded-t-lg hover:bg-slate-700 hover:text-white flex items-center gap-1.5 shadow-lg transition-colors"
+                  onClick={() => setToolbarOpen(o => !o)}
                 >
-                  <Grid3x3 className="h-3 w-3" /> {snapGrid ? 'Snap ON' : 'Snap OFF'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={rightPanel === 'checklist' ? "default" : "outline"}
-                  className="gap-1.5 h-8 text-xs shadow-sm"
-                  onClick={() => setRightPanel(p => p === 'checklist' ? null : 'checklist')}
-                >
-                  <ClipboardList className="h-3 w-3" /> Checklist
-                </Button>
-                <Button
-                  size="sm"
-                  variant={rightPanel === 'battery' ? "default" : "outline"}
-                  className="gap-1.5 h-8 text-xs shadow-sm"
-                  onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')}
-                >
-                  <Battery className="h-3 w-3" /> Battery
-                </Button>
-                <Button
-                  size="sm"
-                  variant={rightPanel === 'voltagedrop' ? "default" : "outline"}
-                  className="gap-1.5 h-8 text-xs shadow-sm"
-                  onClick={() => setRightPanel(p => p === 'voltagedrop' ? null : 'voltagedrop')}
-                >
-                  <Zap className="h-3 w-3" /> Voltage Drop
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 h-8 text-xs shadow-sm border-blue-200 text-blue-700 hover:bg-blue-50"
-                  onClick={() => downloadDXF(project, rooms, devices, activeFloor)}
-                >
-                  <FileDown className="h-3 w-3" /> DXF
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 h-8 text-xs shadow-sm border-orange-200 text-orange-700 hover:bg-orange-50"
-                  onClick={() => setShowSubmittal(true)}
-                >
-                  <BookOpen className="h-3 w-3" /> Submittal PDF
-                </Button>
+                  {toolbarOpen ? <ChevronLeft className="h-3 w-3 rotate-90" /> : <ChevronRight className="h-3 w-3 -rotate-90" />}
+                  {toolbarOpen ? 'Hide Tools' : 'Show Tools'}
+                </button>
+                {/* Drawer */}
+                <div className={`pointer-events-auto w-full bg-slate-800/95 backdrop-blur border-t border-slate-700 shadow-2xl transition-all duration-200 ${toolbarOpen ? 'max-h-24 opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}>
+                  <div className="flex flex-wrap items-center gap-1.5 px-3 py-2.5">
+                    <ToolbarBtn onClick={() => setShowCalculations(true)} icon={<Calculator className="h-3 w-3" />} label="Calculations" />
+                    <ToolbarBtn onClick={() => setShowBOM(true)} icon={<Package className="h-3 w-3" />} label="BOM" />
+                    <ToolbarBtn active={snapGrid} onClick={() => setSnapGrid(s => !s)} icon={<Grid3x3 className="h-3 w-3" />} label={snapGrid ? 'Snap ON' : 'Snap OFF'} />
+                    <ToolbarBtn active={rightPanel === 'checklist'} onClick={() => setRightPanel(p => p === 'checklist' ? null : 'checklist')} icon={<ClipboardList className="h-3 w-3" />} label="Checklist" />
+                    <ToolbarBtn active={rightPanel === 'battery'} onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')} icon={<Battery className="h-3 w-3" />} label="Battery" />
+                    <ToolbarBtn active={rightPanel === 'voltagedrop'} onClick={() => setRightPanel(p => p === 'voltagedrop' ? null : 'voltagedrop')} icon={<Zap className="h-3 w-3" />} label="V-Drop" />
+                    <ToolbarBtn onClick={() => downloadDXF(project, rooms, devices, activeFloor)} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
+                    <ToolbarBtn onClick={() => setShowSubmittal(true)} icon={<BookOpen className="h-3 w-3" />} label="Submittal PDF" orange />
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -500,6 +517,37 @@ Return ONLY a JSON array of room objects, no explanation.`,
           onClose={() => setShowSubmittal(false)}
         />
       )}
+
+      {/* Room Name Dialog */}
+      {pendingRoom && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-80">
+            <h3 className="text-sm font-semibold text-slate-800 mb-1">Name this room</h3>
+            <p className="text-xs text-slate-500 mb-3">{pendingRoom.width}×{pendingRoom.height}px · ~{Math.round(pendingRoom.width * pendingRoom.height / 9)} sf</p>
+            <input
+              autoFocus
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-400 mb-4"
+              value={pendingRoomName}
+              onChange={e => setPendingRoomName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleRoomNameConfirm(); if (e.key === 'Escape') setPendingRoom(null); }}
+              placeholder="e.g. Office, Corridor, Lobby..."
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPendingRoom(null)}>Cancel</Button>
+              <Button size="sm" className="bg-orange-500 hover:bg-orange-600 text-white" onClick={handleRoomNameConfirm}>Add Room</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function ToolbarBtn({ onClick, icon, label, active, blue, orange }) {
+  let cls = 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ';
+  if (active) cls += 'bg-orange-500 text-white ';
+  else if (blue) cls += 'bg-blue-600/80 text-white hover:bg-blue-600 ';
+  else if (orange) cls += 'bg-orange-600/80 text-white hover:bg-orange-600 ';
+  else cls += 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white ';
+  return <button className={cls} onClick={onClick}>{icon}{label}</button>;
 }
