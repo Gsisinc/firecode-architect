@@ -101,34 +101,71 @@ export default function ProjectDesigner() {
     if (idx >= 0) updated[idx] = { ...updated[idx], image_url: url };
     else updated.push({ floor_number: activeFloor, image_url: url });
     setLocalFloorPlans(updated);
+    // Auto-save immediately so the floor plan persists on reload
+    saveMutation.mutate({
+      rooms,
+      devices,
+      floor_plans: updated,
+      analysis_results: analysisResults,
+      status: devices.length > 0 ? "in_progress" : "draft",
+    });
   };
 
   const handleAnalyzeFloorPlan = async () => {
     const plan = floorPlans.find(fp => fp.floor_number === activeFloor);
     if (!plan?.image_url) { toast.error("Upload a floor plan first"); return; }
     setAnalyzingFloor(true);
-    toast.info("AI is analyzing the floor plan — this may take 15–30 seconds...");
+    toast.info("AI is analyzing the blueprint — this may take 20–40 seconds...");
+
+    // Step 1: Load the image to get its natural pixel dimensions
+    const imgEl = new window.Image();
+    imgEl.crossOrigin = 'anonymous';
+    imgEl.src = plan.image_url;
+    await new Promise(res => { imgEl.onload = res; imgEl.onerror = res; });
+    const imgW = imgEl.naturalWidth || 1000;
+    const imgH = imgEl.naturalHeight || 800;
+
     const result = await base44.integrations.Core.InvokeLLM({
-      prompt: `You are an architectural expert analyzing a floor plan image.
+      model: "claude_sonnet_4_6",
+      prompt: `You are a expert fire alarm engineer and architect analyzing a floor plan / architectural blueprint image.
 
-Carefully examine this floor plan and identify ALL distinct rooms and spaces visible.
+Your task: Precisely identify EVERY enclosed room and space in this floor plan. The image is ${imgW} pixels wide and ${imgH} pixels tall.
 
-For EACH room/space, return:
-- name: descriptive name (e.g. "Office 101", "Main Corridor", "Conference Room", "Restroom", "Storage", "Lobby", "Stairwell", "Mechanical Room", "Break Room", "Reception")
+CRITICAL INSTRUCTIONS:
+1. Look at the actual WALLS (thick black lines) to determine room boundaries — NOT labels or furniture.
+2. For each room, find the bounding box tightly fitting inside the walls.
+3. The floor plan drawing area typically does NOT start at pixel 0,0 — it usually has a title block, legend, or border. Identify where the actual floor plan drawing starts and ends first.
+4. Return coordinates in PIXELS (not fractions) relative to the full image dimensions (${imgW}x${imgH}).
+5. Be precise. A room labeled "Conference Room" that occupies the center-left of the plan should have coordinates exactly matching where its walls are.
+6. Every text label you can read in the image (e.g. "CONFERENCE ROOM", "RESTROOM", "LOBBY", "ELECTRICAL", "OFFICE", "CORRIDOR") indicates a room — find it and box it.
+7. Do NOT overlap rooms. Each enclosed space is a separate room.
+8. Typical rooms to look for: office spaces, corridors/hallways, restrooms/bathrooms, conference rooms, lobby/reception, storage, mechanical/electrical rooms, stairwells, break rooms, copy rooms.
+
+For EACH room return:
+- name: the text label visible in the room (e.g. "Conference Room", "Women's Restroom", "Electrical Room")
 - room_type: one of: office, corridor, conference_room, bathroom, kitchen, lobby, stairwell, mechanical_room, storage, bedroom, other
-- x: left edge position as a fraction 0.0–1.0 of total image width
-- y: top edge position as a fraction 0.0–1.0 of total image height  
-- w: room width as a fraction 0.0–1.0 of total image width
-- h: room height as a fraction 0.0–1.0 of total image height
-- sqft: estimated square footage (typical: office=150, conference=300, corridor=80, bathroom=60, lobby=400, storage=100)
+- px: left edge X in pixels from image left edge
+- py: top edge Y in pixels from image top edge
+- pw: room width in pixels
+- ph: room height in pixels
+- sqft: estimated real-world square footage of this room
 
-Use FRACTIONS (0.0 to 1.0) for all position/size values — NOT pixel values.
-Identify every visible labeled space. Aim for 5–20 rooms.
-Return ONLY a JSON object with a "rooms" array.`,
+Return ONLY valid JSON. No explanation text.`,
       file_urls: [plan.image_url],
       response_json_schema: {
         type: "object",
         properties: {
+          image_width_px: { type: "number" },
+          image_height_px: { type: "number" },
+          floor_plan_bounds: {
+            type: "object",
+            properties: {
+              left: { type: "number" },
+              top: { type: "number" },
+              right: { type: "number" },
+              bottom: { type: "number" }
+            }
+          },
           rooms: {
             type: "array",
             items: {
@@ -136,10 +173,10 @@ Return ONLY a JSON object with a "rooms" array.`,
               properties: {
                 name: { type: "string" },
                 room_type: { type: "string" },
-                x: { type: "number" },
-                y: { type: "number" },
-                w: { type: "number" },
-                h: { type: "number" },
+                px: { type: "number" },
+                py: { type: "number" },
+                pw: { type: "number" },
+                ph: { type: "number" },
                 sqft: { type: "number" }
               }
             }
@@ -148,20 +185,18 @@ Return ONLY a JSON object with a "rooms" array.`,
       }
     });
 
-    // Convert fractions to canvas pixel coords using the actual floor plan image size
-    const fp = plan;
-    // We need to know the rendered image size — use a temp image to get natural dims
-    const imgEl = new window.Image();
-    imgEl.src = fp.image_url;
-    await new Promise(res => { imgEl.onload = res; imgEl.onerror = res; });
-    const imgW = imgEl.naturalWidth || 900;
-    const imgH = imgEl.naturalHeight || 700;
+    // The AI returns pixel coords based on the actual image size
+    // We scale them to match the canvas coordinate system (image is drawn at natural size on canvas)
+    const aiImgW = result?.image_width_px || imgW;
+    const aiImgH = result?.image_height_px || imgH;
+    const scaleX = imgW / aiImgW;
+    const scaleY = imgH / aiImgH;
 
     const detectedRooms = (result?.rooms || []).map(r => {
-      const x = Math.round((r.x || 0) * imgW);
-      const y = Math.round((r.y || 0) * imgH);
-      const width = Math.round((r.w || 0.1) * imgW);
-      const height = Math.round((r.h || 0.1) * imgH);
+      const x = Math.round((r.px || 0) * scaleX);
+      const y = Math.round((r.py || 0) * scaleY);
+      const width = Math.round((r.pw || 50) * scaleX);
+      const height = Math.round((r.ph || 50) * scaleY);
       return {
         id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         floor: activeFloor,
@@ -180,8 +215,17 @@ Return ONLY a JSON object with a "rooms" array.`,
     if (detectedRooms.length === 0) {
       toast.error("Could not detect rooms — try a clearer floor plan image");
     } else {
-      setLocalRooms([...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms]);
-      toast.success(`Detected ${detectedRooms.length} rooms on Floor ${activeFloor}! Run Auto-Place to add devices.`);
+      const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
+      setLocalRooms(newRooms);
+      // Auto-save detected rooms
+      saveMutation.mutate({
+        rooms: newRooms,
+        devices,
+        floor_plans: floorPlans,
+        analysis_results: analysisResults,
+        status: devices.length > 0 ? "in_progress" : "draft",
+      });
+      toast.success(`Detected ${detectedRooms.length} rooms on Floor ${activeFloor}! Review them, then run Auto-Place.`);
     }
     setAnalyzingFloor(false);
   };
