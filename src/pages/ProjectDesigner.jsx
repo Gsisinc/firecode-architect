@@ -129,30 +129,44 @@ export default function ProjectDesigner() {
     try {
       result = await base44.integrations.Core.InvokeLLM({
         model: "gemini_3_1_pro",
-        prompt: `You are analyzing an architectural floor plan blueprint image that is ${imgW}px wide by ${imgH}px tall.
+        prompt: `You are a professional architectural blueprint reader analyzing a fire alarm floor plan. The image is ${imgW}x${imgH} pixels.
 
-TASK: Find every labeled room/space and return its exact bounding box in pixels.
+STEP 1 — Find the drawing boundary:
+Locate the outer boundary of the actual floor plan drawing (the thick outer walls of the building). Ignore title blocks, legend boxes, notes sections outside the building. Report the pixel coordinates of the building's outer boundary: left_px, top_px, right_px, bottom_px.
 
-RULES:
-- Use the TEXT LABELS visible in the plan to identify rooms (e.g. "CONFERENCE ROOM", "RESTROOM", "LOBBY", "ELECTRICAL ROOM", "OFFICE", "CORRIDOR", "STORAGE", "EMPLOYEE LOUNGE", "RECEPTION")
-- For each labeled space, find the 4 walls enclosing it and return the bounding box IN PIXELS
-- Coordinates are relative to the TOP-LEFT of the full image (0,0)
-- The floor plan usually has a border/title block — only map rooms INSIDE the actual floor plan drawing
-- Do NOT overlap rooms
-- Be as accurate as possible — the fire alarm device placement depends on this
+STEP 2 — Read the scale:
+Look for dimension annotations on the drawing (lines with arrows and measurements like "25'-0"", "50'-0"", "9'-0"", etc.). Find at least one horizontal and one vertical dimension annotation. Report:
+- A horizontal dimension: its pixel length (how many pixels span that dimension line) and its real-world length in feet
+- A vertical dimension: same
 
-Return JSON with a "rooms" array. Each room has:
-- name: the label text (e.g. "Conference Room")
-- room_type: one of office|corridor|conference_room|bathroom|kitchen|lobby|stairwell|mechanical_room|storage|other
-- px: left wall X in pixels
-- py: top wall Y in pixels  
-- pw: room width in pixels
-- ph: room height in pixels
-- sqft: estimated real square footage`,
+STEP 3 — Map every room:
+For each enclosed, labeled space inside the building walls, report its bounding box in pixels (px=left edge, py=top edge, pw=width, ph=height) measured from the image top-left corner (0,0). Use the dimension scale from Step 2 to calculate real sqft.
+
+Be PRECISE — align px/py/pw/ph exactly with the wall lines you can see. The room boxes must line up with the actual drawn walls, not approximate guesses.
+
+Rooms to find: every labeled space (Electrical Room, Storage Room, Restroom, Conference Room, Office, Lobby, Corridor, Sales Floor, Employee Lounge, Reception, etc.)`,
         file_urls: [plan.image_url],
         response_json_schema: {
           type: "object",
           properties: {
+            building_bounds: {
+              type: "object",
+              properties: {
+                left_px: { type: "number" },
+                top_px: { type: "number" },
+                right_px: { type: "number" },
+                bottom_px: { type: "number" }
+              }
+            },
+            scale: {
+              type: "object",
+              properties: {
+                horiz_px: { type: "number" },
+                horiz_ft: { type: "number" },
+                vert_px: { type: "number" },
+                vert_ft: { type: "number" }
+              }
+            },
             rooms: {
               type: "array",
               items: {
@@ -173,12 +187,20 @@ Return JSON with a "rooms" array. Each room has:
       });
     } catch (err) {
       console.error("Room detection error:", err);
-      toast.error(`Room detection failed: ${err?.message || "Unknown error"}. Check console for details.`);
+      toast.error(`Room detection failed: ${err?.message || "Unknown error"}`);
       setAnalyzingFloor(false);
       return;
     }
 
-    // AI returns pixel coords relative to the image — used directly since canvas draws image at natural size
+    console.log("Room detection result:", JSON.stringify(result, null, 2));
+
+    // Log scale info for debugging
+    if (result?.scale) {
+      const { horiz_px, horiz_ft, vert_px, vert_ft } = result.scale;
+      const pxPerFt = horiz_px && horiz_ft ? horiz_px / horiz_ft : null;
+      console.log(`Scale: ${horiz_px}px = ${horiz_ft}ft (${pxPerFt?.toFixed(1)} px/ft), vert: ${vert_px}px = ${vert_ft}ft`);
+    }
+
     const detectedRooms = (result?.rooms || []).map(r => {
       const x = Math.round(r.px || 0);
       const y = Math.round(r.py || 0);
@@ -204,7 +226,6 @@ Return JSON with a "rooms" array. Each room has:
     } else {
       const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
       setLocalRooms(newRooms);
-      // Auto-save detected rooms
       saveMutation.mutate({
         rooms: newRooms,
         devices,
@@ -212,7 +233,10 @@ Return JSON with a "rooms" array. Each room has:
         analysis_results: analysisResults,
         status: devices.length > 0 ? "in_progress" : "draft",
       });
-      toast.success(`Detected ${detectedRooms.length} rooms on Floor ${activeFloor}! Review them, then run Auto-Place.`);
+      const scaleInfo = result?.scale?.horiz_ft
+        ? ` (scale: ~${(result.scale.horiz_px / result.scale.horiz_ft).toFixed(0)}px/ft)`
+        : '';
+      toast.success(`Detected ${detectedRooms.length} rooms${scaleInfo}. Review boundaries, then Auto-Place devices.`);
     }
     setAnalyzingFloor(false);
   };
