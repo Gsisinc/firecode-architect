@@ -14,6 +14,7 @@ import {
   generateDeviceSchedule,
   generateSequenceOfOperations,
 } from "@/lib/codeEngine";
+import { calculateWireLengthSummary } from "@/lib/designValidation";
 
 const DEVICE_TYPE_LABELS = {
   smoke_detector: "Smoke Detector",
@@ -41,7 +42,7 @@ const NFPA_REFS = {
   facp: "NFPA 72 §10",
 };
 
-export default function SubmittalPackage({ project, devices, rooms, analysisResults, canvasRef, onClose }) {
+export default function SubmittalPackage({ project, devices, rooms, wires = [], floorPlans = [], analysisResults, canvasRef, onClose }) {
   const [generating, setGenerating] = useState(false);
   const [sections, setSections] = useState({
     cover: true,
@@ -69,6 +70,7 @@ export default function SubmittalPackage({ project, devices, rooms, analysisResu
     const pName = project?.name || "Fire Alarm System";
     const now = new Date().toLocaleDateString();
     const reqs = analysisResults || {};
+    const wireSummary = calculateWireLengthSummary({ devices, wires, floorPlans });
     let pageNum = 1;
 
     const addHeader = (title) => {
@@ -349,6 +351,7 @@ export default function SubmittalPackage({ project, devices, rooms, analysisResu
         ["Wire Type", wiring.wire_type],
         ["Conductor Size", wiring.conductor_size],
         ["Configuration", wiring.conductor_count],
+        ["Saved Field Wiring", `${wireSummary.totalFeet} ft across ${wireSummary.byCircuit.length} circuit(s)`],
         ["NEC Article", wiring.nec_article],
         ["Circuit Class", wiring.circuit_class],
         ["Survivability Level", wiring.survivability_level],

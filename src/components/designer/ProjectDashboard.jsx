@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { CheckCircle2, AlertTriangle, XCircle, Zap, DollarSign, Layers, Shield } from 'lucide-react';
+import { validateDesign } from '@/lib/designValidation';
 
 const DEVICE_COSTS = {
   smoke_detector: 85,
@@ -31,28 +32,7 @@ const DEVICE_LABELS = {
   elevator_recall: 'Elevator Recall',
 };
 
-function getComplianceStatus(devices, rooms, analysisResults) {
-  if (!analysisResults) return { score: null, issues: [] };
-  const issues = [];
-
-  const smokeCount = devices.filter(d => d.type === 'smoke_detector').length;
-  const hornCount = devices.filter(d => ['horn_strobe', 'horn'].includes(d.type)).length;
-  const pullCount = devices.filter(d => d.type === 'pull_station').length;
-  const facpCount = devices.filter(d => d.type === 'facp').length;
-
-  if (analysisResults.fireAlarmRequired && smokeCount === 0) issues.push({ level: 'error', text: 'No smoke detectors placed' });
-  if (analysisResults.fireAlarmRequired && hornCount === 0) issues.push({ level: 'error', text: 'No notification appliances placed' });
-  if (analysisResults.fireAlarmRequired && pullCount === 0) issues.push({ level: 'warn', text: 'No pull stations placed' });
-  if (facpCount === 0) issues.push({ level: 'warn', text: 'No FACP placed on canvas' });
-  if (rooms.length === 0) issues.push({ level: 'warn', text: 'No rooms defined — use AI Detect or Draw Room' });
-
-  const errors = issues.filter(i => i.level === 'error').length;
-  const warns = issues.filter(i => i.level === 'warn').length;
-  const score = Math.max(0, 100 - errors * 25 - warns * 10);
-  return { score, issues };
-}
-
-export default function ProjectDashboard({ project, devices, rooms, analysisResults }) {
+export default function ProjectDashboard({ project, devices, rooms, wires = [], floorPlans = [], analysisResults }) {
   const byFloor = useMemo(() => {
     const map = {};
     for (let f = 1; f <= (project?.num_floors || 1); f++) map[f] = [];
@@ -73,9 +53,11 @@ export default function ProjectDashboard({ project, devices, rooms, analysisResu
     devices.reduce((sum, d) => sum + (DEVICE_COSTS[d.subtype || d.type] || 80), 0),
     [devices]);
 
-  const { score, issues } = useMemo(() =>
-    getComplianceStatus(devices, rooms, analysisResults),
-    [devices, rooms, analysisResults]);
+  const validation = useMemo(
+    () => validateDesign({ project, rooms, devices, wires, floorPlans, analysisResults }),
+    [project, rooms, devices, wires, floorPlans, analysisResults]
+  );
+  const { score, issues } = validation;
 
   const scoreColor = score === null ? 'text-gray-400' : score >= 80 ? 'text-green-600' : score >= 50 ? 'text-yellow-500' : 'text-red-500';
   const scoreBg = score === null ? 'bg-gray-100' : score >= 80 ? 'bg-green-50 border-green-200' : score >= 50 ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200';
@@ -108,14 +90,24 @@ export default function ProjectDashboard({ project, devices, rooms, analysisResu
           <h3 className="text-sm font-semibold text-gray-800 mb-3">Compliance Issues</h3>
           <div className="space-y-2">
             {issues.map((issue, i) => (
-              <div key={i} className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${issue.level === 'error' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'}`}>
-                {issue.level === 'error' ? <XCircle className="w-3.5 h-3.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
-                {issue.text}
+              <div key={i} className={`flex items-start gap-2 text-xs px-3 py-2 rounded-lg ${issue.severity === 'error' ? 'bg-red-50 text-red-700' : issue.severity === 'warning' ? 'bg-yellow-50 text-yellow-700' : 'bg-blue-50 text-blue-700'}`}>
+                {issue.severity === 'error' ? <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> : <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />}
+                <span><strong>{issue.message}</strong>{issue.action ? ` ${issue.action}` : ''}</span>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-gray-800 mb-3">Engineering Validation</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <Metric label="Errors" value={validation.counts.errors} tone="red" />
+          <Metric label="Warnings" value={validation.counts.warnings} tone="yellow" />
+          <Metric label="Saved Wire" value={`${validation.wireLength.totalFeet} ft`} tone="blue" />
+          <Metric label="Battery" value={`${validation.battery.selected_Ah} Ah`} tone="green" />
+        </div>
+      </div>
       {score !== null && issues.length === 0 && (
         <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-green-50 text-green-700 border border-green-200">
           <CheckCircle2 className="w-3.5 h-3.5" /> All basic compliance checks passed
@@ -195,6 +187,21 @@ function KpiCard({ icon, label, value, sub }) {
       </div>
       <p className="text-2xl font-bold text-gray-900">{value}</p>
       <p className="text-xs text-gray-400">{sub}</p>
+    </div>
+  );
+}
+
+function Metric({ label, value, tone }) {
+  const tones = {
+    red: 'bg-red-50 text-red-700',
+    yellow: 'bg-yellow-50 text-yellow-700',
+    blue: 'bg-blue-50 text-blue-700',
+    green: 'bg-green-50 text-green-700',
+  };
+  return (
+    <div className={`rounded-lg px-3 py-2 ${tones[tone] || 'bg-gray-50 text-gray-700'}`}>
+      <div className="text-[10px] uppercase tracking-wide opacity-70">{label}</div>
+      <div className="font-mono font-bold text-sm">{value}</div>
     </div>
   );
 }

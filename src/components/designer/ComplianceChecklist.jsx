@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CheckCircle2, XCircle, AlertTriangle, ClipboardList } from "lucide-react";
+import { validateDesign } from "@/lib/designValidation";
 
 const DEVICE_TYPES = {
   smoke_detector: "Smoke Detector",
@@ -192,10 +193,14 @@ function buildChecklist(project, devices, analysisResults, rooms) {
   return items;
 }
 
-export default function ComplianceChecklist({ project, devices, analysisResults, rooms }) {
+export default function ComplianceChecklist({ project, devices, analysisResults, rooms, wires = [], floorPlans = [] }) {
   const checklist = useMemo(
     () => buildChecklist(project, devices, analysisResults, rooms),
     [project, devices, analysisResults, rooms]
+  );
+  const validation = useMemo(
+    () => validateDesign({ project, devices, rooms, wires, floorPlans, analysisResults }),
+    [project, devices, rooms, wires, floorPlans, analysisResults]
   );
 
   const allChecks = checklist.flatMap((s) => s.checks);
@@ -228,11 +233,36 @@ export default function ComplianceChecklist({ project, devices, analysisResults,
             style={{ width: `${pct}%` }}
           />
         </div>
-        <p className="text-[10px] text-slate-400 mt-1">{pct}% complete · {allChecks.length} total items</p>
+        <p className="text-[10px] text-slate-400 mt-1">
+          {pct}% checklist complete · design score {validation.score}% · {validation.counts.errors} critical / {validation.counts.warnings} warnings
+        </p>
       </div>
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-5">
+          {validation.issues.length > 0 && (
+            <div>
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Design Validation</h3>
+              <div className="space-y-1.5">
+                {validation.issues.slice(0, 10).map((issue) => (
+                  <div
+                    key={issue.code}
+                    className={`p-2.5 rounded-lg border text-xs ${
+                      issue.severity === "error"
+                        ? "bg-red-50 border-red-100 text-red-800"
+                        : issue.severity === "warning"
+                        ? "bg-amber-50 border-amber-100 text-amber-800"
+                        : "bg-blue-50 border-blue-100 text-blue-800"
+                    }`}
+                  >
+                    <p className="font-medium leading-tight">{issue.message}</p>
+                    <p className="text-[10px] mt-0.5 font-mono opacity-75">{issue.ref}</p>
+                    {issue.action && <p className="text-[10px] mt-1 opacity-80">{issue.action}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {checklist.map((section) => (
             <div key={section.section}>
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{section.section}</h3>

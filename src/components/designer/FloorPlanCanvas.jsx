@@ -359,7 +359,7 @@ export default function FloorPlanCanvas({
         ctx.setLineDash([]);
         // Wire length label
         const dist = Math.hypot(b.x - a.x, b.y - a.y);
-        const ft = Math.round(dist * 0.5); // rough scale: 1px ≈ 0.5ft
+        const ft = Math.round(dist / 10); // fallback if no calibrated scale is available
         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
         ctx.fillRect(mx - 20, my - 9, 40, 13);

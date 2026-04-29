@@ -25,6 +25,8 @@ import {
   deriveDetectionGeometry,
   normalizeDetectedRooms,
 } from "@/lib/floorPlanDetection";
+import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale";
+import { mergeGeneratedDevices } from "@/lib/designValidation";
 
 import {
   determineSystemRequirements,
@@ -68,7 +70,7 @@ export default function ProjectDesigner() {
   const [localDevices, setLocalDevices] = useState(null);
   const [localFloorPlans, setLocalFloorPlans] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
-  const [wires, setWires] = useState([]);
+  const [localWires, setLocalWires] = useState(null);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -80,6 +82,7 @@ export default function ProjectDesigner() {
   const rooms = localRooms ?? project?.rooms ?? [];
   const devices = localDevices ?? project?.devices ?? [];
   const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
+  const wires = localWires ?? project?.wires ?? [];
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
@@ -94,6 +97,7 @@ export default function ProjectDesigner() {
       rooms,
       devices,
       floor_plans: floorPlans,
+      wires,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
@@ -110,6 +114,7 @@ export default function ProjectDesigner() {
       rooms,
       devices,
       floor_plans: updated,
+      wires,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
@@ -252,11 +257,14 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       toast.error("Could not detect rooms. Try a clearer plan, or draw rooms manually and use Auto-Place Devices.");
     } else {
       const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
+      const updatedFloorPlans = updateFloorPlanScale(floorPlans, activeFloor, geometry);
       setLocalRooms(newRooms);
+      setLocalFloorPlans(updatedFloorPlans);
       saveMutation.mutate({
         rooms: newRooms,
         devices,
-        floor_plans: floorPlans,
+        floor_plans: updatedFloorPlans,
+        wires,
         analysis_results: analysisResults,
         status: devices.length > 0 ? "in_progress" : "draft",
       });
@@ -282,38 +290,39 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
     if (!analysisResults) setAnalysisResults(analysis);
 
     let allDevices = [];
+    const floorRooms = rooms.filter((r) => r.floor === activeFloor);
 
     // Smoke detectors — codeEngine returns camelCase (fireAlarmRequired)
     const needsAlarm = analysis.fireAlarmRequired || analysis.fire_alarm_required;
     if (needsAlarm) {
       const smokeRooms = rooms.filter(
-        (r) => r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
+        (r) => r.floor === activeFloor && r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
       );
       allDevices.push(...calculateSmokeDetectorPlacement(smokeRooms, project.default_ceiling_height));
     }
 
     // Heat detectors
-    allDevices.push(...calculateHeatDetectorPlacement(rooms, project.default_ceiling_height));
+    allDevices.push(...calculateHeatDetectorPlacement(floorRooms, project.default_ceiling_height));
 
     // Pull stations
-    allDevices.push(...calculatePullStationPlacement(rooms, analysis));
+    allDevices.push(...calculatePullStationPlacement(floorRooms, analysis));
 
     // Strobes
     if (needsAlarm) {
-      allDevices.push(...calculateStrobePlacement(rooms));
+      allDevices.push(...calculateStrobePlacement(floorRooms));
     }
 
     // Horn/strobes
     if (needsAlarm) {
-      allDevices.push(...calculateHornPlacement(rooms));
+      allDevices.push(...calculateHornPlacement(floorRooms));
     }
 
     // Elevator recall
-    const elevDevices = calculateElevatorRecallDetectors(project);
+    const elevDevices = calculateElevatorRecallDetectors(project).filter((d) => d.floor === activeFloor);
     allDevices.push(...elevDevices);
 
     // Sprinkler monitoring
-    const sprinklerDevices = calculateSprinklerMonitoring(project);
+    const sprinklerDevices = calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor);
     allDevices.push(...sprinklerDevices);
 
     // Assign addresses
@@ -321,11 +330,13 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       ...d,
       address: d.address || `${d.type === "smoke_detector" ? "SD" : d.type === "heat_detector" ? "HD" : d.type === "pull_station" ? "PS" : d.type === "horn_strobe" ? "HS" : d.type === "strobe" ? "STR" : d.type === "waterflow_switch" ? "WF" : d.type === "valve_tamper" ? "VS" : "DEV"}-${String(i + 1).padStart(3, "0")}`,
       zone: d.zone || `Floor ${d.floor || 1}`,
+      generated_by: "auto_place",
     }));
 
-    setLocalDevices(allDevices);
-    toast.success(`Auto-placed ${allDevices.length} devices`);
-  }, [project, rooms, analysisResults]);
+    const mergedDevices = mergeGeneratedDevices(devices, allDevices, activeFloor);
+    setLocalDevices(mergedDevices);
+    toast.success(`Auto-placed ${allDevices.length} generated devices on floor ${activeFloor}; manual devices were preserved`);
+  }, [project, rooms, devices, activeFloor, analysisResults]);
 
   const handleAddRoom = (roomData) => {
     const newRoom = {
@@ -334,7 +345,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       name: roomData.room_type.replace(/_/g, " "),
       ceiling_height: project.default_ceiling_height,
       ceiling_type: project.default_ceiling_type,
-      sqft: Math.round((roomData.width * roomData.height) / (10 * 10)), // approx scale
+      sqft: roomSqft(roomData, getFloorScale(floorPlans, activeFloor)),
     };
     setLocalRooms([...rooms, newRoom]);
   };
@@ -368,7 +379,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       floor: activeFloor,
       name: pendingRoomName || 'Room',
       ...pendingRoom,
-      sqft: Math.round(pendingRoom.width * pendingRoom.height / 9),
+      sqft: roomSqft(pendingRoom, getFloorScale(floorPlans, activeFloor)),
       ceiling_height: project?.default_ceiling_height || 9,
       ceiling_type: project?.default_ceiling_type || 'smooth_flat',
     };
@@ -458,6 +469,8 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 project={project}
                 devices={devices}
                 rooms={rooms}
+                wires={wires}
+                floorPlans={floorPlans}
                 analysisResults={analysisResults}
               />
             </div>
@@ -529,7 +542,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                     <ToolbarBtn active={rightPanel === 'checklist'} onClick={() => setRightPanel(p => p === 'checklist' ? null : 'checklist')} icon={<ClipboardList className="h-3 w-3" />} label="Checklist" />
                     <ToolbarBtn active={rightPanel === 'battery'} onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')} icon={<Battery className="h-3 w-3" />} label="Battery" />
                     <ToolbarBtn active={rightPanel === 'voltagedrop'} onClick={() => setRightPanel(p => p === 'voltagedrop' ? null : 'voltagedrop')} icon={<Zap className="h-3 w-3" />} label="V-Drop" />
-                    <ToolbarBtn onClick={() => downloadDXF(project, rooms, devices, activeFloor)} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
+                    <ToolbarBtn onClick={() => downloadDXF(project, rooms, devices, activeFloor, wires)} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
                     <ToolbarBtn onClick={() => setShowSubmittal(true)} icon={<BookOpen className="h-3 w-3" />} label="Submittal PDF" orange />
                   </div>
                 </div>
@@ -571,13 +584,15 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                   devices={devices}
                   analysisResults={analysisResults}
                   rooms={rooms}
+                  wires={wires}
+                  floorPlans={floorPlans}
                 />
               )}
               {rightPanel === 'battery' && (
                 <BatteryPanel devices={devices} />
               )}
               {rightPanel === 'voltagedrop' && (
-                <VoltageDropCalculator devices={devices} />
+                <VoltageDropCalculator devices={devices} floorPlans={floorPlans} wires={wires} />
               )}
             </div>
           </div>
@@ -597,6 +612,8 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
         <BillOfMaterials
           project={project}
           devices={devices}
+          wires={wires}
+          floorPlans={floorPlans}
           onClose={() => setShowBOM(false)}
         />
       )}
@@ -606,6 +623,8 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
           project={project}
           devices={devices}
           rooms={rooms}
+          wires={wires}
+          floorPlans={floorPlans}
           analysisResults={analysisResults}
           canvasRef={canvasRef}
           onClose={() => setShowSubmittal(false)}

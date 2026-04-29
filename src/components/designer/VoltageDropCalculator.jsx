@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { feetBetween, getFloorScale } from "@/lib/designScale";
 
 // NEC resistance values (Ω per 1000 ft, copper)
 const WIRE_RESISTANCE = { 14: 2.525, 16: 4.016, 18: 6.385, 20: 10.15, 22: 16.14 };
@@ -41,7 +42,7 @@ function calcDrop(deviceCount, avgCurrentMa, wireGauge, distanceFt, supplyV) {
   };
 }
 
-export default function VoltageDropCalculator({ devices, onClose }) {
+export default function VoltageDropCalculator({ devices, wires = [], floorPlans = [], onClose }) {
   const [wireGauge, setWireGauge] = useState(18);
   const [supplyVoltage, setSupplyVoltage] = useState(24);
   const [distanceOverrides, setDistanceOverrides] = useState({});
@@ -59,14 +60,22 @@ export default function VoltageDropCalculator({ devices, onClose }) {
   }, [devices]);
 
   // Auto-estimate circuit length from device positions (bounding box diagonal)
-  const estimateLength = (devs) => {
+  const estimateLength = (devs, circuit) => {
+    const circuitWires = wires.filter((wire) => wire.type === "NAC" || wire.circuit === circuit);
+    const wireFeet = circuitWires.reduce((sum, wire) => {
+      const from = devices.find((d) => d.id === wire.from);
+      const to = devices.find((d) => d.id === wire.to);
+      if (!from || !to) return sum;
+      return sum + feetBetween(from, to, getFloorScale(floorPlans, wire.floor || from.floor || 1));
+    }, 0);
+    if (wireFeet > 0) return Math.max(25, Math.round(wireFeet));
     if (devs.length < 2) return 50; // default 50ft for single device
     const xs = devs.map(d => d.x || 0);
     const ys = devs.map(d => d.y || 0);
     const spanX = Math.max(...xs) - Math.min(...xs);
     const spanY = Math.max(...ys) - Math.min(...ys);
-    // Canvas px → feet: assume ~3 px/ft. Round trip is handled in calc.
-    const estFt = Math.max(50, Math.round((spanX + spanY) / 3));
+    const scale = getFloorScale(floorPlans, devs[0]?.floor || 1);
+    const estFt = Math.max(50, Math.round((spanX + spanY) / scale));
     return estFt;
   };
 
@@ -74,12 +83,12 @@ export default function VoltageDropCalculator({ devices, onClose }) {
     return circuits.map(c => {
       const distFt = distanceOverrides[c.circuit] !== undefined
         ? Number(distanceOverrides[c.circuit])
-        : estimateLength(c.devices);
+        : estimateLength(c.devices, c.circuit);
       const avgMa = c.devices.reduce((sum, d) => sum + (DEVICE_CURRENT_mA[d.type] || DEVICE_CURRENT_mA.default), 0) / c.devices.length;
       const calc = calcDrop(c.devices.length, avgMa, wireGauge, distFt, supplyVoltage);
       return { ...c, distFt, avgMa: Math.round(avgMa), ...calc };
     });
-  }, [circuits, wireGauge, supplyVoltage, distanceOverrides]);
+  }, [circuits, wireGauge, supplyVoltage, distanceOverrides, devices, wires, floorPlans]);
 
   const overloaded = results.filter(r => !r.compliant);
 
@@ -132,7 +141,7 @@ export default function VoltageDropCalculator({ devices, onClose }) {
         </div>
         <div className="flex items-start gap-1.5 text-[10px] text-slate-400">
           <Info className="w-3 h-3 mt-0.5 shrink-0" />
-          Circuit distances are auto-estimated from device positions. Click any distance to override.
+          Circuit distances use saved wire segments when available, otherwise calibrated floor scale. Click any distance to override.
         </div>
       </div>
 
