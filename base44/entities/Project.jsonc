@@ -1,0 +1,281 @@
+{
+  "name": "Project",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "address": {
+      "type": "string"
+    },
+    "owner_name": {
+      "type": "string"
+    },
+    "installer_name": {
+      "type": "string"
+    },
+    "occupancy_group": {
+      "type": "string",
+      "enum": [
+        "A",
+        "B",
+        "E",
+        "F",
+        "H",
+        "I-1",
+        "I-2",
+        "I-3",
+        "I-4",
+        "M",
+        "R-1",
+        "R-2",
+        "R-3",
+        "R-4",
+        "S",
+        "High Rise"
+      ]
+    },
+    "total_occupant_load": {
+      "type": "number"
+    },
+    "occupant_load_per_floor": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "floor": {
+            "type": "number"
+          },
+          "load": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "gross_sqft_per_floor": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "floor": {
+            "type": "number"
+          },
+          "sqft": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "num_floors": {
+      "type": "number"
+    },
+    "sprinkler_status": {
+      "type": "string",
+      "enum": [
+        "None",
+        "Partial",
+        "Full (NFPA 13)",
+        "Full (NFPA 13R)",
+        "Full (NFPA 13D)"
+      ]
+    },
+    "default_ceiling_height": {
+      "type": "number",
+      "description": "Default ceiling height in feet"
+    },
+    "default_ceiling_type": {
+      "type": "string",
+      "enum": [
+        "smooth_flat",
+        "sloped",
+        "beamed",
+        "open_web_joist"
+      ]
+    },
+    "elevator_count": {
+      "type": "number"
+    },
+    "ahj_contact": {
+      "type": "string"
+    },
+    "adopted_code_edition": {
+      "type": "string"
+    },
+    "communication_pathway": {
+      "type": "string",
+      "enum": [
+        "POTS",
+        "IP/GSM",
+        "Fiber"
+      ]
+    },
+    "floor_plans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "floor_number": {
+            "type": "number"
+          },
+          "image_url": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "analysis_results": {
+      "type": "object",
+      "description": "Code analysis engine output"
+    },
+    "rooms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "floor": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "ceiling_height": {
+            "type": "number"
+          },
+          "ceiling_type": {
+            "type": "string"
+          },
+          "room_type": {
+            "type": "string"
+          },
+          "sqft": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "floor": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "subtype": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          },
+          "circuit": {
+            "type": "string"
+          },
+          "candela": {
+            "type": "number"
+          },
+          "db_rating": {
+            "type": "number"
+          },
+          "mounting_height": {
+            "type": "string"
+          },
+          "room_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "circuits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string"
+          },
+          "floor": {
+            "type": "number"
+          },
+          "device_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "wire_type": {
+            "type": "string"
+          },
+          "conductor_size": {
+            "type": "string"
+          },
+          "total_current": {
+            "type": "number"
+          },
+          "rated_current": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "in_progress",
+        "completed"
+      ],
+      "default": "draft"
+    },
+    "total_sleeping_units": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "name",
+    "occupancy_group",
+    "num_floors"
+  ]
+}
