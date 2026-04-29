@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Calculator, Package, Grid3x3 } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -12,6 +12,10 @@ import FloorPlanCanvas from "@/components/designer/FloorPlanCanvas";
 import DevicePanel from "@/components/designer/DevicePanel";
 import CalculationsPanel from "@/components/designer/CalculationsPanel";
 import BillOfMaterials from "@/components/designer/BillOfMaterials";
+
+import ComplianceChecklist from "@/components/designer/ComplianceChecklist";
+import BatteryPanel from "@/components/designer/BatteryPanel";
+import { downloadDXF } from "@/lib/dxfExport";
 
 import {
   determineSystemRequirements,
@@ -44,6 +48,7 @@ export default function ProjectDesigner() {
   const [snapGrid, setSnapGrid] = useState(false);
   const [selectedTool, setSelectedTool] = useState('select');
   const [layers, setLayers] = useState({ grid: false, rooms: true, circuits: true, labels: true });
+  const [rightPanel, setRightPanel] = useState(null); // 'checklist' | 'battery' | null
   const [analysisResults, setAnalysisResults] = useState(null);
   const [localRooms, setLocalRooms] = useState(null);
   const [localDevices, setLocalDevices] = useState(null);
@@ -222,7 +227,7 @@ export default function ProjectDesigner() {
         onTabChange={setActiveTab}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden" style={{minHeight: 0}}>
         <DesignerSidebar
           project={project}
           devices={devices}
@@ -282,21 +287,11 @@ export default function ProjectDesigner() {
                 onDelete={handleDeleteDevice}
               />
               {/* Bottom toolbar */}
-              <div className="absolute bottom-4 left-4 flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 h-8 text-xs shadow-sm"
-                  onClick={() => setShowCalculations(true)}
-                >
+              <div className="absolute bottom-4 left-4 flex items-center gap-2 flex-wrap">
+                <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs shadow-sm" onClick={() => setShowCalculations(true)}>
                   <Calculator className="h-3 w-3" /> Calculations
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 h-8 text-xs shadow-sm"
-                  onClick={() => setShowBOM(true)}
-                >
+                <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs shadow-sm" onClick={() => setShowBOM(true)}>
                   <Package className="h-3 w-3" /> BOM
                 </Button>
                 <Button
@@ -304,14 +299,74 @@ export default function ProjectDesigner() {
                   variant={snapGrid ? "default" : "outline"}
                   className="gap-1.5 h-8 text-xs shadow-sm"
                   onClick={() => setSnapGrid(s => !s)}
-                  title="Toggle snap-to-grid"
                 >
                   <Grid3x3 className="h-3 w-3" /> {snapGrid ? 'Snap ON' : 'Snap OFF'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={rightPanel === 'checklist' ? "default" : "outline"}
+                  className="gap-1.5 h-8 text-xs shadow-sm"
+                  onClick={() => setRightPanel(p => p === 'checklist' ? null : 'checklist')}
+                >
+                  <ClipboardList className="h-3 w-3" /> Checklist
+                </Button>
+                <Button
+                  size="sm"
+                  variant={rightPanel === 'battery' ? "default" : "outline"}
+                  className="gap-1.5 h-8 text-xs shadow-sm"
+                  onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')}
+                >
+                  <Battery className="h-3 w-3" /> Battery Calc
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 h-8 text-xs shadow-sm border-blue-200 text-blue-700 hover:bg-blue-50"
+                  onClick={() => downloadDXF(project, rooms, devices, activeFloor)}
+                  title="Export current floor to DXF (AutoCAD compatible)"
+                >
+                  <FileDown className="h-3 w-3" /> Export DXF
                 </Button>
               </div>
             </>
           )}
         </div>
+
+        {/* Right panel: Checklist / Battery */}
+        {rightPanel && (
+          <div className="w-80 border-l border-slate-200 flex flex-col overflow-hidden shrink-0">
+            <div className="flex items-center border-b border-slate-200 shrink-0 bg-slate-50">
+              <button
+                onClick={() => setRightPanel('checklist')}
+                className={`flex items-center gap-1.5 flex-1 py-2 px-3 text-xs font-medium transition-colors ${rightPanel === 'checklist' ? 'bg-white text-slate-900 border-b-2 border-blue-500' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <ClipboardList className="w-3.5 h-3.5" /> Checklist
+              </button>
+              <button
+                onClick={() => setRightPanel('battery')}
+                className={`flex items-center gap-1.5 flex-1 py-2 px-3 text-xs font-medium transition-colors ${rightPanel === 'battery' ? 'bg-white text-slate-900 border-b-2 border-orange-500' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <Battery className="w-3.5 h-3.5" /> Battery
+              </button>
+              <button onClick={() => setRightPanel(null)} className="p-2 text-slate-400 hover:text-slate-600">
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {rightPanel === 'checklist' && (
+                <ComplianceChecklist
+                  project={project}
+                  devices={devices}
+                  analysisResults={analysisResults}
+                  rooms={rooms}
+                />
+              )}
+              {rightPanel === 'battery' && (
+                <BatteryPanel devices={devices} />
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {showCalculations && (
