@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { routeCircuits, drawCircuitRoutes } from '@/lib/circuitRouter';
+import { createMarkupFromTool, formatMarkupMeasurement, getMarkupBounds, getMarkupLayerKey, getMarkupTool, isMarkupTool } from '@/lib/bluebeamMarkupTools';
 
 // NFPA 170 Standard Fire Protection Symbols
 const NFPA_SYMBOLS = {
@@ -178,6 +179,107 @@ function getSymbol(type, subtype) {
   return NFPA_SYMBOLS[subtype] || NFPA_SYMBOLS[type] || NFPA_SYMBOLS['smoke_detector'];
 }
 
+function drawLabel(ctx, text, x, y, color = '#1e293b') {
+  if (!text) return;
+  ctx.font = '9px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const width = ctx.measureText(text).width + 8;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillRect(x - width / 2, y - 8, width, 16);
+  ctx.strokeStyle = 'rgba(15,23,42,0.1)';
+  ctx.lineWidth = 0.5;
+  ctx.strokeRect(x - width / 2, y - 8, width, 16);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+}
+
+function drawCloud(ctx, bounds, color) {
+  const scallop = 10;
+  ctx.beginPath();
+  for (let x = bounds.left; x <= bounds.right; x += scallop) {
+    ctx.arc(x, bounds.top, scallop / 2, Math.PI, 0);
+  }
+  for (let y = bounds.top; y <= bounds.bottom; y += scallop) {
+    ctx.arc(bounds.right, y, scallop / 2, -Math.PI / 2, Math.PI / 2);
+  }
+  for (let x = bounds.right; x >= bounds.left; x -= scallop) {
+    ctx.arc(x, bounds.bottom, scallop / 2, 0, Math.PI);
+  }
+  for (let y = bounds.bottom; y >= bounds.top; y -= scallop) {
+    ctx.arc(bounds.left, y, scallop / 2, Math.PI / 2, -Math.PI / 2);
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function drawMarkup(ctx, markup, pxPerFt) {
+  const bounds = getMarkupBounds(markup);
+  if (!bounds) return;
+  const color = markup.color || '#2563eb';
+  const label = markup.type === 'text' || markup.type === 'callout'
+    ? markup.text
+    : formatMarkupMeasurement(markup, pxPerFt);
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash(markup.status === 'Completed' ? [4, 4] : []);
+
+  if (markup.type === 'text') {
+    drawLabel(ctx, markup.text || markup.subject, markup.x, markup.y, color);
+  } else if (markup.type === 'count') {
+    ctx.beginPath();
+    ctx.arc(markup.x, markup.y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.font = 'bold 10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(markup.text || '1', markup.x, markup.y);
+  } else if (markup.type === 'length' || markup.type === 'callout') {
+    ctx.beginPath();
+    ctx.moveTo(markup.x, markup.y);
+    ctx.lineTo(markup.x2, markup.y2);
+    ctx.stroke();
+    const angle = Math.atan2(markup.y2 - markup.y, markup.x2 - markup.x);
+    [0, Math.PI].forEach((flip, idx) => {
+      const x = idx === 0 ? markup.x2 : markup.x;
+      const y = idx === 0 ? markup.y2 : markup.y;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - Math.cos(angle + flip - 0.45) * 10, y - Math.sin(angle + flip - 0.45) * 10);
+      ctx.lineTo(x - Math.cos(angle + flip + 0.45) * 10, y - Math.sin(angle + flip + 0.45) * 10);
+      ctx.closePath();
+      ctx.fill();
+    });
+    drawLabel(ctx, label, (markup.x + markup.x2) / 2, (markup.y + markup.y2) / 2 - 12, color);
+  } else if (markup.type === 'cloud') {
+    drawCloud(ctx, bounds, color);
+    drawLabel(ctx, label, bounds.left + bounds.width / 2, bounds.top - 10, color);
+  } else {
+    ctx.beginPath();
+    ctx.rect(bounds.left, bounds.top, bounds.width, bounds.height);
+    if (markup.type === 'highlight') {
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else if (markup.type === 'area') {
+      ctx.fillStyle = `${color}18`;
+      ctx.fill();
+    }
+    ctx.stroke();
+    drawLabel(ctx, label, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2, color);
+  }
+
+  ctx.restore();
+}
+
 export default function FloorPlanCanvas({
   floorPlanUrl,
   devices = [],
@@ -194,6 +296,9 @@ export default function FloorPlanCanvas({
   onRoomNameRequest,
   wires = [],
   onWiresChange,
+  markups = [],
+  onMarkupsChange,
+  pxPerFt = 10,
 }) {
   const internalCanvasRef = useRef(null);
   const canvasRef = externalCanvasRef || internalCanvasRef;
@@ -202,6 +307,7 @@ export default function FloorPlanCanvas({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(null);
   const [drawingRoom, setDrawingRoom] = useState(null);
+  const [drawingMarkup, setDrawingMarkup] = useState(null);
   const [wireStart, setWireStart] = useState(null); // device id
   const [mouseWorld, setMouseWorld] = useState(null);
   const [floorImg, setFloorImg] = useState(null);
@@ -419,8 +525,23 @@ export default function FloorPlanCanvas({
       ctx.restore();
     });
 
+    // Bluebeam-style markups and calibrated measurements
+    if (layers.markups !== false) {
+      markups
+        .filter(m => m.floor === currentFloor && layers[getMarkupLayerKey(m.layer)] !== false)
+        .forEach(markup => drawMarkup(ctx, markup, pxPerFt));
+    }
+
+    if (drawingMarkup) {
+      drawMarkup(ctx, {
+        ...drawingMarkup,
+        text: drawingMarkup.type === 'count' ? '1' : drawingMarkup.subject,
+        status: 'Open',
+      }, pxPerFt);
+    }
+
     ctx.restore();
-  }, [floorImg, devices, rooms, layers, scale, offset, selectedDevice, drawingRoom, canvasSize, currentFloor, wires, wireStart, mouseWorld]);
+  }, [floorImg, devices, rooms, layers, scale, offset, selectedDevice, drawingRoom, drawingMarkup, canvasSize, currentFloor, wires, wireStart, mouseWorld, markups, pxPerFt]);
 
   const toWorld = useCallback((e) => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -450,6 +571,30 @@ export default function FloorPlanCanvas({
     }
     if (selectedTool === 'room') {
       setDrawingRoom({ x: world.x, y: world.y, ex: world.x, ey: world.y });
+      return;
+    }
+    if (isMarkupTool(selectedTool)) {
+      const tool = getMarkupTool(selectedTool);
+      const snapped = {
+        x: snapToGrid(world.x, snapGrid),
+        y: snapToGrid(world.y, snapGrid),
+      };
+      if (tool.mode === 'point') {
+        const newMarkup = createMarkupFromTool(tool, snapped, { floor: currentFloor });
+        if (onMarkupsChange) onMarkupsChange([...(markups || []), newMarkup]);
+      } else {
+        setDrawingMarkup({
+          type: tool.type,
+          subject: tool.subject,
+          color: tool.color,
+          layer: tool.layer || 'Review',
+          floor: currentFloor,
+          x: snapped.x,
+          y: snapped.y,
+          x2: snapped.x,
+          y2: snapped.y,
+        });
+      }
       return;
     }
     if (selectedTool === 'delete') {
@@ -514,7 +659,7 @@ export default function FloorPlanCanvas({
         setDragging({ type: 'pan', start: { x: e.clientX - offset.x, y: e.clientY - offset.y } });
       }
     }
-  }, [selectedTool, toWorld, offset, devices, currentFloor, onDevicesChange, onDeviceSelect, snapGrid]);
+  }, [selectedTool, toWorld, offset, devices, currentFloor, onDevicesChange, onDeviceSelect, snapGrid, markups, onMarkupsChange]);
 
   const handleMouseMove = useCallback((e) => {
     if (selectedTool === 'wire') {
@@ -523,6 +668,15 @@ export default function FloorPlanCanvas({
     if (drawingRoom && !dragging) {
       const world = toWorld(e);
       setDrawingRoom(r => r ? { ...r, ex: world.x, ey: world.y } : null);
+      return;
+    }
+    if (drawingMarkup && !dragging) {
+      const world = toWorld(e);
+      setDrawingMarkup(m => m ? {
+        ...m,
+        x2: snapToGrid(world.x, snapGrid),
+        y2: snapToGrid(world.y, snapGrid),
+      } : null);
       return;
     }
     if (!dragging) return;
@@ -540,7 +694,7 @@ export default function FloorPlanCanvas({
       const world = toWorld(e);
       setDrawingRoom(r => r ? { ...r, ex: world.x, ey: world.y } : null);
     }
-  }, [dragging, drawingRoom, toWorld, devices, onDevicesChange, snapGrid]);
+  }, [dragging, drawingRoom, drawingMarkup, toWorld, devices, onDevicesChange, snapGrid]);
 
   const handleMouseUp = useCallback((e) => {
     if (selectedTool === 'room' && drawingRoom) {
@@ -562,8 +716,17 @@ export default function FloorPlanCanvas({
       }
       setDrawingRoom(null);
     }
+    if (isMarkupTool(selectedTool) && drawingMarkup) {
+      const tool = getMarkupTool(selectedTool);
+      const bounds = getMarkupBounds(drawingMarkup);
+      if (tool && bounds && (bounds.width > 8 || bounds.height > 8)) {
+        const newMarkup = createMarkupFromTool(tool, drawingMarkup, { floor: currentFloor });
+        if (onMarkupsChange) onMarkupsChange([...(markups || []), newMarkup]);
+      }
+      setDrawingMarkup(null);
+    }
     setDragging(null);
-  }, [selectedTool, drawingRoom, rooms, onRoomsChange, currentFloor, onRoomNameRequest]);
+  }, [selectedTool, drawingRoom, drawingMarkup, rooms, onRoomsChange, currentFloor, onRoomNameRequest, markups, onMarkupsChange]);
 
   const handleWheel = useCallback((e) => {
     e.preventDefault();
@@ -583,6 +746,7 @@ export default function FloorPlanCanvas({
   const getCursor = () => {
     if (selectedTool === 'pan' || dragging?.type === 'pan') return dragging ? 'grabbing' : 'grab';
     if (selectedTool === 'room') return 'crosshair';
+    if (isMarkupTool(selectedTool)) return 'crosshair';
     if (selectedTool === 'delete') return 'not-allowed';
     if (selectedTool === 'wire') return wireStart ? 'cell' : 'crosshair';
     if (selectedTool?.startsWith('place_device_')) return 'copy';
@@ -599,7 +763,7 @@ export default function FloorPlanCanvas({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={() => { setDragging(null); setDrawingRoom(null); }}
+        onMouseLeave={() => { setDragging(null); setDrawingRoom(null); setDrawingMarkup(null); }}
         onWheel={handleWheel}
       />
       {/* Zoom Controls */}
@@ -625,6 +789,9 @@ export default function FloorPlanCanvas({
         )}
         {selectedTool === 'wire' && (
           <><span className="text-gray-300">|</span><span className="text-blue-500 font-semibold">{wireStart ? 'WIRE — click target device' : 'WIRE — click source device'}</span></>
+        )}
+        {isMarkupTool(selectedTool) && (
+          <><span className="text-gray-300">|</span><span className="text-emerald-600 font-semibold">MARKUP — {getMarkupTool(selectedTool)?.label}</span></>
         )}
       </div>
     </div>

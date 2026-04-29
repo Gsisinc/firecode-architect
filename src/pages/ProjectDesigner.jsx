@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -20,6 +20,7 @@ import SubmittalPackage from "@/components/designer/SubmittalPackage";
 import VoltageDropCalculator from "@/components/designer/VoltageDropCalculator";
 import ProjectDashboard from "@/components/designer/ProjectDashboard";
 import RiserDiagram from "@/components/designer/RiserDiagram";
+import MarkupsList from "@/components/designer/MarkupsList";
 import { downloadDXF } from "@/lib/dxfExport";
 
 import {
@@ -52,7 +53,18 @@ export default function ProjectDesigner() {
   const [showBOM, setShowBOM] = useState(false);
   const [snapGrid, setSnapGrid] = useState(false);
   const [selectedTool, setSelectedTool] = useState('select');
-  const [layers, setLayers] = useState({ grid: false, rooms: true, circuits: true, labels: true });
+  const [layers, setLayers] = useState({
+    grid: false,
+    rooms: true,
+    circuits: true,
+    labels: true,
+    markups: true,
+    markup_Review: true,
+    markup_Measurements: true,
+    markup_Takeoff: true,
+    markup_Fire_Alarm: true,
+    markup_Coordination: true,
+  });
   const [rightPanel, setRightPanel] = useState(null);
   const [showSubmittal, setShowSubmittal] = useState(false);
   const [toolbarOpen, setToolbarOpen] = useState(false);
@@ -63,6 +75,7 @@ export default function ProjectDesigner() {
   const [localRooms, setLocalRooms] = useState(null);
   const [localDevices, setLocalDevices] = useState(null);
   const [localFloorPlans, setLocalFloorPlans] = useState(null);
+  const [localMarkups, setLocalMarkups] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
   const [wires, setWires] = useState([]);
 
@@ -76,6 +89,7 @@ export default function ProjectDesigner() {
   const rooms = localRooms ?? project?.rooms ?? [];
   const devices = localDevices ?? project?.devices ?? [];
   const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
+  const markups = localMarkups ?? project?.markups ?? [];
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
@@ -89,6 +103,7 @@ export default function ProjectDesigner() {
     saveMutation.mutate({
       rooms,
       devices,
+      markups,
       floor_plans: floorPlans,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
@@ -105,6 +120,7 @@ export default function ProjectDesigner() {
     saveMutation.mutate({
       rooms,
       devices,
+      markups,
       floor_plans: updated,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
@@ -269,6 +285,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       saveMutation.mutate({
         rooms: newRooms,
         devices,
+        markups,
         floor_plans: floorPlans,
         analysis_results: analysisResults,
         status: devices.length > 0 ? "in_progress" : "draft",
@@ -367,6 +384,17 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
   const handleDeleteDevice = (deviceId) => {
     setLocalDevices(devices.filter((d) => d.id !== deviceId));
     setSelectedDevice(null);
+  };
+
+  const handleUpdateMarkup = (markupId, updates) => {
+    const updatedAt = new Date().toISOString();
+    setLocalMarkups(markups.map((markup) => (
+      markup.id === markupId ? { ...markup, ...updates, updated_at: updatedAt } : markup
+    )));
+  };
+
+  const handleDeleteMarkup = (markupId) => {
+    setLocalMarkups(markups.filter((markup) => markup.id !== markupId));
   };
 
   const handleRoomNameRequest = (rect) => {
@@ -509,6 +537,9 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 onRoomNameRequest={handleRoomNameRequest}
                 wires={wires}
                 onWiresChange={setWires}
+                markups={markups}
+                onMarkupsChange={setLocalMarkups}
+                pxPerFt={10}
               />
               <FloorPlanUploader
                 floorNumber={activeFloor}
@@ -542,6 +573,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                     <ToolbarBtn active={rightPanel === 'checklist'} onClick={() => setRightPanel(p => p === 'checklist' ? null : 'checklist')} icon={<ClipboardList className="h-3 w-3" />} label="Checklist" />
                     <ToolbarBtn active={rightPanel === 'battery'} onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')} icon={<Battery className="h-3 w-3" />} label="Battery" />
                     <ToolbarBtn active={rightPanel === 'voltagedrop'} onClick={() => setRightPanel(p => p === 'voltagedrop' ? null : 'voltagedrop')} icon={<Zap className="h-3 w-3" />} label="V-Drop" />
+                    <ToolbarBtn active={rightPanel === 'markups'} onClick={() => setRightPanel(p => p === 'markups' ? null : 'markups')} icon={<MessageSquare className="h-3 w-3" />} label="Markups" />
                     <ToolbarBtn onClick={() => downloadDXF(project, rooms, devices, activeFloor)} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
                     <ToolbarBtn onClick={() => setShowSubmittal(true)} icon={<BookOpen className="h-3 w-3" />} label="Submittal PDF" orange />
                   </div>
@@ -551,9 +583,9 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
           )}
         </div>
 
-        {/* Right panel: Checklist / Battery */}
+        {/* Right panel: Checklist / Battery / Markups */}
         {rightPanel && (
-          <div className="w-80 border-l border-slate-200 flex flex-col overflow-hidden shrink-0">
+          <div className="w-96 border-l border-slate-200 flex flex-col overflow-hidden shrink-0">
             <div className="flex items-center border-b border-slate-200 shrink-0 bg-slate-50">
               <button
                 onClick={() => setRightPanel('checklist')}
@@ -573,6 +605,12 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
               >
                 <Zap className="w-3.5 h-3.5" /> V-Drop
               </button>
+              <button
+                onClick={() => setRightPanel('markups')}
+                className={`flex items-center gap-1.5 flex-1 py-2 px-3 text-xs font-medium transition-colors ${rightPanel === 'markups' ? 'bg-white text-slate-900 border-b-2 border-emerald-500' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" /> Markups
+              </button>
               <button onClick={() => setRightPanel(null)} className="p-2 text-slate-400 hover:text-slate-600">
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -591,6 +629,16 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
               )}
               {rightPanel === 'voltagedrop' && (
                 <VoltageDropCalculator devices={devices} />
+              )}
+              {rightPanel === 'markups' && (
+                <MarkupsList
+                  project={project}
+                  markups={markups}
+                  currentFloor={activeFloor}
+                  pxPerFt={10}
+                  onUpdateMarkup={handleUpdateMarkup}
+                  onDeleteMarkup={handleDeleteMarkup}
+                />
               )}
             </div>
           </div>

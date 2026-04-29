@@ -2,9 +2,10 @@ import { useState } from 'react';
 import {
   Layers, Zap, Download, ChevronDown, ChevronRight,
   Eye, EyeOff, LayoutList, AlertTriangle, CheckCircle2,
-  MousePointer, Square, Hand, Trash2, Settings2, Cable
+  MousePointer, Square, Hand, Trash2, Settings2, Cable, MessageSquare
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { MARKUP_TOOLS } from '@/lib/bluebeamMarkupTools';
 
 // NFPA 170 device palette with proper symbols
 export const DEVICE_PALETTE = [
@@ -93,6 +94,26 @@ export default function DesignerSidebar({
                 {visible ? <Eye className="w-3 h-3 text-orange-400" /> : <EyeOff className="w-3 h-3 text-white/20" />}
               </button>
             ))}
+          </div>
+        </SidebarSection>
+
+        {/* Bluebeam-style Tool Chest */}
+        <SidebarSection title="Tool Chest" icon={MessageSquare} open={openSection === 'toolchest'} onToggle={() => toggle('toolchest')}>
+          <div className="space-y-2">
+            <p className="text-[10px] text-white/35 px-1 leading-snug">
+              Reusable review, takeoff, and measurement markups for the floor-plan canvas.
+            </p>
+            <div className="grid grid-cols-2 gap-1">
+              {MARKUP_TOOLS.map((tool) => (
+                <ToolBtn
+                  key={tool.id}
+                  active={selectedTool === tool.id}
+                  onClick={() => onToolSelect(tool.id)}
+                  icon={<span className="w-3 h-3 rounded-sm border" style={{ borderColor: tool.color, backgroundColor: `${tool.color}22` }} />}
+                  label={tool.label}
+                />
+              ))}
+            </div>
           </div>
         </SidebarSection>
 
