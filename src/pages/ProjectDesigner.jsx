@@ -125,78 +125,65 @@ export default function ProjectDesigner() {
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
 
-    const result = await base44.integrations.Core.InvokeLLM({
-      model: "claude_sonnet_4_6",
-      prompt: `You are a expert fire alarm engineer and architect analyzing a floor plan / architectural blueprint image.
+    let result;
+    try {
+      result = await base44.integrations.Core.InvokeLLM({
+        model: "gemini_3_1_pro",
+        prompt: `You are analyzing an architectural floor plan blueprint image that is ${imgW}px wide by ${imgH}px tall.
 
-Your task: Precisely identify EVERY enclosed room and space in this floor plan. The image is ${imgW} pixels wide and ${imgH} pixels tall.
+TASK: Find every labeled room/space and return its exact bounding box in pixels.
 
-CRITICAL INSTRUCTIONS:
-1. Look at the actual WALLS (thick black lines) to determine room boundaries — NOT labels or furniture.
-2. For each room, find the bounding box tightly fitting inside the walls.
-3. The floor plan drawing area typically does NOT start at pixel 0,0 — it usually has a title block, legend, or border. Identify where the actual floor plan drawing starts and ends first.
-4. Return coordinates in PIXELS (not fractions) relative to the full image dimensions (${imgW}x${imgH}).
-5. Be precise. A room labeled "Conference Room" that occupies the center-left of the plan should have coordinates exactly matching where its walls are.
-6. Every text label you can read in the image (e.g. "CONFERENCE ROOM", "RESTROOM", "LOBBY", "ELECTRICAL", "OFFICE", "CORRIDOR") indicates a room — find it and box it.
-7. Do NOT overlap rooms. Each enclosed space is a separate room.
-8. Typical rooms to look for: office spaces, corridors/hallways, restrooms/bathrooms, conference rooms, lobby/reception, storage, mechanical/electrical rooms, stairwells, break rooms, copy rooms.
+RULES:
+- Use the TEXT LABELS visible in the plan to identify rooms (e.g. "CONFERENCE ROOM", "RESTROOM", "LOBBY", "ELECTRICAL ROOM", "OFFICE", "CORRIDOR", "STORAGE", "EMPLOYEE LOUNGE", "RECEPTION")
+- For each labeled space, find the 4 walls enclosing it and return the bounding box IN PIXELS
+- Coordinates are relative to the TOP-LEFT of the full image (0,0)
+- The floor plan usually has a border/title block — only map rooms INSIDE the actual floor plan drawing
+- Do NOT overlap rooms
+- Be as accurate as possible — the fire alarm device placement depends on this
 
-For EACH room return:
-- name: the text label visible in the room (e.g. "Conference Room", "Women's Restroom", "Electrical Room")
-- room_type: one of: office, corridor, conference_room, bathroom, kitchen, lobby, stairwell, mechanical_room, storage, bedroom, other
-- px: left edge X in pixels from image left edge
-- py: top edge Y in pixels from image top edge
+Return JSON with a "rooms" array. Each room has:
+- name: the label text (e.g. "Conference Room")
+- room_type: one of office|corridor|conference_room|bathroom|kitchen|lobby|stairwell|mechanical_room|storage|other
+- px: left wall X in pixels
+- py: top wall Y in pixels  
 - pw: room width in pixels
 - ph: room height in pixels
-- sqft: estimated real-world square footage of this room
-
-Return ONLY valid JSON. No explanation text.`,
-      file_urls: [plan.image_url],
-      response_json_schema: {
-        type: "object",
-        properties: {
-          image_width_px: { type: "number" },
-          image_height_px: { type: "number" },
-          floor_plan_bounds: {
-            type: "object",
-            properties: {
-              left: { type: "number" },
-              top: { type: "number" },
-              right: { type: "number" },
-              bottom: { type: "number" }
-            }
-          },
-          rooms: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                room_type: { type: "string" },
-                px: { type: "number" },
-                py: { type: "number" },
-                pw: { type: "number" },
-                ph: { type: "number" },
-                sqft: { type: "number" }
+- sqft: estimated real square footage`,
+        file_urls: [plan.image_url],
+        response_json_schema: {
+          type: "object",
+          properties: {
+            rooms: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  room_type: { type: "string" },
+                  px: { type: "number" },
+                  py: { type: "number" },
+                  pw: { type: "number" },
+                  ph: { type: "number" },
+                  sqft: { type: "number" }
+                }
               }
             }
           }
         }
-      }
-    });
+      });
+    } catch (err) {
+      console.error("Room detection error:", err);
+      toast.error(`Room detection failed: ${err?.message || "Unknown error"}. Check console for details.`);
+      setAnalyzingFloor(false);
+      return;
+    }
 
-    // The AI returns pixel coords based on the actual image size
-    // We scale them to match the canvas coordinate system (image is drawn at natural size on canvas)
-    const aiImgW = result?.image_width_px || imgW;
-    const aiImgH = result?.image_height_px || imgH;
-    const scaleX = imgW / aiImgW;
-    const scaleY = imgH / aiImgH;
-
+    // AI returns pixel coords relative to the image — used directly since canvas draws image at natural size
     const detectedRooms = (result?.rooms || []).map(r => {
-      const x = Math.round((r.px || 0) * scaleX);
-      const y = Math.round((r.py || 0) * scaleY);
-      const width = Math.round((r.pw || 50) * scaleX);
-      const height = Math.round((r.ph || 50) * scaleY);
+      const x = Math.round(r.px || 0);
+      const y = Math.round(r.py || 0);
+      const width = Math.round(r.pw || 50);
+      const height = Math.round(r.ph || 50);
       return {
         id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         floor: activeFloor,
