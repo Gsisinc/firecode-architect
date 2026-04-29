@@ -115,9 +115,9 @@ export default function ProjectDesigner() {
     const plan = floorPlans.find(fp => fp.floor_number === activeFloor);
     if (!plan?.image_url) { toast.error("Upload a floor plan first"); return; }
     setAnalyzingFloor(true);
-    toast.info("AI is analyzing the blueprint — this may take 20–40 seconds...");
+    toast.info("AI is reading blueprint dimensions — step 1 of 2...");
 
-    // Step 1: Load the image to get its natural pixel dimensions
+    // Load image to get natural pixel dimensions
     const imgEl = new window.Image();
     imgEl.crossOrigin = 'anonymous';
     imgEl.src = plan.image_url;
@@ -125,48 +125,97 @@ export default function ProjectDesigner() {
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
 
-    let result;
+    // ── PASS 1: Read dimension callouts to establish pixel-per-foot scale ──
+    let pass1;
     try {
-      result = await base44.integrations.Core.InvokeLLM({
+      pass1 = await base44.integrations.Core.InvokeLLM({
         model: "gemini_3_1_pro",
-        prompt: `You are a professional architectural blueprint reader analyzing a fire alarm floor plan. The image is ${imgW}x${imgH} pixels.
+        prompt: `This is an architectural floor plan blueprint image (${imgW}x${imgH} pixels).
 
-STEP 1 — Find the drawing boundary:
-Locate the outer boundary of the actual floor plan drawing (the thick outer walls of the building). Ignore title blocks, legend boxes, notes sections outside the building. Report the pixel coordinates of the building's outer boundary: left_px, top_px, right_px, bottom_px.
+YOUR ONLY JOB: Find the dimension annotation lines printed on the drawing and read the scale.
 
-STEP 2 — Read the scale:
-Look for dimension annotations on the drawing (lines with arrows and measurements like "25'-0"", "50'-0"", "9'-0"", etc.). Find at least one horizontal and one vertical dimension annotation. Report:
-- A horizontal dimension: its pixel length (how many pixels span that dimension line) and its real-world length in feet
-- A vertical dimension: same
+1. Find the LONGEST horizontal dimension line with a measurement label (e.g. "25'-0\"" or "25'0\""). Report:
+   - The pixel X coordinate of its LEFT arrowhead tip
+   - The pixel X coordinate of its RIGHT arrowhead tip
+   - The feet value written on it (as a decimal, e.g. 25.0)
 
-STEP 3 — Map every room:
-For each enclosed, labeled space inside the building walls, report its bounding box in pixels (px=left edge, py=top edge, pw=width, ph=height) measured from the image top-left corner (0,0). Use the dimension scale from Step 2 to calculate real sqft.
+2. Find the LONGEST vertical dimension line with a measurement label. Report:
+   - The pixel Y coordinate of its TOP arrowhead tip
+   - The pixel Y coordinate of its BOTTOM arrowhead tip
+   - The feet value written on it (as a decimal, e.g. 50.0)
 
-Be PRECISE — align px/py/pw/ph exactly with the wall lines you can see. The room boxes must line up with the actual drawn walls, not approximate guesses.
+3. Find the OUTER WALLS of the building floor plan (ignore title block, notes, legend outside the building):
+   - left_px, top_px, right_px, bottom_px (pixels from image top-left)
 
-Rooms to find: every labeled space (Electrical Room, Storage Room, Restroom, Conference Room, Office, Lobby, Corridor, Sales Floor, Employee Lounge, Reception, etc.)`,
+Be extremely precise about pixel coordinates. Look carefully at where dimension lines START and END.`,
         file_urls: [plan.image_url],
         response_json_schema: {
           type: "object",
           properties: {
-            building_bounds: {
-              type: "object",
-              properties: {
-                left_px: { type: "number" },
-                top_px: { type: "number" },
-                right_px: { type: "number" },
-                bottom_px: { type: "number" }
-              }
-            },
-            scale: {
-              type: "object",
-              properties: {
-                horiz_px: { type: "number" },
-                horiz_ft: { type: "number" },
-                vert_px: { type: "number" },
-                vert_ft: { type: "number" }
-              }
-            },
+            horiz_dim: { type: "object", properties: {
+              x1_px: { type: "number" }, x2_px: { type: "number" }, feet: { type: "number" }
+            }},
+            vert_dim: { type: "object", properties: {
+              y1_px: { type: "number" }, y2_px: { type: "number" }, feet: { type: "number" }
+            }},
+            building: { type: "object", properties: {
+              left_px: { type: "number" }, top_px: { type: "number" },
+              right_px: { type: "number" }, bottom_px: { type: "number" }
+            }}
+          }
+        }
+      });
+    } catch (err) {
+      toast.error(`Scale detection failed: ${err?.message || "Unknown error"}`);
+      setAnalyzingFloor(false);
+      return;
+    }
+
+    console.log("Pass 1 (scale):", JSON.stringify(pass1, null, 2));
+
+    // Calculate px/ft scale from the dimension lines
+    const h = pass1?.horiz_dim;
+    const v = pass1?.vert_dim;
+    const b = pass1?.building;
+
+    const pxPerFtH = h?.feet > 0 ? Math.abs(h.x2_px - h.x1_px) / h.feet : null;
+    const pxPerFtV = v?.feet > 0 ? Math.abs(v.y2_px - v.y1_px) / v.feet : null;
+    // Use average of both axes if available, otherwise fall back to the one we have
+    const pxPerFt = pxPerFtH && pxPerFtV ? (pxPerFtH + pxPerFtV) / 2 : pxPerFtH || pxPerFtV || 10;
+
+    console.log(`Scale: H=${pxPerFtH?.toFixed(1)}px/ft, V=${pxPerFtV?.toFixed(1)}px/ft, avg=${pxPerFt.toFixed(1)}px/ft`);
+
+    const buildingLeft = b?.left_px || 0;
+    const buildingTop = b?.top_px || 0;
+    const buildingRight = b?.right_px || imgW;
+    const buildingBottom = b?.bottom_px || imgH;
+
+    toast.info(`Scale detected: ~${pxPerFt.toFixed(1)}px/ft. Mapping rooms — step 2 of 2...`);
+
+    // ── PASS 2: Read each room's real-world dimensions in FEET from the drawing ──
+    let pass2;
+    try {
+      pass2 = await base44.integrations.Core.InvokeLLM({
+        model: "gemini_3_1_pro",
+        prompt: `This is an architectural floor plan blueprint image (${imgW}x${imgH} pixels).
+
+The building's outer walls are at: left=${buildingLeft}px, top=${buildingTop}px, right=${buildingRight}px, bottom=${buildingBottom}px.
+The drawing scale is approximately ${pxPerFt.toFixed(1)} pixels per foot.
+
+YOUR JOB: For every labeled enclosed room/space inside the building walls, report:
+1. The room's TEXT LABEL as written on the plan (e.g. "ELECTRICAL ROOM", "STORAGE ROOM", "RESTROOM", "SALES FLOOR")
+2. The room_type (office|corridor|conference_room|bathroom|storage|lobby|stairwell|mechanical_room|sales_floor|other)
+3. The room's WIDTH in feet — read from dimension callouts inside or adjacent to the room, OR estimate from the scale
+4. The room's HEIGHT (depth) in feet — same
+5. The pixel coordinate of the room's TOP-LEFT corner (px, py) measured from image top-left
+
+IMPORTANT: Width and height should be the REAL-WORLD feet dimensions readable from the drawing.
+If a room has a dimension callout like "9'-0\"" that is its actual size — use that, don't guess.
+For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.`,
+        file_urls: [plan.image_url],
+        response_json_schema: {
+          type: "object",
+          properties: {
             rooms: {
               type: "array",
               items: {
@@ -174,11 +223,10 @@ Rooms to find: every labeled space (Electrical Room, Storage Room, Restroom, Con
                 properties: {
                   name: { type: "string" },
                   room_type: { type: "string" },
+                  width_ft: { type: "number" },
+                  height_ft: { type: "number" },
                   px: { type: "number" },
-                  py: { type: "number" },
-                  pw: { type: "number" },
-                  ph: { type: "number" },
-                  sqft: { type: "number" }
+                  py: { type: "number" }
                 }
               }
             }
@@ -186,36 +234,28 @@ Rooms to find: every labeled space (Electrical Room, Storage Room, Restroom, Con
         }
       });
     } catch (err) {
-      console.error("Room detection error:", err);
-      toast.error(`Room detection failed: ${err?.message || "Unknown error"}`);
+      toast.error(`Room mapping failed: ${err?.message || "Unknown error"}`);
       setAnalyzingFloor(false);
       return;
     }
 
-    console.log("Room detection result:", JSON.stringify(result, null, 2));
+    console.log("Pass 2 (rooms):", JSON.stringify(pass2, null, 2));
 
-    // Log scale info for debugging
-    if (result?.scale) {
-      const { horiz_px, horiz_ft, vert_px, vert_ft } = result.scale;
-      const pxPerFt = horiz_px && horiz_ft ? horiz_px / horiz_ft : null;
-      console.log(`Scale: ${horiz_px}px = ${horiz_ft}ft (${pxPerFt?.toFixed(1)} px/ft), vert: ${vert_px}px = ${vert_ft}ft`);
-    }
-
-    const detectedRooms = (result?.rooms || []).map(r => {
-      const x = Math.round(r.px || 0);
-      const y = Math.round(r.py || 0);
-      const width = Math.round(r.pw || 50);
-      const height = Math.round(r.ph || 50);
+    // Convert feet → pixels using our calibrated scale
+    const detectedRooms = (pass2?.rooms || []).map(r => {
+      const widthPx = Math.round((r.width_ft || 10) * pxPerFt);
+      const heightPx = Math.round((r.height_ft || 10) * pxPerFt);
+      const sqft = Math.round((r.width_ft || 10) * (r.height_ft || 10));
       return {
         id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         floor: activeFloor,
         name: r.name || 'Room',
         room_type: r.room_type || 'other',
-        x: Math.max(0, x),
-        y: Math.max(0, y),
-        width: Math.max(20, width),
-        height: Math.max(20, height),
-        sqft: r.sqft || Math.round(width * height / 9),
+        x: Math.max(0, Math.round(r.px || buildingLeft)),
+        y: Math.max(0, Math.round(r.py || buildingTop)),
+        width: Math.max(20, widthPx),
+        height: Math.max(20, heightPx),
+        sqft,
         ceiling_height: project.default_ceiling_height || 9,
         ceiling_type: project.default_ceiling_type || 'smooth_flat',
       };
@@ -233,10 +273,7 @@ Rooms to find: every labeled space (Electrical Room, Storage Room, Restroom, Con
         analysis_results: analysisResults,
         status: devices.length > 0 ? "in_progress" : "draft",
       });
-      const scaleInfo = result?.scale?.horiz_ft
-        ? ` (scale: ~${(result.scale.horiz_px / result.scale.horiz_ft).toFixed(0)}px/ft)`
-        : '';
-      toast.success(`Detected ${detectedRooms.length} rooms${scaleInfo}. Review boundaries, then Auto-Place devices.`);
+      toast.success(`Detected ${detectedRooms.length} rooms at ${pxPerFt.toFixed(1)}px/ft scale. Room sizes are based on blueprint dimensions.`);
     }
     setAnalyzingFloor(false);
   };
