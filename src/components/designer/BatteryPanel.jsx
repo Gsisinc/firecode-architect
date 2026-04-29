@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Battery, Zap, Info } from "lucide-react";
+import { Battery, Info } from "lucide-react";
 
 // Per-device current draw estimates (mA)
 const DEVICE_CURRENTS = {

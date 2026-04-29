@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { ChevronUp, ChevronDown, Calculator, Package, Grid3x3, ClipboardList, Battery, Zap, FileDown, BookOpen } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 
 export default function CanvasToolbar({
   snapGrid, onToggleSnap,

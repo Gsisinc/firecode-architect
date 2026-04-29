@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { determineSystemRequirements } from '@/lib/codeEngine';
-import { Flame, ArrowLeft, Upload, Plus, Trash2, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { CODE_SAFETY_DISCLAIMER } from '@/lib/productInfo';
+import { Flame, ArrowLeft, Upload, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
 const OCCUPANCY_GROUPS = ['A', 'B', 'E', 'F', 'H', 'I-1', 'I-2', 'I-3', 'I-4', 'M', 'R-1', 'R-2', 'R-3', 'R-4', 'S', 'High Rise'];
@@ -50,14 +51,20 @@ export default function ProjectSetup() {
   const [analysisPreview, setAnalysisPreview] = useState(null);
   const [uploading, setUploading] = useState({});
 
-  const { data: existingProject } = useQuery({
+  const { data: existingProjects = [], isLoading: isLoadingProject } = useQuery({
     queryKey: ['project', id],
     queryFn: () => base44.entities.Project.filter({ id }),
     enabled: !isNew,
-    onSuccess: (data) => {
-      if (data?.[0]) setForm(data[0]);
-    },
   });
+
+  const existingProject = existingProjects[0];
+
+  useEffect(() => {
+    if (existingProject) {
+      setForm(existingProject);
+      setAnalysisPreview(existingProject.analysis_results || null);
+    }
+  }, [existingProject]);
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
@@ -70,7 +77,14 @@ export default function ProjectSetup() {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       const projectId = result?.id || id;
       toast({ title: 'Project saved', description: 'Code analysis complete.' });
-      navigate(`/project/${projectId}/design`);
+      navigate(`/project/${projectId}/designer`);
+    },
+    onError: (error) => {
+      toast({
+        title: 'Project save failed',
+        description: error?.message || 'Please try again before leaving this page.',
+        variant: 'destructive',
+      });
     },
   });
 
@@ -84,13 +98,23 @@ export default function ProjectSetup() {
 
   const handleUpload = async (floorIndex, file) => {
     setUploading(u => ({ ...u, [floorIndex]: true }));
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    setForm(f => {
-      const plans = [...f.floor_plans];
-      plans[floorIndex] = { ...plans[floorIndex], image_url: file_url };
-      return { ...f, floor_plans: plans };
-    });
-    setUploading(u => ({ ...u, [floorIndex]: false }));
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      setForm(f => {
+        const plans = [...f.floor_plans];
+        plans[floorIndex] = { ...plans[floorIndex], image_url: file_url };
+        return { ...f, floor_plans: plans };
+      });
+      toast({ title: 'Floor plan uploaded', description: `Floor ${floorIndex + 1} is ready for design.` });
+    } catch (error) {
+      toast({
+        title: 'Upload failed',
+        description: error?.message || 'The floor plan could not be uploaded.',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploading(u => ({ ...u, [floorIndex]: false }));
+    }
   };
 
   const runAnalysisPreview = () => {
@@ -104,6 +128,29 @@ export default function ProjectSetup() {
   };
 
   const f = form;
+
+  if (!isNew && isLoadingProject) {
+    return (
+      <div className="min-h-screen bg-[hsl(222,47%,8%)] text-white flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isNew && !existingProject) {
+    return (
+      <div className="min-h-screen bg-[hsl(222,47%,8%)] text-white flex items-center justify-center px-6">
+        <div className="max-w-md text-center bg-white/5 border border-white/10 rounded-2xl p-8">
+          <AlertTriangle className="w-10 h-10 text-orange-400 mx-auto mb-4" />
+          <h1 className="text-xl font-semibold mb-2">Project not found</h1>
+          <p className="text-sm text-white/50 mb-6">This project may have been deleted or you may not have access to it.</p>
+          <Button onClick={() => navigate('/')} className="bg-orange-500 hover:bg-orange-600 text-white">
+            Back to Projects
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[hsl(222,47%,8%)] text-white">
@@ -129,6 +176,7 @@ export default function ProjectSetup() {
 
             {/* Project Info */}
             <Section title="Project Information">
+              <ComplianceNotice />
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Project Name" required>
                   <Input value={f.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Oak Creek Office Building" className="input-dark" required />
@@ -310,6 +358,9 @@ export default function ProjectSetup() {
                 <Info className="w-4 h-4 text-orange-400" />
                 Code Analysis Preview
               </h3>
+              <div className="mb-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-2 text-xs text-yellow-100/80">
+                Preliminary guidance only. Confirm final requirements with the AHJ and a licensed fire alarm professional.
+              </div>
               {analysisPreview ? (
                 <div className="space-y-2">
                   <ResultRow label="Fire Alarm Required" value={analysisPreview.fireAlarmRequired} />
@@ -372,6 +423,17 @@ function Section({ title, children }) {
     <div className="bg-white/5 border border-white/10 rounded-xl p-5">
       <h2 className="font-semibold text-white mb-4 text-sm tracking-wide uppercase text-white/60">{title}</h2>
       {children}
+    </div>
+  );
+}
+
+function ComplianceNotice() {
+  return (
+    <div className="mb-4 rounded-lg border border-amber-400/20 bg-amber-500/10 p-3 text-xs text-amber-100">
+      <div className="flex gap-2">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+        <p>{CODE_SAFETY_DISCLAIMER}</p>
+      </div>
     </div>
   );
 }

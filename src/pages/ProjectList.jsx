@@ -4,8 +4,10 @@ import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/use-toast';
 import { Plus, Search, FolderOpen, Trash2, Clock, Building2, AlertTriangle, Flame, BookOpen, ChevronRight, ShieldCheck, Layers } from 'lucide-react';
 import { format } from 'date-fns';
+import { CODE_SAFETY_DISCLAIMER } from '@/lib/productInfo';
 
 const OCCUPANCY_CONFIG = {
   'A':         { bg: 'bg-purple-50',   text: 'text-purple-700',   border: 'border-purple-200',   dot: 'bg-purple-500',   accent: 'bg-purple-500',  label: 'Assembly' },
@@ -32,6 +34,7 @@ export default function ProjectList() {
   const [search, setSearch] = useState('');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -40,8 +43,25 @@ export default function ProjectList() {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.Project.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      toast({ title: 'Project deleted' });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'The project could not be deleted.',
+        variant: 'destructive',
+      });
+    },
   });
+
+  const confirmDelete = (project) => {
+    const message = `Delete "${project.name || 'this project'}"? This cannot be undone.`;
+    if (window.confirm(message)) {
+      deleteMutation.mutate(project.id);
+    }
+  };
 
   const filtered = projects.filter(p =>
     p.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -106,6 +126,10 @@ export default function ProjectList() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {CODE_SAFETY_DISCLAIMER}
+        </div>
+
         {/* Search */}
         <div className="relative mb-8 max-w-xl">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -176,9 +200,10 @@ export default function ProjectList() {
                           <FolderOpen className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={e => { e.stopPropagation(); if (confirm('Delete this project?')) deleteMutation.mutate(project.id); }}
+                          onClick={e => { e.stopPropagation(); confirmDelete(project); }}
                           className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
                           title="Delete project"
+                          disabled={deleteMutation.isPending}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

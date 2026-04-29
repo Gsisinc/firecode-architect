@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { base44 } from "@/api/base44Client";
-import { Upload, ImagePlus, X, Loader2, Sparkles } from "lucide-react";
+import { Upload, ImagePlus, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 

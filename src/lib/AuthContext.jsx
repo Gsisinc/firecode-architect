@@ -110,6 +110,11 @@ export const AuthProvider = ({ children }) => {
           type: 'auth_required',
           message: 'Authentication required'
         });
+      } else {
+        setAuthError({
+          type: 'session_error',
+          message: error?.message || 'Unable to verify your session'
+        });
       }
     }
   };

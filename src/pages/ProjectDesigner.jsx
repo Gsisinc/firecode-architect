@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { Suspense, lazy, useState, useCallback, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -35,6 +35,8 @@ import {
   generateDeviceSchedule,
   generateSequenceOfOperations,
 } from "@/lib/codeEngine";
+
+const DocumentWorkspace = lazy(() => import("@/components/designer/DocumentWorkspace"));
 
 export default function ProjectDesigner() {
   const { id: projectId } = useParams();
@@ -76,6 +78,7 @@ export default function ProjectDesigner() {
   const [localDevices, setLocalDevices] = useState(null);
   const [localFloorPlans, setLocalFloorPlans] = useState(null);
   const [localMarkups, setLocalMarkups] = useState(null);
+  const [localDocumentWorkspace, setLocalDocumentWorkspace] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
   const [wires, setWires] = useState([]);
 
@@ -90,6 +93,7 @@ export default function ProjectDesigner() {
   const devices = localDevices ?? project?.devices ?? [];
   const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
   const markups = localMarkups ?? project?.markups ?? [];
+  const documentWorkspace = localDocumentWorkspace ?? project?.document_workspace ?? null;
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
@@ -105,6 +109,7 @@ export default function ProjectDesigner() {
       devices,
       markups,
       floor_plans: floorPlans,
+      document_workspace: documentWorkspace,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
@@ -122,6 +127,7 @@ export default function ProjectDesigner() {
       devices,
       markups,
       floor_plans: updated,
+      document_workspace: documentWorkspace,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
@@ -518,6 +524,26 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 inline
               />
             </div>
+          )}
+          {activeTab === 'documents' && (
+            <Suspense fallback={<DocumentWorkspaceLoading />}>
+              <DocumentWorkspace
+                project={project}
+                workspace={documentWorkspace}
+                onWorkspaceChange={setLocalDocumentWorkspace}
+                onSave={(workspace) => {
+                  setLocalDocumentWorkspace(workspace);
+                  saveMutation.mutate({
+                    rooms,
+                    devices,
+                    floor_plans: floorPlans,
+                    document_workspace: workspace,
+                    analysis_results: analysisResults,
+                    status: devices.length > 0 ? "in_progress" : "draft",
+                  });
+                }}
+              />
+            </Suspense>
           )}
           {activeTab === 'canvas' && (
             <>
