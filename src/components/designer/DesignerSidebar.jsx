@@ -19,7 +19,7 @@ export const DEVICE_PALETTE = [
   { type: 'valve_tamper',     symbol: 'VS',   label: 'Valve Tamper',      color: '#0d9488', shape: 'diamond', nfpa: 'NFPA 72 §17.16' },
   { type: 'co_detector',      symbol: 'CO',   label: 'CO Detector',       color: '#65a30d', shape: 'circle',  nfpa: 'IBC §915' },
   { type: 'facp',             symbol: 'FACP', label: 'FACP',              color: '#dc2626', shape: 'panel',   nfpa: 'NFPA 72 §10.4' },
-  { type: 'duct_detector',    symbol: 'D',    label: 'Elevator Recall',   color: '#7c3aed', shape: 'circle',  nfpa: 'IBC §3006', subtype: 'elevator_recall' },
+  { type: 'elevator_recall',  symbol: 'ER',   label: 'Elevator Recall',   color: '#7c3aed', shape: 'circle',  nfpa: 'IBC §3006' },
 ];
 
 export default function DesignerSidebar({
@@ -220,6 +220,7 @@ function ToolBtn({ active, onClick, icon, label, danger }) {
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={`flex items-center gap-1.5 px-2 py-2 rounded text-xs transition-colors justify-center ${
         active
           ? danger ? 'bg-red-500/20 text-red-300 ring-1 ring-red-500/40' : 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40'
