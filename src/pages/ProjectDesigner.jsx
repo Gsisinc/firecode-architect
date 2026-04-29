@@ -24,6 +24,7 @@ import MarkupsList from "@/components/designer/MarkupsList";
 import { downloadDXF } from "@/lib/dxfExport";
 import {
   deriveDetectionGeometry,
+  detectRoomsFromImageData,
   normalizeDetectedRooms,
 } from "@/lib/floorPlanDetection";
 import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale";
@@ -152,9 +153,71 @@ export default function ProjectDesigner() {
     const imgEl = new window.Image();
     imgEl.crossOrigin = 'anonymous';
     imgEl.src = plan.image_url;
-    await new Promise(res => { imgEl.onload = res; imgEl.onerror = res; });
+    const imageLoaded = await new Promise(res => { imgEl.onload = () => res(true); imgEl.onerror = () => res(false); });
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
+
+    const applyDetectedRooms = (detectedRooms, geometry, successMessage) => {
+      const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
+      const updatedFloorPlans = updateFloorPlanScale(floorPlans, activeFloor, geometry);
+      setLocalRooms(newRooms);
+      setLocalFloorPlans(updatedFloorPlans);
+      saveMutation.mutate({
+        rooms: newRooms,
+        devices,
+        markups,
+        floor_plans: updatedFloorPlans,
+        wires,
+        document_workspace: documentWorkspace,
+        analysis_results: analysisResults,
+        status: devices.length > 0 ? "in_progress" : "draft",
+      });
+      toast.success(successMessage);
+    };
+
+    const runLocalRoomDetection = () => {
+      if (!imageLoaded) {
+        toast.error("Could not load the floor plan image for local room detection.");
+        return false;
+      }
+
+      const maxAnalysisSize = 900;
+      const ratio = Math.min(1, maxAnalysisSize / Math.max(imgW, imgH));
+      const analysisW = Math.max(1, Math.round(imgW * ratio));
+      const analysisH = Math.max(1, Math.round(imgH * ratio));
+      const canvas = document.createElement("canvas");
+      canvas.width = analysisW;
+      canvas.height = analysisH;
+      const ctx = canvas.getContext("2d");
+      let imageData;
+      try {
+        ctx.drawImage(imgEl, 0, 0, analysisW, analysisH);
+        imageData = ctx.getImageData(0, 0, analysisW, analysisH);
+      } catch (err) {
+        console.warn("Local room detection could not read floor plan image", err);
+        toast.error("Could not read the floor plan image for local room detection.");
+        return false;
+      }
+      const { rooms: localDetectedRooms, geometry: localGeometry } = detectRoomsFromImageData({
+        imageData,
+        activeFloor,
+        project,
+        scaleToWidth: imgW,
+        scaleToHeight: imgH,
+      });
+
+      if (!localDetectedRooms.length || !localGeometry) {
+        toast.error("Could not detect rooms. Try a clearer plan, or draw rooms manually and use Auto-Place Devices.");
+        return false;
+      }
+
+      applyDetectedRooms(
+        localDetectedRooms,
+        localGeometry,
+        `Detected ${localDetectedRooms.length} room regions using local blueprint detection.`
+      );
+      return true;
+    };
 
     // ── PASS 1: Read dimension callouts to establish pixel-per-foot scale ──
     let pass1;
@@ -196,7 +259,8 @@ If a dimension line cannot be read confidently, return null for that dimension. 
         }
       });
     } catch (err) {
-      toast.error(`Scale detection failed: ${err?.message || "Unknown error"}`);
+      toast.warning(`AI scale detection failed; using local room detection instead. ${err?.message || ""}`.trim());
+      runLocalRoomDetection();
       setAnalyzingFloor(false);
       return;
     }
@@ -259,7 +323,8 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
         }
       });
     } catch (err) {
-      toast.error(`Room mapping failed: ${err?.message || "Unknown error"}`);
+      toast.warning(`AI room mapping failed; using local room detection instead. ${err?.message || ""}`.trim());
+      runLocalRoomDetection();
       setAnalyzingFloor(false);
       return;
     }
@@ -276,23 +341,13 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
     });
 
     if (detectedRooms.length === 0) {
-      toast.error("Could not detect rooms. Try a clearer plan, or draw rooms manually and use Auto-Place Devices.");
+      runLocalRoomDetection();
     } else {
-      const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
-      const updatedFloorPlans = updateFloorPlanScale(floorPlans, activeFloor, geometry);
-      setLocalRooms(newRooms);
-      setLocalFloorPlans(updatedFloorPlans);
-      saveMutation.mutate({
-        rooms: newRooms,
-        devices,
-        markups,
-        floor_plans: updatedFloorPlans,
-        wires,
-        document_workspace: documentWorkspace,
-        analysis_results: analysisResults,
-        status: devices.length > 0 ? "in_progress" : "draft",
-      });
-      toast.success(`Detected ${detectedRooms.length} rooms at ${pxPerFt.toFixed(1)}px/ft scale (${scaleSource}).`);
+      applyDetectedRooms(
+        detectedRooms,
+        geometry,
+        `Detected ${detectedRooms.length} rooms at ${pxPerFt.toFixed(1)}px/ft scale (${scaleSource}).`
+      );
     }
     setAnalyzingFloor(false);
   };
