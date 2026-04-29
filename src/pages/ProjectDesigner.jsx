@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { Suspense, lazy, useState, useCallback, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -20,7 +20,6 @@ import SubmittalPackage from "@/components/designer/SubmittalPackage";
 import VoltageDropCalculator from "@/components/designer/VoltageDropCalculator";
 import ProjectDashboard from "@/components/designer/ProjectDashboard";
 import RiserDiagram from "@/components/designer/RiserDiagram";
-import DocumentWorkspace from "@/components/designer/DocumentWorkspace";
 import { downloadDXF } from "@/lib/dxfExport";
 
 import {
@@ -35,6 +34,8 @@ import {
   generateDeviceSchedule,
   generateSequenceOfOperations,
 } from "@/lib/codeEngine";
+
+const DocumentWorkspace = lazy(() => import("@/components/designer/DocumentWorkspace"));
 
 export default function ProjectDesigner() {
   const { id: projectId } = useParams();
@@ -497,22 +498,24 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
             </div>
           )}
           {activeTab === 'documents' && (
-            <DocumentWorkspace
-              project={project}
-              workspace={documentWorkspace}
-              onWorkspaceChange={setLocalDocumentWorkspace}
-              onSave={(workspace) => {
-                setLocalDocumentWorkspace(workspace);
-                saveMutation.mutate({
-                  rooms,
-                  devices,
-                  floor_plans: floorPlans,
-                  document_workspace: workspace,
-                  analysis_results: analysisResults,
-                  status: devices.length > 0 ? "in_progress" : "draft",
-                });
-              }}
-            />
+            <Suspense fallback={<DocumentWorkspaceLoading />}>
+              <DocumentWorkspace
+                project={project}
+                workspace={documentWorkspace}
+                onWorkspaceChange={setLocalDocumentWorkspace}
+                onSave={(workspace) => {
+                  setLocalDocumentWorkspace(workspace);
+                  saveMutation.mutate({
+                    rooms,
+                    devices,
+                    floor_plans: floorPlans,
+                    document_workspace: workspace,
+                    analysis_results: analysisResults,
+                    status: devices.length > 0 ? "in_progress" : "draft",
+                  });
+                }}
+              />
+            </Suspense>
           )}
           {activeTab === 'canvas' && (
             <>
