@@ -15,6 +15,7 @@ import BillOfMaterials from "@/components/designer/BillOfMaterials";
 
 import ComplianceChecklist from "@/components/designer/ComplianceChecklist";
 import BatteryPanel from "@/components/designer/BatteryPanel";
+import FloorPlanUploader from "@/components/designer/FloorPlanUploader";
 import { downloadDXF } from "@/lib/dxfExport";
 
 import {
@@ -52,6 +53,8 @@ export default function ProjectDesigner() {
   const [analysisResults, setAnalysisResults] = useState(null);
   const [localRooms, setLocalRooms] = useState(null);
   const [localDevices, setLocalDevices] = useState(null);
+  const [localFloorPlans, setLocalFloorPlans] = useState(null);
+  const [analyzingFloor, setAnalyzingFloor] = useState(false);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -62,6 +65,7 @@ export default function ProjectDesigner() {
 
   const rooms = localRooms ?? project?.rooms ?? [];
   const devices = localDevices ?? project?.devices ?? [];
+  const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
@@ -75,9 +79,77 @@ export default function ProjectDesigner() {
     saveMutation.mutate({
       rooms,
       devices,
+      floor_plans: floorPlans,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
+  };
+
+  const handleFloorPlanUploaded = (url) => {
+    const updated = [...floorPlans];
+    const idx = updated.findIndex(fp => fp.floor_number === activeFloor);
+    if (idx >= 0) updated[idx] = { ...updated[idx], image_url: url };
+    else updated.push({ floor_number: activeFloor, image_url: url });
+    setLocalFloorPlans(updated);
+  };
+
+  const handleAnalyzeFloorPlan = async () => {
+    const plan = floorPlans.find(fp => fp.floor_number === activeFloor);
+    if (!plan?.image_url) { toast.error("Upload a floor plan first"); return; }
+    setAnalyzingFloor(true);
+    toast.info("AI is analyzing the floor plan — this may take 15–30 seconds...");
+    const canvasW = 900, canvasH = 700;
+    const result = await base44.integrations.Core.InvokeLLM({
+      prompt: `You are a fire alarm design expert. Analyze this architectural floor plan image and identify all rooms/spaces visible.
+
+For each room, return:
+- name: room name/type (e.g. "Office", "Corridor", "Conference Room", "Restroom", "Storage", "Lobby", "Stairwell", "Mechanical Room", "Kitchen")
+- room_type: one of: office, corridor, conference_room, bathroom, kitchen, lobby, stairwell, mechanical_room, storage, bedroom, other
+- x, y: top-left corner position (0–${canvasW} range, scaled proportionally to where the room appears in the image)
+- width, height: room dimensions in canvas pixels (estimate based on relative size, rooms should range from 60–400px)
+- sqft: estimated square footage based on typical room sizes for this type
+
+The floor plan canvas is ${canvasW}×${canvasH} pixels. Map room positions proportionally.
+Try to identify 3–15 rooms. Focus on clearly visible spaces.
+Return ONLY a JSON array of room objects, no explanation.`,
+      file_urls: [plan.image_url],
+      response_json_schema: {
+        type: "object",
+        properties: {
+          rooms: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                room_type: { type: "string" },
+                x: { type: "number" },
+                y: { type: "number" },
+                width: { type: "number" },
+                height: { type: "number" },
+                sqft: { type: "number" }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const detectedRooms = (result?.rooms || []).map(r => ({
+      ...r,
+      id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      floor: activeFloor,
+      ceiling_height: project.default_ceiling_height || 9,
+      ceiling_type: project.default_ceiling_type || 'smooth_flat',
+    }));
+
+    if (detectedRooms.length === 0) {
+      toast.error("Could not detect rooms — try a clearer floor plan image");
+    } else {
+      setLocalRooms([...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms]);
+      toast.success(`Detected ${detectedRooms.length} rooms on Floor ${activeFloor}! Run Auto-Place to add devices.`);
+    }
+    setAnalyzingFloor(false);
   };
 
   const handleRunAnalysis = () => {
@@ -207,7 +279,7 @@ export default function ProjectDesigner() {
     setShowCalculations(true);
   };
 
-  const currentFloorPlan = project?.floor_plans?.find((fp) => fp.floor_number === activeFloor);
+  const currentFloorPlan = floorPlans.find((fp) => fp.floor_number === activeFloor);
 
   if (isLoading || !project) {
     return (
@@ -264,21 +336,24 @@ export default function ProjectDesigner() {
           {activeTab === 'canvas' && (
             <>
               <FloorPlanCanvas
-                floorPlan={currentFloorPlan}
+                floorPlanUrl={currentFloorPlan?.image_url}
                 rooms={rooms}
                 devices={devices}
-                activeFloor={activeFloor}
-                showGrid={showGrid}
-                showCircuits={showCircuits}
-                showLabels={showLabels}
-                drawingRoom={drawingRoom}
-                roomDrawType={roomDrawType}
+                layers={layers}
+                selectedTool={selectedTool}
                 snapGrid={snapGrid}
-                onAddRoom={handleAddRoom}
-                onDeviceDrag={handleDeviceDrag}
+                onDevicesChange={setLocalDevices}
+                onRoomsChange={setLocalRooms}
+                onDeviceSelect={setSelectedDevice}
                 selectedDevice={selectedDevice}
-                onSelectDevice={setSelectedDevice}
-                scale={10}
+                currentFloor={activeFloor}
+              />
+              <FloorPlanUploader
+                floorNumber={activeFloor}
+                currentUrl={currentFloorPlan?.image_url}
+                onUploaded={handleFloorPlanUploaded}
+                onAnalyze={handleAnalyzeFloorPlan}
+                analyzing={analyzingFloor}
               />
               <DevicePanel
                 device={selectedDevice}
