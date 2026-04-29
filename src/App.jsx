@@ -8,6 +8,7 @@ import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ProjectList from './pages/ProjectList';
 import ProjectSetup from './pages/ProjectSetup';
 import ProjectDesigner from './pages/ProjectDesigner';
+import CodeReference from './pages/CodeReference';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -35,6 +36,7 @@ const AuthenticatedApp = () => {
       <Route path="/project/new" element={<ProjectSetup />} />
       <Route path="/project/:id/setup" element={<ProjectSetup />} />
       <Route path="/project/:id/designer" element={<ProjectDesigner />} />
+      <Route path="/code-reference" element={<CodeReference />} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );

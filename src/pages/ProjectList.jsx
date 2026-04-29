@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Search, FolderOpen, Trash2, Clock, Building2, AlertTriangle, Flame } from 'lucide-react';
+import { Plus, Search, FolderOpen, Trash2, Clock, Building2, AlertTriangle, Flame, BookOpen } from 'lucide-react';
 import { format } from 'date-fns';
 
 const OCCUPANCY_COLORS = {
@@ -62,12 +62,21 @@ export default function ProjectList() {
               <p className="text-xs text-white/40">NFPA 72 · NFPA 101 · IBC · NEC</p>
             </div>
           </div>
-          <Button
-            onClick={() => navigate('/project/new')}
-            className="bg-orange-500 hover:bg-orange-600 text-white gap-2"
-          >
-            <Plus className="w-4 h-4" /> New Project
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => navigate('/code-reference')}
+              variant="outline"
+              className="border-white/20 text-white/60 hover:bg-white/10 gap-2 text-sm"
+            >
+              <BookOpen className="w-4 h-4" /> Code Reference
+            </Button>
+            <Button
+              onClick={() => navigate('/project/new')}
+              className="bg-orange-500 hover:bg-orange-600 text-white gap-2"
+            >
+              <Plus className="w-4 h-4" /> New Project
+            </Button>
+          </div>
         </div>
       </div>
 
