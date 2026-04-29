@@ -4,13 +4,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Calculator } from "lucide-react";
+import { Calculator, Package, Grid3x3 } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
 import FloorPlanCanvas from "@/components/designer/FloorPlanCanvas";
 import DevicePanel from "@/components/designer/DevicePanel";
 import CalculationsPanel from "@/components/designer/CalculationsPanel";
+import BillOfMaterials from "@/components/designer/BillOfMaterials";
 
 import {
   determineSystemRequirements,
@@ -38,6 +39,8 @@ export default function ProjectDesigner() {
   const [roomDrawType, setRoomDrawType] = useState("office");
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [showCalculations, setShowCalculations] = useState(false);
+  const [showBOM, setShowBOM] = useState(false);
+  const [snapGrid, setSnapGrid] = useState(false);
   const [analysisResults, setAnalysisResults] = useState(null);
   const [localRooms, setLocalRooms] = useState(null);
   const [localDevices, setLocalDevices] = useState(null);
@@ -250,6 +253,7 @@ export default function ProjectDesigner() {
             showLabels={showLabels}
             drawingRoom={drawingRoom}
             roomDrawType={roomDrawType}
+            snapGrid={snapGrid}
             onAddRoom={handleAddRoom}
             onDeviceDrag={handleDeviceDrag}
             selectedDevice={selectedDevice}
@@ -260,19 +264,38 @@ export default function ProjectDesigner() {
           <DevicePanel
             device={selectedDevice}
             onClose={() => setSelectedDevice(null)}
-            onUpdateDevice={handleUpdateDevice}
-            onDeleteDevice={handleDeleteDevice}
+            onUpdate={handleUpdateDevice}
+            onDelete={handleDeleteDevice}
           />
 
-          {/* Calculations button */}
-          <Button
-            size="sm"
-            variant="outline"
-            className="absolute bottom-4 left-4 gap-1.5 h-8 text-xs shadow-sm"
-            onClick={() => setShowCalculations(true)}
-          >
-            <Calculator className="h-3 w-3" /> Calculations
-          </Button>
+          {/* Bottom toolbar */}
+          <div className="absolute bottom-4 left-4 flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-8 text-xs shadow-sm"
+              onClick={() => setShowCalculations(true)}
+            >
+              <Calculator className="h-3 w-3" /> Calculations
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-8 text-xs shadow-sm"
+              onClick={() => setShowBOM(true)}
+            >
+              <Package className="h-3 w-3" /> BOM
+            </Button>
+            <Button
+              size="sm"
+              variant={snapGrid ? "default" : "outline"}
+              className="gap-1.5 h-8 text-xs shadow-sm"
+              onClick={() => setSnapGrid(s => !s)}
+              title="Toggle snap-to-grid"
+            >
+              <Grid3x3 className="h-3 w-3" /> {snapGrid ? 'Snap ON' : 'Snap OFF'}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -282,6 +305,14 @@ export default function ProjectDesigner() {
           devices={devices}
           analysisResults={analysisResults}
           onClose={() => setShowCalculations(false)}
+        />
+      )}
+
+      {showBOM && (
+        <BillOfMaterials
+          project={project}
+          devices={devices}
+          onClose={() => setShowBOM(false)}
         />
       )}
     </div>

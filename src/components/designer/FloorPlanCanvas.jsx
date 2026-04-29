@@ -18,6 +18,13 @@ const DEVICE_INFO = {
 
 const DEVICE_SIZE = 22;
 
+const GRID_SIZE = 20; // snap grid in world-px
+
+function snapToGrid(val, enabled) {
+  if (!enabled) return val;
+  return Math.round(val / GRID_SIZE) * GRID_SIZE;
+}
+
 export default function FloorPlanCanvas({
   floorPlanUrl,
   devices = [],
@@ -25,6 +32,7 @@ export default function FloorPlanCanvas({
   layers = {},
   selectedTool = 'select',
   selectedDeviceType = null,
+  snapGrid = false,
   onDevicesChange,
   onRoomsChange,
   onDeviceSelect,
@@ -268,8 +276,8 @@ export default function FloorPlanCanvas({
         type: devType,
         subtype: devType,
         symbol: info.symbol,
-        x: world.x,
-        y: world.y,
+        x: snapToGrid(world.x, snapGrid),
+        y: snapToGrid(world.y, snapGrid),
         floor: currentFloor,
         label: `${devType.toUpperCase().slice(0, 3)}-${Date.now().toString().slice(-4)}`,
         address: `1-${String(Math.floor(Math.random() * 999)).padStart(3, '0')}`,
@@ -312,7 +320,11 @@ export default function FloorPlanCanvas({
       const world = toWorld(e);
       onDevicesChange(devices.map(d =>
         d.id === dragging.id
-          ? { ...d, x: Math.round(world.x - dragging.startX), y: Math.round(world.y - dragging.startY) }
+          ? {
+              ...d,
+              x: snapToGrid(Math.round(world.x - dragging.startX), snapGrid),
+              y: snapToGrid(Math.round(world.y - dragging.startY), snapGrid),
+            }
           : d
       ));
     }
@@ -381,8 +393,9 @@ export default function FloorPlanCanvas({
         <button onClick={() => { setScale(1); setOffset({ x: 0, y: 0 }); }} className="w-8 h-8 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center justify-center text-xs shadow-sm">⊡</button>
         <button onClick={() => setScale(s => Math.max(0.1, s / 1.2))} className="w-8 h-8 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center justify-center text-sm font-bold shadow-sm">−</button>
       </div>
-      <div className="absolute bottom-4 left-4 bg-white/80 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500 font-mono">
-        {Math.round(scale * 100)}% · Floor {currentFloor}
+      <div className="absolute bottom-4 left-4 bg-white/80 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500 font-mono flex items-center gap-2">
+        <span>{Math.round(scale * 100)}% · Floor {currentFloor}</span>
+        {snapGrid && <span className="text-blue-500 font-semibold">SNAP {GRID_SIZE}px</span>}
       </div>
     </div>
   );
