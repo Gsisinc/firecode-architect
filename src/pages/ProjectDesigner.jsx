@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Calculator } from "lucide-react";
@@ -26,8 +26,7 @@ import {
 } from "@/lib/codeEngine";
 
 export default function ProjectDesigner() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const projectId = window.location.pathname.split("/project/")[1]?.split("/")[0];
+  const { id: projectId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 

@@ -378,7 +378,7 @@ export default function FloorPlanCanvas({
       {/* Zoom Controls */}
       <div className="absolute bottom-4 right-4 flex flex-col gap-1">
         <button onClick={() => setScale(s => Math.min(5, s * 1.2))} className="w-8 h-8 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center justify-center text-sm font-bold shadow-sm">+</button>
-        <button onClick={() => setScale(1); setOffset({ x: 0, y: 0 });} className="w-8 h-8 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center justify-center text-xs shadow-sm" onClick={() => { setScale(1); setOffset({ x: 0, y: 0 }); }}>⊡</button>
+        <button onClick={() => { setScale(1); setOffset({ x: 0, y: 0 }); }} className="w-8 h-8 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center justify-center text-xs shadow-sm">⊡</button>
         <button onClick={() => setScale(s => Math.max(0.1, s / 1.2))} className="w-8 h-8 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center justify-center text-sm font-bold shadow-sm">−</button>
       </div>
       <div className="absolute bottom-4 left-4 bg-white/80 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500 font-mono">

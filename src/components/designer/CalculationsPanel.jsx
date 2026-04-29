@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,8 @@ import { X, Battery, Zap, FileText, Cable } from "lucide-react";
 import {
   calculateBatterySizing,
   calculateNacLoading,
-  determineWiringType,
   calculateSlcCapacity,
+  determineWiringType,
   generateDeviceSchedule,
   generateSequenceOfOperations,
 } from "@/lib/codeEngine";
@@ -29,18 +29,14 @@ const TYPE_LABELS = {
 };
 
 export default function CalculationsPanel({ project, devices, analysisResults, onClose }) {
-  const battery = calculateBatterySizing(
-    devices.length,
-    analysisResults?.battery_standby_hours || 24,
-    analysisResults?.battery_alarm_minutes || 5
-  );
+  const battery = calculateBatterySizing(devices.length, 24, 5);
   const nacLoading = calculateNacLoading(devices);
   const wiring = determineWiringType(project);
   const slcCapacity = calculateSlcCapacity(devices.length);
   const schedule = generateDeviceSchedule(devices);
   const sequence = analysisResults
     ? generateSequenceOfOperations(analysisResults, project)
-    : "Run code analysis first";
+    : "Run code analysis first to generate sequence.";
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -82,8 +78,8 @@ export default function CalculationsPanel({ project, devices, analysisResults, o
                       ["Alarm Current", `${battery.alarm_current_mA} mA`],
                       ["Standby Ah", `${battery.standby_Ah} Ah`],
                       ["Alarm Ah", `${battery.alarm_Ah} Ah`],
-                      ["Derating Factor", `×${battery.derating_factor}`],
-                      ["Total Required", `${battery.total_Ah} Ah`],
+                      ["Derating ×1.20", `${battery.raw_Ah} → ${battery.required_Ah} Ah`],
+                      ["Required Ah", `${battery.required_Ah} Ah`],
                     ].map(([label, value]) => (
                       <div key={label} className="bg-muted rounded-lg p-3">
                         <p className="text-[10px] text-muted-foreground">{label}</p>
@@ -92,8 +88,9 @@ export default function CalculationsPanel({ project, devices, analysisResults, o
                     ))}
                   </div>
                   <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
-                    <p className="text-xs font-medium">Recommended</p>
+                    <p className="text-xs font-medium">Recommended Battery</p>
                     <p className="text-sm font-mono mt-1">{battery.recommended_batteries}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">{battery.code_ref}</p>
                   </div>
                 </div>
               </TabsContent>
@@ -163,6 +160,7 @@ export default function CalculationsPanel({ project, devices, analysisResults, o
                       ["Conductor Size", wiring.conductor_size],
                       ["Configuration", wiring.conductor_count],
                       ["Survivability", wiring.survivability_level],
+                      ["Circuit Class", wiring.circuit_class],
                       ["CI Cable", wiring.ci_cable_required ? "Required" : "Not Required"],
                     ].map(([label, value]) => (
                       <div key={label} className="bg-muted rounded-lg p-3">
@@ -172,7 +170,7 @@ export default function CalculationsPanel({ project, devices, analysisResults, o
                     ))}
                   </div>
                   <div className="space-y-1.5 mt-3">
-                    {wiring.notes.map((note, i) => (
+                    {(wiring.notes || []).map((note, i) => (
                       <p key={i} className="text-xs text-muted-foreground">• {note}</p>
                     ))}
                   </div>
@@ -198,7 +196,7 @@ export default function CalculationsPanel({ project, devices, analysisResults, o
                       {schedule.map((item) => (
                         <TableRow key={item.item}>
                           <TableCell className="text-[10px] font-mono">{item.item}</TableCell>
-                          <TableCell className="text-[10px]">{TYPE_LABELS[item.device_type] || item.device_type}</TableCell>
+                          <TableCell className="text-[10px]">{TYPE_LABELS[item.device_type] || item.type_label || item.device_type}</TableCell>
                           <TableCell className="text-[10px] font-mono">{item.address}</TableCell>
                           <TableCell className="text-[10px]">{item.zone}</TableCell>
                           <TableCell className="text-[10px]">{item.floor}</TableCell>

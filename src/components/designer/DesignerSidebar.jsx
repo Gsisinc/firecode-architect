@@ -183,7 +183,8 @@ export default function DesignerSidebar({
   );
 }
 
-function SidebarSection({ title, icon: Icon, open, onToggle, children }) {
+function SidebarSection({ title, icon: SectionIcon, open, onToggle, children }) {
+  const Icon = SectionIcon;
   return (
     <div className="border-b border-white/5">
       <button

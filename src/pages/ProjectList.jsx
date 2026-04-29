@@ -111,7 +111,7 @@ export default function ProjectList() {
               <div
                 key={project.id}
                 className="group relative bg-white/5 border border-white/10 rounded-xl p-5 hover:border-orange-500/40 hover:bg-white/8 transition-all cursor-pointer"
-                onClick={() => navigate(`/project/${project.id}/designer`)}
+                onClick={() => navigate(`/project/${project.id}/design`)}
               >
                 <div className="flex items-start justify-between mb-3">
                   <Badge className={OCCUPANCY_COLORS[project.occupancy_group] || 'bg-gray-500/20 text-gray-300'}>

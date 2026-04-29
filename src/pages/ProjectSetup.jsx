@@ -70,7 +70,7 @@ export default function ProjectSetup() {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       const projectId = result?.id || id;
       toast({ title: 'Project saved', description: 'Code analysis complete.' });
-      navigate(`/project/${projectId}/designer`);
+      navigate(`/project/${projectId}/design`);
     },
   });
 
