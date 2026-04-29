@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { DeviceSymbol } from './DesignerSidebar';
+import { routeCircuits, drawCircuitRoutes } from '@/lib/circuitRouter';
 
 const DEVICE_INFO = {
   smoke_detector: { color: '#3b82f6', shape: 'circle', symbol: 'S' },
@@ -38,8 +39,10 @@ export default function FloorPlanCanvas({
   onDeviceSelect,
   selectedDevice,
   currentFloor,
+  canvasRef: externalCanvasRef,
 }) {
-  const canvasRef = useRef(null);
+  const internalCanvasRef = useRef(null);
+  const canvasRef = externalCanvasRef || internalCanvasRef;
   const containerRef = useRef(null);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -147,29 +150,10 @@ export default function FloorPlanCanvas({
       ctx.setLineDash([]);
     }
 
-    // Circuit lines
+    // Circuit routes (MST-based routing engine)
     if (layers.circuits) {
-      const floorDevices = devices.filter(d => d.floor === currentFloor);
-      const byCircuit = {};
-      floorDevices.forEach(d => {
-        const c = d.circuit || 'default';
-        if (!byCircuit[c]) byCircuit[c] = [];
-        byCircuit[c].push(d);
-      });
-      const circuitColors = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444'];
-      Object.entries(byCircuit).forEach(([circuit, devs], ci) => {
-        if (devs.length < 2) return;
-        ctx.strokeStyle = circuitColors[ci % circuitColors.length] + '60';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        devs.forEach((d, i) => {
-          if (i === 0) ctx.moveTo(d.x, d.y);
-          else ctx.lineTo(d.x, d.y);
-        });
-        ctx.stroke();
-        ctx.setLineDash([]);
-      });
+      const routes = routeCircuits(devices, rooms, currentFloor);
+      drawCircuitRoutes(ctx, routes, layers.labels !== false);
     }
 
     // Devices

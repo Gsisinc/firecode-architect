@@ -1,10 +1,10 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -16,6 +16,8 @@ import BillOfMaterials from "@/components/designer/BillOfMaterials";
 import ComplianceChecklist from "@/components/designer/ComplianceChecklist";
 import BatteryPanel from "@/components/designer/BatteryPanel";
 import FloorPlanUploader from "@/components/designer/FloorPlanUploader";
+import SubmittalPackage from "@/components/designer/SubmittalPackage";
+import VoltageDropCalculator from "@/components/designer/VoltageDropCalculator";
 import { downloadDXF } from "@/lib/dxfExport";
 
 import {
@@ -49,7 +51,9 @@ export default function ProjectDesigner() {
   const [snapGrid, setSnapGrid] = useState(false);
   const [selectedTool, setSelectedTool] = useState('select');
   const [layers, setLayers] = useState({ grid: false, rooms: true, circuits: true, labels: true });
-  const [rightPanel, setRightPanel] = useState(null); // 'checklist' | 'battery' | null
+  const [rightPanel, setRightPanel] = useState(null); // 'checklist' | 'battery' | 'voltagedrop' | null
+  const [showSubmittal, setShowSubmittal] = useState(false);
+  const canvasRef = useRef(null);
   const [analysisResults, setAnalysisResults] = useState(null);
   const [localRooms, setLocalRooms] = useState(null);
   const [localDevices, setLocalDevices] = useState(null);
@@ -347,6 +351,7 @@ Return ONLY a JSON array of room objects, no explanation.`,
                 onDeviceSelect={setSelectedDevice}
                 selectedDevice={selectedDevice}
                 currentFloor={activeFloor}
+                canvasRef={canvasRef}
               />
               <FloorPlanUploader
                 floorNumber={activeFloor}
@@ -391,16 +396,31 @@ Return ONLY a JSON array of room objects, no explanation.`,
                   className="gap-1.5 h-8 text-xs shadow-sm"
                   onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')}
                 >
-                  <Battery className="h-3 w-3" /> Battery Calc
+                  <Battery className="h-3 w-3" /> Battery
+                </Button>
+                <Button
+                  size="sm"
+                  variant={rightPanel === 'voltagedrop' ? "default" : "outline"}
+                  className="gap-1.5 h-8 text-xs shadow-sm"
+                  onClick={() => setRightPanel(p => p === 'voltagedrop' ? null : 'voltagedrop')}
+                >
+                  <Zap className="h-3 w-3" /> Voltage Drop
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   className="gap-1.5 h-8 text-xs shadow-sm border-blue-200 text-blue-700 hover:bg-blue-50"
                   onClick={() => downloadDXF(project, rooms, devices, activeFloor)}
-                  title="Export current floor to DXF (AutoCAD compatible)"
                 >
-                  <FileDown className="h-3 w-3" /> Export DXF
+                  <FileDown className="h-3 w-3" /> DXF
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 h-8 text-xs shadow-sm border-orange-200 text-orange-700 hover:bg-orange-50"
+                  onClick={() => setShowSubmittal(true)}
+                >
+                  <BookOpen className="h-3 w-3" /> Submittal PDF
                 </Button>
               </div>
             </>
@@ -423,6 +443,12 @@ Return ONLY a JSON array of room objects, no explanation.`,
               >
                 <Battery className="w-3.5 h-3.5" /> Battery
               </button>
+              <button
+                onClick={() => setRightPanel('voltagedrop')}
+                className={`flex items-center gap-1.5 flex-1 py-2 px-3 text-xs font-medium transition-colors ${rightPanel === 'voltagedrop' ? 'bg-white text-slate-900 border-b-2 border-yellow-500' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <Zap className="w-3.5 h-3.5" /> V-Drop
+              </button>
               <button onClick={() => setRightPanel(null)} className="p-2 text-slate-400 hover:text-slate-600">
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -438,6 +464,9 @@ Return ONLY a JSON array of room objects, no explanation.`,
               )}
               {rightPanel === 'battery' && (
                 <BatteryPanel devices={devices} />
+              )}
+              {rightPanel === 'voltagedrop' && (
+                <VoltageDropCalculator devices={devices} />
               )}
             </div>
           </div>
@@ -458,6 +487,17 @@ Return ONLY a JSON array of room objects, no explanation.`,
           project={project}
           devices={devices}
           onClose={() => setShowBOM(false)}
+        />
+      )}
+
+      {showSubmittal && (
+        <SubmittalPackage
+          project={project}
+          devices={devices}
+          rooms={rooms}
+          analysisResults={analysisResults}
+          canvasRef={canvasRef}
+          onClose={() => setShowSubmittal(false)}
         />
       )}
     </div>
