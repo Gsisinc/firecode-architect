@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 import { Plus, Search, FolderOpen, Trash2, Clock, Building2, AlertTriangle, Flame, BookOpen, ChevronRight, ShieldCheck, Layers } from 'lucide-react';
 import { format } from 'date-fns';
-import { FIRE_ALARM_DESIGN_DISCLAIMER } from '@/lib/productInfo';
+import { CODE_SAFETY_DISCLAIMER } from '@/lib/productInfo';
 
 const OCCUPANCY_CONFIG = {
   'A':         { bg: 'bg-purple-50',   text: 'text-purple-700',   border: 'border-purple-200',   dot: 'bg-purple-500',   accent: 'bg-purple-500',  label: 'Assembly' },
@@ -127,7 +127,7 @@ export default function ProjectList() {
 
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          {FIRE_ALARM_DESIGN_DISCLAIMER}
+          {CODE_SAFETY_DISCLAIMER}
         </div>
 
         {/* Search */}

@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { determineSystemRequirements } from '@/lib/codeEngine';
-import { CODE_COMPLIANCE_DISCLAIMER } from '@/lib/productInfo';
-import { Flame, ArrowLeft, Upload, Plus, Trash2, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { CODE_SAFETY_DISCLAIMER } from '@/lib/productInfo';
+import { Flame, ArrowLeft, Upload, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
 const OCCUPANCY_GROUPS = ['A', 'B', 'E', 'F', 'H', 'I-1', 'I-2', 'I-3', 'I-4', 'M', 'R-1', 'R-2', 'R-3', 'R-4', 'S', 'High Rise'];
@@ -432,7 +432,7 @@ function ComplianceNotice() {
     <div className="mb-4 rounded-lg border border-amber-400/20 bg-amber-500/10 p-3 text-xs text-amber-100">
       <div className="flex gap-2">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-        <p>{CODE_COMPLIANCE_DISCLAIMER}</p>
+        <p>{CODE_SAFETY_DISCLAIMER}</p>
       </div>
     </div>
   );
