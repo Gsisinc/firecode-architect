@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Download, Flame, CheckCircle2, Loader2, FileText, Table, GitBranch, Layout, BookOpen } from 'lucide-react';
+import { ArrowLeft, Save, Download, Flame, CheckCircle2, Loader2, FileText, Table, GitBranch, Layout, BookOpen, LayoutDashboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { generateSequenceOfOperations, generateDeviceSchedule, calculateBatterySizing, calculateNacLoading, calculateSlcCapacity, determineWiringType, calculateVoltageDrop } from '@/lib/codeEngine';
 import jsPDF from 'jspdf';
@@ -403,6 +403,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     { id: 'canvas', label: 'Floor Plan', icon: Layout },
     { id: 'riser', label: 'Riser Diagram', icon: GitBranch },
     { id: 'calculations', label: 'Calculations', icon: Table },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   ];
 
   return (

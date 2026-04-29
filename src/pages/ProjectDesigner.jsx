@@ -18,6 +18,8 @@ import BatteryPanel from "@/components/designer/BatteryPanel";
 import FloorPlanUploader from "@/components/designer/FloorPlanUploader";
 import SubmittalPackage from "@/components/designer/SubmittalPackage";
 import VoltageDropCalculator from "@/components/designer/VoltageDropCalculator";
+import ProjectDashboard from "@/components/designer/ProjectDashboard";
+import RiserDiagram from "@/components/designer/RiserDiagram";
 import { downloadDXF } from "@/lib/dxfExport";
 
 import {
@@ -62,6 +64,7 @@ export default function ProjectDesigner() {
   const [localDevices, setLocalDevices] = useState(null);
   const [localFloorPlans, setLocalFloorPlans] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
+  const [wires, setWires] = useState([]);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -370,9 +373,19 @@ Return ONLY a JSON object with a "rooms" array.`,
         />
 
         <div className="flex-1 relative overflow-hidden">
+          {activeTab === 'dashboard' && (
+            <div className="w-full h-full overflow-auto">
+              <ProjectDashboard
+                project={project}
+                devices={devices}
+                rooms={rooms}
+                analysisResults={analysisResults}
+              />
+            </div>
+          )}
           {activeTab === 'riser' && (
-            <div className="w-full h-full overflow-auto bg-white p-6">
-              <p className="text-slate-500 text-sm">Riser Diagram — switch to the Riser Diagram tab view here.</p>
+            <div className="w-full h-full overflow-auto">
+              <RiserDiagram project={project} devices={devices} />
             </div>
           )}
           {activeTab === 'calculations' && (
@@ -402,6 +415,8 @@ Return ONLY a JSON object with a "rooms" array.`,
                 currentFloor={activeFloor}
                 canvasRef={canvasRef}
                 onRoomNameRequest={handleRoomNameRequest}
+                wires={wires}
+                onWiresChange={setWires}
               />
               <FloorPlanUploader
                 floorNumber={activeFloor}

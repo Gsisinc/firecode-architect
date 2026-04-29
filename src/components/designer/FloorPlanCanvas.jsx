@@ -192,6 +192,8 @@ export default function FloorPlanCanvas({
   currentFloor,
   canvasRef: externalCanvasRef,
   onRoomNameRequest,
+  wires = [],
+  onWiresChange,
 }) {
   const internalCanvasRef = useRef(null);
   const canvasRef = externalCanvasRef || internalCanvasRef;
@@ -200,6 +202,8 @@ export default function FloorPlanCanvas({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(null);
   const [drawingRoom, setDrawingRoom] = useState(null);
+  const [wireStart, setWireStart] = useState(null); // device id
+  const [mouseWorld, setMouseWorld] = useState(null);
   const [floorImg, setFloorImg] = useState(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
 
@@ -339,6 +343,49 @@ export default function FloorPlanCanvas({
       } catch(e) { /* circuit routing optional */ }
     }
 
+    // Wires
+    if (wires && wires.filter) {
+      wires.filter(w => w.floor === currentFloor).forEach(wire => {
+        const a = devices.find(d => d.id === wire.from);
+        const b = devices.find(d => d.id === wire.to);
+        if (!a || !b || a.x == null || b.x == null) return;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = wire.type === 'NAC' ? '#ea580c' : '#2563eb';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Wire length label
+        const dist = Math.hypot(b.x - a.x, b.y - a.y);
+        const ft = Math.round(dist * 0.5); // rough scale: 1px ≈ 0.5ft
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fillRect(mx - 20, my - 9, 40, 13);
+        ctx.fillStyle = wire.type === 'NAC' ? '#ea580c' : '#2563eb';
+        ctx.font = '8px Inter';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`~${ft}ft`, mx, my);
+      });
+    }
+
+    // Live wire preview
+    if (wireStart && mouseWorld) {
+      const a = devices.find(d => d.id === wireStart);
+      if (a && a.x != null) {
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(mouseWorld.x, mouseWorld.y);
+        ctx.strokeStyle = 'rgba(37,99,235,0.6)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
     // Devices — NFPA 170 symbols
     devices.filter(d => d.floor === currentFloor).forEach(device => {
       if (device.x == null || device.y == null) return;
@@ -373,7 +420,7 @@ export default function FloorPlanCanvas({
     });
 
     ctx.restore();
-  }, [floorImg, devices, rooms, layers, scale, offset, selectedDevice, drawingRoom, canvasSize, currentFloor]);
+  }, [floorImg, devices, rooms, layers, scale, offset, selectedDevice, drawingRoom, canvasSize, currentFloor, wires, wireStart, mouseWorld]);
 
   const toWorld = useCallback((e) => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -413,6 +460,27 @@ export default function FloorPlanCanvas({
       if (hit) onDevicesChange(devices.filter(d => d.id !== hit.id));
       return;
     }
+    if (selectedTool === 'wire') {
+      const floorDevs = devices.filter(d => d.floor === currentFloor);
+      const hit = [...floorDevs].reverse().find(d =>
+        d.x != null && Math.hypot(world.x - d.x, world.y - d.y) < DEVICE_RADIUS + 6
+      );
+      if (hit) {
+        if (!wireStart) {
+          setWireStart(hit.id);
+        } else if (wireStart !== hit.id) {
+          const isNAC = ['horn_strobe','strobe','speaker','horn'].includes(hit.type) || ['horn_strobe','strobe','speaker','horn'].includes(devices.find(d=>d.id===wireStart)?.type);
+          const newWire = { id: `wire-${Date.now()}`, from: wireStart, to: hit.id, floor: currentFloor, type: isNAC ? 'NAC' : 'SLC' };
+          if (onWiresChange) onWiresChange([...(wires||[]), newWire]);
+          setWireStart(null);
+        } else {
+          setWireStart(null);
+        }
+      } else {
+        setWireStart(null);
+      }
+      return;
+    }
     if (selectedTool?.startsWith('place_device_')) {
       const devType = selectedTool.replace('place_device_', '');
       const sym = NFPA_SYMBOLS[devType] || NFPA_SYMBOLS['smoke_detector'];
@@ -449,6 +517,9 @@ export default function FloorPlanCanvas({
   }, [selectedTool, toWorld, offset, devices, currentFloor, onDevicesChange, onDeviceSelect, snapGrid]);
 
   const handleMouseMove = useCallback((e) => {
+    if (selectedTool === 'wire') {
+      setMouseWorld(toWorld(e));
+    }
     if (drawingRoom && !dragging) {
       const world = toWorld(e);
       setDrawingRoom(r => r ? { ...r, ex: world.x, ey: world.y } : null);
@@ -513,6 +584,7 @@ export default function FloorPlanCanvas({
     if (selectedTool === 'pan' || dragging?.type === 'pan') return dragging ? 'grabbing' : 'grab';
     if (selectedTool === 'room') return 'crosshair';
     if (selectedTool === 'delete') return 'not-allowed';
+    if (selectedTool === 'wire') return wireStart ? 'cell' : 'crosshair';
     if (selectedTool?.startsWith('place_device_')) return 'copy';
     return 'default';
   };
@@ -550,6 +622,9 @@ export default function FloorPlanCanvas({
         )}
         {selectedTool === 'delete' && (
           <><span className="text-gray-300">|</span><span className="text-red-500 font-semibold">DELETE — click device</span></>
+        )}
+        {selectedTool === 'wire' && (
+          <><span className="text-gray-300">|</span><span className="text-blue-500 font-semibold">{wireStart ? 'WIRE — click target device' : 'WIRE — click source device'}</span></>
         )}
       </div>
     </div>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   Layers, Zap, Download, ChevronDown, ChevronRight,
   Eye, EyeOff, LayoutList, AlertTriangle, CheckCircle2,
-  MousePointer, Square, Hand, Trash2, Settings2
+  MousePointer, Square, Hand, Trash2, Settings2, Cable
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -75,6 +75,7 @@ export default function DesignerSidebar({
             <ToolBtn active={selectedTool === 'select'} onClick={() => onToolSelect('select')} icon={<MousePointer className="w-3 h-3" />} label="Select" />
             <ToolBtn active={selectedTool === 'pan'} onClick={() => onToolSelect('pan')} icon={<Hand className="w-3 h-3" />} label="Pan" />
             <ToolBtn active={selectedTool === 'room'} onClick={() => onToolSelect('room')} icon={<Square className="w-3 h-3" />} label="Room" />
+            <ToolBtn active={selectedTool === 'wire'} onClick={() => onToolSelect('wire')} icon={<Cable className="w-3 h-3" />} label="Wire" />
             <ToolBtn active={selectedTool === 'delete'} onClick={() => onToolSelect('delete')} icon={<Trash2 className="w-3 h-3" />} label="Delete" danger />
           </div>
         </SidebarSection>
