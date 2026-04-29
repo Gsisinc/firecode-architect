@@ -563,7 +563,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 canvasRef={canvasRef}
                 onRoomNameRequest={handleRoomNameRequest}
                 wires={wires}
-                onWiresChange={setWires}
+                onWiresChange={setLocalWires}
                 markups={markups}
                 onMarkupsChange={setLocalMarkups}
                 pxPerFt={10}
