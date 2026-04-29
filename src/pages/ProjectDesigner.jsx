@@ -42,6 +42,8 @@ export default function ProjectDesigner() {
   const [showCalculations, setShowCalculations] = useState(false);
   const [showBOM, setShowBOM] = useState(false);
   const [snapGrid, setSnapGrid] = useState(false);
+  const [selectedTool, setSelectedTool] = useState('select');
+  const [layers, setLayers] = useState({ grid: false, rooms: true, circuits: true, labels: true });
   const [analysisResults, setAnalysisResults] = useState(null);
   const [localRooms, setLocalRooms] = useState(null);
   const [localDevices, setLocalDevices] = useState(null);
@@ -223,21 +225,17 @@ export default function ProjectDesigner() {
       <div className="flex flex-1 overflow-hidden">
         <DesignerSidebar
           project={project}
-          analysisResults={analysisResults}
-          activeFloor={activeFloor}
-          setActiveFloor={setActiveFloor}
-          showGrid={showGrid}
-          setShowGrid={setShowGrid}
-          showCircuits={showCircuits}
-          setShowCircuits={setShowCircuits}
-          showLabels={showLabels}
-          setShowLabels={setShowLabels}
-          drawingRoom={drawingRoom}
-          setDrawingRoom={setDrawingRoom}
-          roomDrawType={roomDrawType}
-          setRoomDrawType={setRoomDrawType}
-          onRunAnalysis={handleRunAnalysis}
+          devices={devices}
+          currentFloor={activeFloor}
+          onFloorChange={setActiveFloor}
+          layers={layers}
+          onToggleLayer={(key) => setLayers(prev => ({ ...prev, [key]: !prev[key] }))}
+          selectedTool={selectedTool}
+          onToolSelect={setSelectedTool}
+          onAddDeviceType={() => {}}
+          requirements={analysisResults}
           onAutoPlace={handleAutoPlace}
+          onExport={() => setShowBOM(true)}
           rooms={rooms}
         />
 
