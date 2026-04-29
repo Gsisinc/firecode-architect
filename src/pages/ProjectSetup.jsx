@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { determineSystemRequirements } from '@/lib/codeEngine';
-import { Flame, ArrowLeft, Upload, Plus, Trash2, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { Flame, ArrowLeft, Upload, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
 const OCCUPANCY_GROUPS = ['A', 'B', 'E', 'F', 'H', 'I-1', 'I-2', 'I-3', 'I-4', 'M', 'R-1', 'R-2', 'R-3', 'R-4', 'S', 'High Rise'];
@@ -24,7 +24,6 @@ export default function ProjectSetup() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const fileRefs = useRef({});
 
   const [form, setForm] = useState({
     name: '',
@@ -54,10 +53,11 @@ export default function ProjectSetup() {
     queryKey: ['project', id],
     queryFn: () => base44.entities.Project.filter({ id }),
     enabled: !isNew,
-    onSuccess: (data) => {
-      if (data?.[0]) setForm(data[0]);
-    },
   });
+
+  useEffect(() => {
+    if (existingProject?.[0]) setForm(existingProject[0]);
+  }, [existingProject]);
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
@@ -70,7 +70,7 @@ export default function ProjectSetup() {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       const projectId = result?.id || id;
       toast({ title: 'Project saved', description: 'Code analysis complete.' });
-      navigate(`/project/${projectId}/design`);
+      navigate(`/project/${projectId}/designer`);
     },
   });
 
