@@ -1,24 +1,37 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { FileText, ImagePlus, Loader2, Sparkles, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { extractPdfPageInfo, renderPdfPageToDataUrl } from "@/lib/documentEngine";
+import { extractPdfPageInfo } from "@/lib/documentEngine";
 
 const UPLOAD_STEPS = {
-  idle: { label: "", progress: 0 },
-  uploading: { label: "Uploading file...", progress: 35 },
-  processing: { label: "Reading PDF pages...", progress: 75 },
-  saving: { label: "Mapping sheets to floors...", progress: 92 },
+  idle: { label: "", ceiling: 0 },
+  uploading: { label: "Uploading file...", ceiling: 65 },
+  processing: { label: "Reading PDF sheet list...", ceiling: 92 },
+  saving: { label: "Saving sheet set...", ceiling: 98 },
 };
 
 export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded, onAnalyze, analyzing }) {
   const fileRef = useRef();
   const [uploadState, setUploadState] = useState("idle");
   const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
   const uploading = uploadState !== "idle";
   const uploadStatus = UPLOAD_STEPS[uploadState] || UPLOAD_STEPS.idle;
+
+  useEffect(() => {
+    if (!uploading) return undefined;
+    const timer = window.setInterval(() => {
+      setUploadProgress((current) => {
+        const ceiling = uploadStatus.ceiling || 98;
+        if (current >= ceiling) return current;
+        return Math.min(ceiling, current + Math.max(0.5, (ceiling - current) * 0.08));
+      });
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [uploadStatus.ceiling, uploading]);
 
   const resetInput = () => {
     if (fileRef.current) fileRef.current.value = "";
@@ -28,28 +41,23 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
     if (!file || uploading) return;
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     setUploadFileName(file.name);
+    setUploadProgress(2);
     setUploadState("uploading");
     try {
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      setUploadProgress(66);
       if (isPdf) {
         setUploadState("processing");
         const localUrl = URL.createObjectURL(file);
         let metadata;
         try {
           metadata = await extractPdfPageInfo(localUrl);
-          metadata.pages = await Promise.all(metadata.pages.map(async (page) => {
-            const preview = await renderPdfPageToDataUrl(localUrl, page.page, 2);
-            return {
-              ...page,
-              previewUrl: preview.dataUrl,
-              previewWidth: preview.width,
-              previewHeight: preview.height,
-            };
-          }));
+          setUploadProgress(90);
         } finally {
           URL.revokeObjectURL(localUrl);
         }
         setUploadState("saving");
+        setUploadProgress(96);
         await Promise.resolve(onUploaded({
           fileUrl: file_url,
           fileType: file.type || "application/pdf",
@@ -58,15 +66,18 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
           pages: metadata.pages,
           localPdfUrl: localUrl,
         }));
-        toast.success(`Imported ${metadata.pageCount} PDF page${metadata.pageCount === 1 ? "" : "s"} as floor plan sheet${metadata.pageCount === 1 ? "" : "s"}`);
+        setUploadProgress(100);
+        toast.success(`Imported ${metadata.pageCount} PDF sheet${metadata.pageCount === 1 ? "" : "s"} for assignment`);
       } else {
         setUploadState("saving");
+        setUploadProgress(94);
         await Promise.resolve(onUploaded({
           fileUrl: file_url,
           fileType: file.type || "image/*",
           fileName: file.name,
           pageCount: 1,
         }));
+        setUploadProgress(100);
         toast.success(`Floor ${floorNumber} plan uploaded`);
       }
     } catch (error) {
@@ -74,6 +85,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
     } finally {
       setUploadState("idle");
       setUploadFileName("");
+      setUploadProgress(0);
       resetInput();
     }
   };
@@ -115,7 +127,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
             {analyzing ? "Analyzing..." : "AI: Detect Rooms"}
           </Button>
         </div>
-        {uploading && <UploadProgressCard fileName={uploadFileName} status={uploadStatus} />}
+        {uploading && <UploadProgressCard fileName={uploadFileName} status={uploadStatus} progress={uploadProgress} />}
         {input}
       </div>
     );
@@ -136,7 +148,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
           }}
         >
           {uploading ? (
-            <UploadProgressCard fileName={uploadFileName} status={uploadStatus} inline />
+            <UploadProgressCard fileName={uploadFileName} status={uploadStatus} progress={uploadProgress} inline />
           ) : (
             <>
               <div className="flex items-center gap-2 text-slate-400">
@@ -146,7 +158,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
               <div>
                 <p className="text-sm font-medium text-slate-700">Upload Floor Plan</p>
                 <p className="text-xs text-slate-400 mt-0.5">PDF, PNG, JPG - drag & drop or click</p>
-                <p className="text-[10px] text-slate-400 mt-1">Multi-page PDFs map pages to consecutive floors starting at floor {floorNumber}</p>
+                <p className="text-[10px] text-slate-400 mt-1">Multi-page PDFs import as sheets for manual floor/type assignment</p>
               </div>
             </>
           )}
@@ -160,7 +172,8 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
   );
 }
 
-function UploadProgressCard({ fileName, status, inline = false }) {
+function UploadProgressCard({ fileName, status, progress, inline = false }) {
+  const displayedProgress = Math.max(1, Math.min(100, Math.round(progress || 0)));
   return (
     <div className={`${inline ? "w-full border-0 shadow-none p-0" : "w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg"} text-left`}>
       <div className="flex items-center gap-2">
@@ -169,9 +182,9 @@ function UploadProgressCard({ fileName, status, inline = false }) {
           <p className="truncate text-xs font-semibold text-slate-700">{fileName || "Floor plan"}</p>
           <p className="text-[11px] text-slate-500">{status.label}</p>
         </div>
-        <span className="text-[11px] font-mono text-slate-500">{status.progress}%</span>
+        <span className="text-[11px] font-mono text-slate-500">{displayedProgress}%</span>
       </div>
-      <Progress value={status.progress} className="mt-2 h-1.5" />
+      <Progress value={displayedProgress} className="mt-2 h-1.5" />
     </div>
   );
 }

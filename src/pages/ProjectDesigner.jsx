@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Files } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -83,11 +83,14 @@ export default function ProjectDesigner() {
   const [localFloorPlans, setLocalFloorPlans] = useState(null);
   const [localMarkups, setLocalMarkups] = useState(null);
   const [localLayoutZones, setLocalLayoutZones] = useState(null);
+  const [localPlanSheets, setLocalPlanSheets] = useState(null);
   const [localDocumentWorkspace, setLocalDocumentWorkspace] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
   const [localWires, setLocalWires] = useState(null);
   const [selectedCircuitType, setSelectedCircuitType] = useState('SLC');
   const [selectedCircuitId, setSelectedCircuitId] = useState('SLC-1');
+  const [selectedSheetId, setSelectedSheetId] = useState(null);
+  const [customPlanType, setCustomPlanType] = useState('');
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -103,6 +106,10 @@ export default function ProjectDesigner() {
   const layoutZones = localLayoutZones ?? project?.layout_zones ?? [];
   const documentWorkspace = localDocumentWorkspace ?? project?.document_workspace ?? null;
   const wires = localWires ?? project?.wires ?? [];
+  const planSheets = localPlanSheets ?? project?.plan_sheets ?? derivePlanSheets(floorPlans);
+  const planCategories = project?.plan_categories ?? [];
+  const selectedSheet = planSheets.find(sheet => sheet.id === selectedSheetId) || planSheets[0] || null;
+  const planTypes = Array.from(new Set(['Architectural', 'Fire Alarm', 'Electrical', 'Life Safety', 'Custom', ...planCategories, ...floorPlans.map(plan => plan.plan_type).filter(Boolean)]));
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
@@ -112,6 +119,23 @@ export default function ProjectDesigner() {
     },
   });
 
+  const saveProjectPatch = (patch) => {
+    saveMutation.mutate({
+      rooms,
+      devices,
+      markups,
+      layout_zones: layoutZones,
+      floor_plans: patch.floor_plans ?? floorPlans,
+      plan_sheets: patch.plan_sheets ?? planSheets,
+      plan_categories: patch.plan_categories ?? planCategories,
+      document_workspace: documentWorkspace,
+      wires,
+      analysis_results: analysisResults,
+      status: devices.length > 0 ? "in_progress" : "draft",
+      ...patch,
+    });
+  };
+
   const handleSave = () => {
     saveMutation.mutate({
       rooms,
@@ -119,6 +143,8 @@ export default function ProjectDesigner() {
       markups,
       layout_zones: layoutZones,
       floor_plans: floorPlans,
+      plan_sheets: planSheets,
+      plan_categories: planCategories,
       document_workspace: documentWorkspace,
       wires,
       analysis_results: analysisResults,
@@ -127,67 +153,48 @@ export default function ProjectDesigner() {
   };
 
   const handleFloorPlanUploaded = (upload) => {
-    const inferFloorNumber = (page, index) => {
-      const text = page?.text || '';
-      const floorMatch = text.match(/\b(?:floor|level|fl\.?)\s*([0-9]{1,2})\b/i);
-      if (floorMatch) return Number(floorMatch[1]);
-      const sheetMatch = text.match(/\b(?:first|second|third|fourth|fifth)\s+floor\b/i);
-      if (sheetMatch) {
-        const words = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5 };
-        return words[sheetMatch[1].toLowerCase()] || activeFloor + index;
-      }
-      return activeFloor + index;
-    };
-    const uploadedPlans = Array.isArray(upload?.floorPlans)
-      ? upload.floorPlans
-      : upload?.fileType === 'application/pdf'
-        ? Array.from({ length: upload.pageCount || 1 }, (_, index) => ({
-            floor_number: inferFloorNumber(upload.pages?.[index], index),
-            image_url: upload.fileUrl,
-            file_url: upload.fileUrl,
-            file_type: upload.fileType,
-            file_name: upload.fileName,
-            page_number: index + 1,
-            page_count: upload.pageCount || 1,
-            sheet_text: upload.pages?.[index]?.text || '',
-            rendered_image_url: upload.pages?.[index]?.previewUrl,
-          }))
-        : [{
-            floor_number: activeFloor,
-            image_url: typeof upload === 'string' ? upload : upload?.image_url || upload?.fileUrl || upload?.file_url,
-            file_url: typeof upload === 'string' ? upload : upload?.fileUrl || upload?.file_url,
-            file_type: upload?.fileType || upload?.file_type || 'image/*',
-            file_name: upload?.fileName || upload?.file_name,
-            page_number: 1,
-            page_count: 1,
-          }];
-    const updated = [...floorPlans];
-    uploadedPlans.forEach((plan) => {
-      const floorNumber = plan.floor_number || activeFloor;
-      const idx = updated.findIndex(fp => Number(fp.floor_number) === Number(floorNumber));
-      const nextPlan = { ...(idx >= 0 ? updated[idx] : {}), ...plan, floor_number: floorNumber };
-      if (idx >= 0) updated[idx] = nextPlan;
-      else updated.push(nextPlan);
-    });
-    updated.sort((a, b) => Number(a.floor_number || 0) - Number(b.floor_number || 0));
-    setLocalFloorPlans(updated);
-    const detectedFloors = Math.max(project?.num_floors || 1, ...updated.map(plan => Number(plan.floor_number) || 1));
-    // Auto-save immediately so the floor plan persists on reload
-    saveMutation.mutate({
-      rooms,
-      devices,
-      markups,
-      layout_zones: layoutZones,
-      floor_plans: updated,
-      num_floors: detectedFloors,
-      document_workspace: documentWorkspace,
-      wires,
-      analysis_results: analysisResults,
-      status: devices.length > 0 ? "in_progress" : "draft",
-    });
-    if (upload?.fileType === 'application/pdf' && uploadedPlans.length > 1) {
-      toast.success(`Mapped ${uploadedPlans.length} PDF pages to floors`);
+    if (upload?.fileType === 'application/pdf') {
+      const uploadedSheets = (upload.pages || []).map((page) => ({
+        id: `sheet-${Date.now()}-${page.page}-${Math.random().toString(36).slice(2, 6)}`,
+        file_url: upload.fileUrl,
+        file_type: upload.fileType,
+        file_name: upload.fileName,
+        page_number: page.page,
+        page_count: upload.pageCount || upload.pages?.length || 1,
+        preview_url: page.previewUrl,
+        width: page.previewWidth || page.width,
+        height: page.previewHeight || page.height,
+        title: page.title || `Page ${page.page}`,
+        sheet_number: page.sheetNumber || '',
+        suggested_type: page.suggestedType || inferSheetType(`${upload.fileName || ''} ${page.text || ''}`),
+        plan_type: page.suggestedType || 'unassigned',
+        assigned_floor: '',
+        sheet_text: page.text || '',
+        source: 'pdf_upload',
+        uploaded_at: new Date().toISOString(),
+      }));
+      const nextSheets = mergePlanSheets(planSheets, uploadedSheets);
+      setLocalPlanSheets(nextSheets);
+      saveProjectPatch({ plan_sheets: nextSheets });
+      setActiveTab('plans');
+      toast.success(`Uploaded ${uploadedSheets.length} PDF sheets. Assign floor-plan pages in the Plans tab.`);
+      return;
     }
+
+    const imagePlan = {
+      floor_number: activeFloor,
+      image_url: typeof upload === 'string' ? upload : upload?.image_url || upload?.fileUrl || upload?.file_url,
+      file_url: typeof upload === 'string' ? upload : upload?.fileUrl || upload?.file_url,
+      file_type: upload?.fileType || upload?.file_type || 'image/*',
+      file_name: upload?.fileName || upload?.file_name,
+      page_number: 1,
+      page_count: 1,
+      plan_type: 'floor_plan',
+    };
+    const updated = upsertFloorPlan(floorPlans, imagePlan);
+    setLocalFloorPlans(updated);
+    saveProjectPatch({ floor_plans: updated });
+    toast.success(`Floor ${activeFloor} plan uploaded`);
   };
 
   const handleAnalyzeFloorPlan = async () => {
@@ -520,6 +527,56 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     setPendingRoomName('');
   };
 
+  const handleAssignSheet = ({ sheet, floor, planType }) => {
+    if (!sheet) return;
+    const finalPlanType = planType === 'Custom' ? customPlanType.trim() : planType;
+    if (!finalPlanType) {
+      toast.error("Enter a custom plan type first");
+      return;
+    }
+    const assignedFloor = finalPlanType === 'Floor Plan' || finalPlanType === 'Fire Alarm' || finalPlanType === 'Architectural'
+      ? Number(floor || activeFloor)
+      : '';
+    const nextSheets = planSheets.map((candidate) => (
+      candidate.id === sheet.id
+        ? { ...candidate, assigned_floor: assignedFloor, plan_type: finalPlanType }
+        : candidate
+    ));
+    const nextCategories = planCategories.includes(finalPlanType) ? planCategories : [...planCategories, finalPlanType];
+    let nextFloorPlans = floorPlans;
+    if (assignedFloor) {
+      nextFloorPlans = upsertFloorPlan(floorPlans, {
+        floor_number: assignedFloor,
+        image_url: sheet.file_url,
+        file_url: sheet.file_url,
+        file_type: sheet.file_type,
+        file_name: sheet.file_name,
+        page_number: sheet.page_number,
+        page_count: sheet.page_count,
+        rendered_image_url: sheet.preview_url,
+        sheet_text: sheet.sheet_text,
+        plan_type: finalPlanType,
+        sheet_id: sheet.id,
+      });
+      setLocalFloorPlans(nextFloorPlans);
+    }
+    setLocalPlanSheets(nextSheets);
+    saveProjectPatch({ floor_plans: nextFloorPlans, plan_sheets: nextSheets, plan_categories: nextCategories });
+    toast.success(assignedFloor ? `Assigned page ${sheet.page_number} to floor ${assignedFloor}` : `Tagged page ${sheet.page_number} as ${finalPlanType}`);
+  };
+
+  const handleClearSheetAssignment = (sheet) => {
+    if (!sheet) return;
+    const nextSheets = planSheets.map((candidate) => (
+      candidate.id === sheet.id ? { ...candidate, assigned_floor: '', plan_type: 'unassigned' } : candidate
+    ));
+    const nextFloorPlans = floorPlans.filter((plan) => plan.sheet_id !== sheet.id);
+    setLocalPlanSheets(nextSheets);
+    setLocalFloorPlans(nextFloorPlans);
+    saveProjectPatch({ floor_plans: nextFloorPlans, plan_sheets: nextSheets });
+    toast.success(`Cleared assignment for page ${sheet.page_number}`);
+  };
+
   // Export functions
   const handleExportDeviceSchedule = () => {
     const schedule = generateDeviceSchedule(devices);
@@ -651,6 +708,20 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
                 }}
               />
             </Suspense>
+          )}
+          {activeTab === 'plans' && (
+            <PlansPanel
+              sheets={planSheets}
+              selectedSheet={selectedSheet}
+              selectedSheetId={selectedSheetId}
+              onSelectSheet={setSelectedSheetId}
+              floors={Array.from({ length: project?.num_floors || 1 }, (_, index) => index + 1)}
+              planTypes={planTypes}
+              customPlanType={customPlanType}
+              onCustomPlanTypeChange={setCustomPlanType}
+              onAssign={handleAssignSheet}
+              onClearAssignment={handleClearSheetAssignment}
+            />
           )}
           {activeTab === 'canvas' && (
             <>
@@ -857,4 +928,206 @@ function ToolbarBtn({ onClick, icon, label, active, blue, orange }) {
   else if (orange) cls += 'bg-orange-600/80 text-white hover:bg-orange-600 ';
   else cls += 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white ';
   return <button className={cls} onClick={onClick}>{icon}{label}</button>;
+}
+
+function PlansPanel({
+  sheets,
+  selectedSheet,
+  selectedSheetId,
+  onSelectSheet,
+  floors,
+  planTypes,
+  customPlanType,
+  onCustomPlanTypeChange,
+  onAssign,
+  onClearAssignment,
+}) {
+  const [targetFloor, setTargetFloor] = useState(String(floors[0] || 1));
+  const [targetType, setTargetType] = useState('Fire Alarm');
+  const assignedCount = sheets.filter((sheet) => sheet.assigned_floor).length;
+
+  return (
+    <div className="h-full grid grid-cols-[320px_minmax(0,1fr)] bg-slate-100">
+      <aside className="border-r border-slate-200 bg-white flex flex-col min-h-0">
+        <div className="p-4 border-b border-slate-200">
+          <h2 className="text-lg font-semibold text-slate-900">Floor Plans</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            {sheets.length} sheet{sheets.length === 1 ? '' : 's'} imported · {assignedCount} assigned
+          </p>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {sheets.map((sheet) => (
+            <button
+              key={sheet.id}
+              onClick={() => onSelectSheet(sheet.id)}
+              className={`w-full rounded-lg border p-2 text-left transition-colors ${
+                selectedSheetId === sheet.id ? 'border-orange-400 bg-orange-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+              }`}
+            >
+              <div className="flex gap-2">
+                {sheet.preview_url ? (
+                  <img src={sheet.preview_url} alt="" className="h-16 w-12 object-cover rounded border border-slate-200 bg-slate-100" />
+                ) : (
+                  <div className="h-16 w-12 rounded border border-slate-200 bg-slate-100 flex items-center justify-center">
+                    <Files className="h-5 w-5 text-slate-400" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-slate-900 truncate">{sheet.sheet_number || `Page ${sheet.page_number}`}</p>
+                  <p className="text-[11px] text-slate-500 truncate">{sheet.title || sheet.file_name || 'Imported sheet'}</p>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    {sheet.assigned_floor ? `Floor ${sheet.assigned_floor} · ${sheet.plan_type}` : `Unassigned · suggested ${sheet.suggested_type || 'Unknown'}`}
+                  </p>
+                </div>
+              </div>
+            </button>
+          ))}
+          {sheets.length === 0 && (
+            <div className="rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">
+              Upload a PDF or image from the canvas tab to create selectable sheets.
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <main className="min-w-0 overflow-auto p-5">
+        {selectedSheet ? (
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-slate-900">{selectedSheet.sheet_number || `Page ${selectedSheet.page_number}`}</h3>
+                  <p className="text-xs text-slate-500">{selectedSheet.file_name}</p>
+                </div>
+                {selectedSheet.assigned_floor && (
+                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+                    Floor {selectedSheet.assigned_floor} · {selectedSheet.plan_type}
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-center rounded-lg bg-slate-900/5 p-4">
+                {selectedSheet.preview_url ? (
+                  <img src={selectedSheet.preview_url} alt="" className="max-h-[70vh] max-w-full rounded border border-slate-200 bg-white object-contain" />
+                ) : (
+                  <div className="flex h-96 w-full items-center justify-center rounded border border-dashed border-slate-300 text-slate-400">
+                    No preview available
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm h-fit space-y-4">
+              <div>
+                <h3 className="font-semibold text-slate-900">Assign Sheet</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Pick the sheet page, then assign it to a floor and plan type. PDF pages are no longer automatically treated as floors.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-600">Floor / Area</label>
+                <select value={targetFloor} onChange={(event) => setTargetFloor(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  {floors.map((floor) => <option key={floor} value={floor}>Floor {floor}</option>)}
+                  <option value="B">Basement</option>
+                  <option value="R">Roof</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-600">Plan Type</label>
+                <select value={targetType} onChange={(event) => setTargetType(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  {planTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </div>
+              {targetType === 'Custom' && (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-600">Custom Type</label>
+                  <input
+                    value={customPlanType}
+                    onChange={(event) => onCustomPlanTypeChange(event.target.value)}
+                    placeholder="e.g. Electrical, Fixture Plan"
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  className="bg-orange-500 text-white hover:bg-orange-600"
+                  onClick={() => onAssign(selectedSheet, targetFloor, targetType)}
+                >
+                  Assign
+                </Button>
+                <Button variant="outline" onClick={() => onClearAssignment(selectedSheet)}>
+                  Clear
+                </Button>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+                Existing uploaded PDFs are still usable here if their pages were previously stored as floor plans; they are converted into selectable sheet rows.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center text-slate-500">
+            Select an uploaded sheet to preview and assign it.
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function derivePlanSheets(floorPlans = []) {
+  const sheetsByKey = new Map();
+  floorPlans.forEach((plan) => {
+    if (plan.source === 'assigned_sheet') return;
+    const key = `${plan.file_url || plan.image_url || plan.file_name}-${plan.page_number || 1}`;
+    if (!sheetsByKey.has(key)) {
+      sheetsByKey.set(key, {
+        id: `sheet-existing-${String(key).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40)}`,
+        file_url: plan.file_url || plan.image_url,
+        file_type: plan.file_type || 'image/*',
+        file_name: plan.file_name || 'Existing upload',
+        page_number: plan.page_number || 1,
+        page_count: plan.page_count || 1,
+        preview_url: plan.rendered_image_url || (plan.file_type?.startsWith('image/') ? plan.image_url : ''),
+        title: plan.file_name || `Page ${plan.page_number || 1}`,
+        sheet_number: plan.sheet_number || '',
+        suggested_type: plan.plan_type || inferSheetType(`${plan.file_name || ''} ${plan.sheet_text || ''}`),
+        plan_type: plan.plan_type || 'unassigned',
+        assigned_floor: plan.floor_number || '',
+        sheet_text: plan.sheet_text || '',
+        source: 'existing_floor_plan',
+      });
+    }
+  });
+  return Array.from(sheetsByKey.values()).sort((a, b) => Number(a.page_number || 0) - Number(b.page_number || 0));
+}
+
+function mergePlanSheets(existing = [], incoming = []) {
+  const keyFor = (sheet) => `${sheet.file_url || sheet.file_name}-${sheet.page_number}`;
+  const seen = new Set(incoming.map(keyFor));
+  return [...existing.filter((sheet) => !seen.has(keyFor(sheet))), ...incoming];
+}
+
+function upsertFloorPlan(floorPlans = [], plan) {
+  const next = [...floorPlans];
+  const idx = next.findIndex((item) => String(item.floor_number) === String(plan.floor_number) && (item.plan_type || 'floor_plan') === (plan.plan_type || 'floor_plan'));
+  if (idx >= 0) next[idx] = { ...next[idx], ...plan };
+  else next.push(plan);
+  return next;
+}
+
+function inferSheetType(text = '') {
+  const normalized = text.toLowerCase();
+  if (/\b(fa|fire alarm|fire)\b/.test(normalized)) return 'Fire Alarm';
+  if (/\b(electrical|power|lighting|e-)\b/.test(normalized)) return 'Electrical';
+  if (/\b(life safety|egress)\b/.test(normalized)) return 'Life Safety';
+  if (/\b(architectural|floor plan|a-)\b/.test(normalized)) return 'Architectural';
+  return 'Architectural';
+}
+
+function DocumentWorkspaceLoading() {
+  return (
+    <div className="h-full flex items-center justify-center bg-slate-950 text-white/50">
+      Loading document workspace...
+    </div>
+  );
 }
