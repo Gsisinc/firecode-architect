@@ -153,3 +153,42 @@ export function isLayoutZoneTool(tool) {
 export function getLayoutZoneMeta(type) {
   return LAYOUT_ZONE_TYPES[type] || LAYOUT_ZONE_TYPES.obstruction;
 }
+
+/**
+ * Merge AI-detected layout zones into existing list (dedupe by id, append new).
+ */
+export function mergeLayoutZones(existing = [], incoming = []) {
+  const a = normalizeLayoutZones(existing);
+  const b = normalizeLayoutZones(incoming);
+  const seen = new Set(a.map((z) => z.id));
+  const out = [...a];
+  b.forEach((z) => {
+    if (!seen.has(z.id)) {
+      seen.add(z.id);
+      out.push(z);
+    }
+  });
+  return out;
+}
+
+/** Bottom-left heuristic inside room union bbox; nudges out of rack/obstruction zones (px). */
+export function suggestFacpPlacementPx(rooms = [], zones = [], floor = 1) {
+  const onFloor = (rooms || []).filter((r) => Number(r.floor) === Number(floor));
+  if (!onFloor.length) return { x: 48, y: 48 };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  onFloor.forEach((r) => {
+    const w = Number(r.width) || 0;
+    const h = Number(r.height) || 0;
+    minX = Math.min(minX, Number(r.x));
+    minY = Math.min(minY, Number(r.y));
+    maxX = Math.max(maxX, Number(r.x) + w);
+    maxY = Math.max(maxY, Number(r.y) + h);
+  });
+  const margin = 36;
+  const point = { x: minX + margin, y: maxY - margin };
+  const bounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  return nearestOpenPoint(point, zones, floor, bounds);
+}

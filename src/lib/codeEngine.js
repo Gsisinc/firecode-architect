@@ -342,16 +342,39 @@ export function calculateHandicappedRooms(totalSleepingUnits) {
 
 // ─── SMOKE DETECTOR PLACEMENT ────────────────────────────────────────────────
 
+/** Accept `{ default, default_type }` or a legacy numeric default height (ft). */
+function normalizeCeilingData(ceilingData) {
+  if (typeof ceilingData === 'number' && Number.isFinite(ceilingData)) {
+    return { default: ceilingData, default_type: 'smooth_flat' };
+  }
+  const o = ceilingData && typeof ceilingData === 'object' ? ceilingData : {};
+  return {
+    default: Number(o.default) || 9,
+    default_type: o.default_type || 'smooth_flat',
+    slope_angle: o.slope_angle,
+  };
+}
+
+function resolveRoomCeilingFt(room, ceilingData) {
+  const cd = normalizeCeilingData(ceilingData);
+  const r = Number(room?.ceiling_height);
+  const def = cd.default;
+  if (!Number.isFinite(r) || r <= 0) return Number.isFinite(def) && def > 0 ? def : 9;
+  if (r === 9 && Number.isFinite(def) && def >= HIGH_BAY_SMOKE_CEILING_FT) return def;
+  return r;
+}
+
 /** NFPA 72 §17.7 - Smoke detector spacing calculations */
 export function calculateSmokeDetectorPlacement(rooms, ceilingData = {}) {
+  const cd = normalizeCeilingData(ceilingData);
   const devices = [];
   let addressCounter = 1;
 
   rooms.forEach(room => {
     if (shouldExcludeSmokeDetector(room)) return;
 
-    const ceilingHeight = room.ceiling_height || ceilingData.default || 9;
-    const ceilingType = room.ceiling_type || ceilingData.default_type || 'smooth_flat';
+    const ceilingHeight = resolveRoomCeilingFt(room, cd);
+    const ceilingType = room.ceiling_type || cd.default_type || 'smooth_flat';
     const sqft = room.sqft || (room.width * room.height) || 0;
 
     /* High-bay / rack retail (e.g. 30 ft clear height): listed projected beam or aspiration — not a ceiling spot grid. */
@@ -384,7 +407,7 @@ export function calculateSmokeDetectorPlacement(rooms, ceilingData = {}) {
 
     // NFPA 72 §17.7 - Sloped ceiling correction
     if (ceilingType === 'sloped') {
-      const slopeAngle = ceilingData.slope_angle || 22;
+      const slopeAngle = cd.slope_angle || 22;
       maxSpacing = calculateSlopedCeilingSpacing(slopeAngle);
     }
 
@@ -447,11 +470,12 @@ function shouldExcludeSmokeDetector(room) {
 
 /** NFPA 72 §17.6 - Heat detector spacing calculations */
 export function calculateHeatDetectorPlacement(rooms, ceilingData = {}) {
+  const cd = normalizeCeilingData(ceilingData);
   const devices = [];
   let addressCounter = 1;
 
   rooms.forEach(room => {
-    const ceilingHeight = room.ceiling_height || ceilingData.default || 9;
+    const ceilingHeight = resolveRoomCeilingFt(room, cd);
     const roomName = (room.room_type || room.name || '').toLowerCase();
     const isKitchen = roomName.includes('kitchen') || roomName.includes('cook');
     const isGarage = roomName.includes('garage');

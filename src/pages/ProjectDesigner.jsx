@@ -30,7 +30,7 @@ import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale
 import { mergeGeneratedDevices } from "@/lib/designValidation";
 import { renderPdfPageToDataUrl } from "@/lib/documentEngine";
 import { analyzeUploadedSheet, classifyPlanFromText } from "@/lib/planVision";
-import { nudgeDevicesOutOfBlockedZones, normalizeDetectedLayoutZones } from "@/lib/layoutZones";
+import { nudgeDevicesOutOfBlockedZones, normalizeDetectedLayoutZones, mergeLayoutZones, suggestFacpPlacementPx } from "@/lib/layoutZones";
 
 import {
   determineSystemRequirements,
@@ -45,6 +45,7 @@ import {
   calculateDuctDetectorPlacement,
   generateDeviceSchedule,
   generateSequenceOfOperations,
+  HIGH_BAY_SMOKE_CEILING_FT,
 } from "@/lib/codeEngine";
 
 const DocumentWorkspace = lazy(() => import("@/components/designer/DocumentWorkspace"));
@@ -453,8 +454,14 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     const analysis = analysisResults || determineSystemRequirements(project);
     if (!analysisResults) setAnalysisResults(analysis);
 
+    const ceilingPayload = {
+      default: Number(project.default_ceiling_height) || 9,
+      default_type: project.default_ceiling_type || "smooth_flat",
+    };
+
     let allDevices = [];
     const floorRooms = rooms.filter((r) => r.floor === activeFloor);
+    const activeFloorZones = layoutZones.filter((zone) => zone.floor === activeFloor);
 
     // Smoke detectors — codeEngine returns camelCase (fireAlarmRequired)
     const needsAlarm = analysis.fireAlarmRequired || analysis.fire_alarm_required;
@@ -462,12 +469,12 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
       const smokeRooms = rooms.filter(
         (r) => r.floor === activeFloor && r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
       );
-      allDevices.push(...calculateSmokeDetectorPlacement(smokeRooms, project.default_ceiling_height));
+      allDevices.push(...calculateSmokeDetectorPlacement(smokeRooms, ceilingPayload));
       allDevices.push(...calculateDuctDetectorPlacement(project, floorRooms, activeFloor, analysis));
     }
 
     // Heat detectors
-    allDevices.push(...calculateHeatDetectorPlacement(floorRooms, project.default_ceiling_height));
+    allDevices.push(...calculateHeatDetectorPlacement(floorRooms, ceilingPayload));
 
     // Pull stations
     allDevices.push(...calculatePullStationPlacement(floorRooms, analysis));
@@ -493,7 +500,48 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     );
     allDevices.push(...sprinklerDevices);
 
-    const activeFloorZones = layoutZones.filter((zone) => zone.floor === activeFloor);
+    if (needsAlarm && activeFloor === 1) {
+      const facpPt = suggestFacpPlacementPx(floorRooms, activeFloorZones, activeFloor);
+      const defH = ceilingPayload.default;
+      const highBay = defH >= HIGH_BAY_SMOKE_CEILING_FT;
+      allDevices.push(
+        {
+          id: "FACP-1",
+          type: "facp",
+          subtype: "addressable",
+          symbol: "FACP",
+          x: Math.round(facpPt.x),
+          y: Math.round(facpPt.y),
+          address: "PANEL",
+          label: "FACP",
+          floor: activeFloor,
+          mounting_height: '48"-66" AFF (top of display)',
+          zone: "PANEL",
+          circuit: "PANEL",
+          codeRef: "NFPA 72 §10.4",
+          note: "Auto-placed at accessible corner — relocate per AHJ / architect.",
+        },
+        {
+          id: "SD-FACP",
+          type: "smoke_detector",
+          subtype: highBay ? "photoelectric_beam" : "photoelectric",
+          symbol: highBay ? "B" : "S",
+          x: Math.round(facpPt.x + 44),
+          y: Math.round(facpPt.y),
+          address: "1-001",
+          label: "SD-FACP",
+          floor: activeFloor,
+          mounting_height: highBay
+            ? `${defH} ft — listed beam / aspiration near FACP (verify §26.2)`
+            : "Ceiling — within 21 ft of FACP",
+          zone: "F1-Z1",
+          circuit: "SLC-1",
+          note: "FACP protection / adjacent detection (NFPA 72 §26.2)",
+          codeRef: "NFPA 72 §26.2",
+        }
+      );
+    }
+
     allDevices = nudgeDevicesOutOfBlockedZones(allDevices, floorRooms, activeFloorZones);
 
     // Assign addresses

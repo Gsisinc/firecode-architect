@@ -6,7 +6,8 @@ export default function NFPALegend({ visible }) {
   if (!visible) return null;
 
   const symbols = [
-    { symbol: 'S', shape: 'circle', color: '#3b82f6', label: 'Smoke Detector, Photoelectric' },
+    { symbol: 'S', shape: 'circle', color: '#3b82f6', label: 'Smoke Detector, Photoelectric (spot)' },
+    { symbol: 'B', shape: 'circle', color: '#b45309', label: 'Projected Beam / Aspirating (high bay — not ceiling spot)' },
     { symbol: 'SS', shape: 'circle', color: '#60a5fa', label: 'Smoke Alarm (single-station)' },
     { symbol: 'H', shape: 'circle', color: '#f59e0b', label: 'Heat Detector' },
     { symbol: 'F', shape: 'square', color: '#ef4444', label: 'Manual Pull Station' },
