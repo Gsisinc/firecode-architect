@@ -4,6 +4,7 @@ import { ArrowLeft, Save, Download, Flame, CheckCircle2, Loader2, Table, GitBran
 import { Button } from '@/components/ui/button';
 import { generateSequenceOfOperations, generateDeviceSchedule, calculateBatterySizing, determineWiringType, calculateVoltageDrop } from '@/lib/codeEngine';
 import jsPDF from 'jspdf';
+import { loadSubmittalLogoDataUrl, GSIS_HEADER_BAR_MM } from '@/lib/submittalBranding';
 
 export default function DesignerTopBar({ project, isSaving, onSave, activeTab, onTabChange }) {
   const navigate = useNavigate();
@@ -11,41 +12,63 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
 
   const handleExportPDF = async () => {
     setExporting(true);
+    const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
+    const HB = GSIS_HEADER_BAR_MM;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pName = project?.name || 'Fire Alarm System';
     const now = new Date().toLocaleDateString();
     const reqs = project?.analysis_results || {};
 
     const addPageHeader = (title, pageNum) => {
-      doc.setFillColor(15, 23, 42);
-      doc.rect(0, 0, 210, 12, 'F');
-      doc.setTextColor(249, 115, 22);
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, 0, 210, HB, 'F');
+      doc.setDrawColor(218, 165, 32);
+      doc.setLineWidth(0.35);
+      doc.line(0, HB, 210, HB);
+      if (logoDataUrl) {
+        try {
+          doc.addImage(logoDataUrl, 'PNG', 210 - 44, 2, 38, 10);
+        } catch {
+          /* ignore */
+        }
+      }
+      doc.setTextColor(184, 134, 11);
       doc.setFontSize(7);
       doc.setFont('helvetica', 'bold');
-      doc.text(pName.toUpperCase(), 10, 8);
-      doc.setTextColor(148, 163, 184);
-      doc.text(title, 105, 8, { align: 'center' });
-      doc.text(`Page ${pageNum}`, 200, 8, { align: 'right' });
+      doc.text('GOLDEN STATE INTEGRATED SYSTEMS', 10, 6);
+      doc.setTextColor(51, 65, 85);
+      doc.text(pName.toUpperCase(), 10, 11);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(title, 105, 8.5, { align: 'center' });
+      const pageLabel = pageNum === '' || pageNum === undefined ? '' : `Page ${pageNum}`;
+      if (pageLabel) doc.text(pageLabel, 200 - 38, 8.5, { align: 'right' });
     };
 
     // ── PAGE 1: COVER ─────────────────────────────────────
-    doc.setFillColor(15, 23, 42);
+    doc.setFillColor(255, 255, 255);
     doc.rect(0, 0, 210, 297, 'F');
-    doc.setFillColor(249, 115, 22);
-    doc.rect(0, 60, 210, 2, 'F');
-    doc.setTextColor(249, 115, 22);
-    doc.setFontSize(22);
+    doc.setDrawColor(218, 165, 32);
+    doc.setLineWidth(0.6);
+    doc.line(0, 62, 210, 62);
+    if (logoDataUrl) {
+      try {
+        doc.addImage(logoDataUrl, 'PNG', 55, 18, 100, 27);
+      } catch {
+        /* ignore */
+      }
+    }
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(20);
     doc.setFont('helvetica', 'bold');
-    doc.text('FIRE ALARM SYSTEM', 20, 45);
-    doc.text('DESIGN REPORT', 20, 57);
-    doc.setFillColor(249, 115, 22);
-    doc.rect(0, 60, 210, 2, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16);
-    doc.text(pName, 20, 80);
+    doc.text('FIRE ALARM SYSTEM', 20, 54);
+    doc.text('DESIGN REPORT', 20, 66);
+    doc.setTextColor(51, 65, 85);
+    doc.setFontSize(14);
+    doc.text(pName, 20, 88);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(148, 163, 184);
+    doc.setTextColor(71, 85, 105);
 
     const infoItems = [
       ['Address', project?.address],
@@ -59,24 +82,25 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
       ['Code Edition', project?.adopted_code_edition || '2021 IBC / 2022 NFPA 72'],
       ['Report Date', now],
     ];
-    let y = 100;
+    let y = 108;
     infoItems.forEach(([label, value]) => {
       if (!value) return;
       doc.setTextColor(100, 116, 139);
       doc.text(`${label}:`, 20, y);
-      doc.setTextColor(200, 210, 230);
+      doc.setTextColor(30, 41, 59);
       doc.text(String(value), 80, y);
       y += 9;
     });
 
-    doc.setFillColor(30, 41, 59);
-    doc.rect(20, 240, 170, 30, 'F');
-    doc.setTextColor(249, 115, 22);
+    doc.setFillColor(255, 251, 235);
+    doc.setDrawColor(218, 165, 32);
+    doc.rect(20, 240, 170, 30, 'FD');
+    doc.setTextColor(146, 64, 14);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.text('DESIGN AUTHORITY', 25, 250);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(148, 163, 184);
+    doc.setTextColor(71, 85, 105);
     doc.setFontSize(7);
     doc.text('NFPA 72 (2022) National Fire Alarm and Signaling Code', 25, 257);
     doc.text('NFPA 101 (2021) Life Safety Code', 25, 262);
@@ -88,7 +112,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     addPageHeader('WRITTEN SYSTEM NARRATIVE', 2);
     doc.setTextColor(15, 23, 42);
     doc.setFillColor(248, 250, 252);
-    doc.rect(0, 12, 210, 285, 'F');
+    doc.rect(0, HB, 210, 297 - HB, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(15, 23, 42);
@@ -113,7 +137,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     narrative.forEach(line => {
       if (line === '') { y += 5; return; }
       const lines = doc.splitTextToSize(line, 178);
-      if (y + lines.length * 5 > 285) { doc.addPage(); addPageHeader('WRITTEN SYSTEM NARRATIVE (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, 'F'); y = 25; }
+      if (y + lines.length * 5 > 285) { doc.addPage(); addPageHeader('WRITTEN SYSTEM NARRATIVE (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 25; }
       doc.text(lines, 15, y);
       y += lines.length * 5.2;
     });
@@ -122,7 +146,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     doc.addPage();
     addPageHeader('CODE ANALYSIS', 3);
     doc.setFillColor(248, 250, 252);
-    doc.rect(0, 12, 210, 285, 'F');
+    doc.rect(0, HB, 210, 297 - HB, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(15, 23, 42);
@@ -182,7 +206,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
       reqs.specialNotes.forEach(note => {
         const lines = doc.splitTextToSize(`• ${note}`, 174);
         doc.setTextColor(71, 85, 105);
-        if (y + lines.length * 5 > 285) { doc.addPage(); addPageHeader('CODE ANALYSIS (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, 'F'); y = 25; }
+        if (y + lines.length * 5 > 285) { doc.addPage(); addPageHeader('CODE ANALYSIS (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 25; }
         doc.text(lines, 18, y);
         y += lines.length * 5;
       });
@@ -192,7 +216,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     doc.addPage();
     addPageHeader('SEQUENCE OF OPERATIONS', 4);
     doc.setFillColor(248, 250, 252);
-    doc.rect(0, 12, 210, 285, 'F');
+    doc.rect(0, HB, 210, 297 - HB, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(15, 23, 42);
@@ -203,7 +227,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     const soo = generateSequenceOfOperations(reqs, project);
     let sy = 35;
     soo.split('\n').forEach(line => {
-      if (sy > 285) { doc.addPage(); addPageHeader('SEQUENCE OF OPERATIONS (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, 'F'); sy = 25; }
+      if (sy > 285) { doc.addPage(); addPageHeader('SEQUENCE OF OPERATIONS (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, HB, 210, 297 - HB, 'F'); sy = 25; }
       doc.text(line, 12, sy);
       sy += 4.5;
     });
@@ -212,7 +236,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     doc.addPage();
     addPageHeader('BATTERY & ELECTRICAL CALCULATIONS', 5);
     doc.setFillColor(248, 250, 252);
-    doc.rect(0, 12, 210, 285, 'F');
+    doc.rect(0, HB, 210, 297 - HB, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(15, 23, 42);
@@ -282,7 +306,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     doc.addPage();
     addPageHeader('DEVICE SCHEDULE', 6);
     doc.setFillColor(248, 250, 252);
-    doc.rect(0, 12, 210, 285, 'F');
+    doc.rect(0, HB, 210, 297 - HB, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(15, 23, 42);
@@ -304,7 +328,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
 
     doc.setFont('helvetica', 'normal');
     schedule.forEach((row, i) => {
-      if (y > 280) { doc.addPage(); addPageHeader('DEVICE SCHEDULE (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, 'F'); y = 20; doc.setFillColor(30, 41, 59); doc.rect(13, y - 5, 182, 8, 'F'); doc.setTextColor(255, 255, 255); headers.forEach((h, j) => doc.text(h, colX[j], y)); y += 8; doc.setFont('helvetica', 'normal'); }
+      if (y > 280) { doc.addPage(); addPageHeader('DEVICE SCHEDULE (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 20; doc.setFillColor(30, 41, 59); doc.rect(13, y - 5, 182, 8, 'F'); doc.setTextColor(255, 255, 255); headers.forEach((h, j) => doc.text(h, colX[j], y)); y += 8; doc.setFont('helvetica', 'normal'); }
       doc.setFillColor(i % 2 === 0 ? 248 : 241, 250, 252);
       doc.rect(13, y - 4, 182, 7, 'F');
       doc.setTextColor(30, 41, 59);
@@ -323,7 +347,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
     doc.addPage();
     addPageHeader('WIRING SPECIFICATIONS', 7);
     doc.setFillColor(248, 250, 252);
-    doc.rect(0, 12, 210, 285, 'F');
+    doc.rect(0, HB, 210, 297 - HB, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(15, 23, 42);

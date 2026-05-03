@@ -97,6 +97,14 @@
       "type": "boolean",
       "description": "Designer confirmed default ceiling height/type against CDs (required for new projects; legacy omit = treated as confirmed on load)"
     },
+    "equipment_specs": {
+      "type": "object",
+      "description": "Optional manufacturer/model/CSFM per device type key (smoke_detector, facp, …) for submittal legend"
+    },
+    "submittal_meta": {
+      "type": "object",
+      "description": "Scope of work, contractor license, and other AHJ submittal cover fields"
+    },
     "elevator_count": {
       "type": "number"
     },

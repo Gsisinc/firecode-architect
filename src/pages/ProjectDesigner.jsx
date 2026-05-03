@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2 } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -29,6 +29,7 @@ import {
 import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale";
 import { mergeGeneratedDevices } from "@/lib/designValidation";
 import { renderPdfPageToDataUrl } from "@/lib/documentEngine";
+import { analyzeUploadedSheet, classifyPlanFromText } from "@/lib/planVision";
 import { nudgeDevicesOutOfBlockedZones, normalizeDetectedLayoutZones } from "@/lib/layoutZones";
 
 import {
@@ -94,6 +95,7 @@ export default function ProjectDesigner() {
   const [selectedSheetId, setSelectedSheetId] = useState(null);
   const [customPlanType, setCustomPlanType] = useState('');
   const [detectingSimilarZones, setDetectingSimilarZones] = useState(false);
+  const [planVisionLoading, setPlanVisionLoading] = useState(false);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -112,7 +114,22 @@ export default function ProjectDesigner() {
   const planSheets = localPlanSheets ?? project?.plan_sheets ?? derivePlanSheets(floorPlans);
   const planCategories = project?.plan_categories ?? [];
   const selectedSheet = planSheets.find(sheet => sheet.id === selectedSheetId) || planSheets[0] || null;
-  const planTypes = Array.from(new Set(['Architectural', 'Fire Alarm', 'Electrical', 'Life Safety', 'Custom', ...planCategories, ...floorPlans.map(plan => plan.plan_type).filter(Boolean)]));
+  const planTypes = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          'Mechanical / HVAC',
+          'Architectural',
+          'Fire Alarm',
+          'Electrical',
+          'Life Safety',
+          'Custom',
+          ...planCategories,
+          ...floorPlans.map((plan) => plan.plan_type).filter(Boolean),
+        ])
+      ),
+    [planCategories, floorPlans]
+  );
 
   const canvasDevices = useMemo(
     () => assignSprinklerMonitoringPositions(devices, rooms),
@@ -174,7 +191,7 @@ export default function ProjectDesigner() {
         height: page.height || '',
         title: page.title || `Page ${page.page}`,
         sheet_number: page.sheetNumber || '',
-        suggested_type: page.suggestedType || inferSheetType(`${upload.fileName || ''} ${page.text || ''}`),
+        suggested_type: page.suggestedType || classifyPlanFromText(`${upload.fileName || ''} ${page.text || ''}`),
         plan_type: page.suggestedType || 'unassigned',
         assigned_floor: '',
         sheet_text: page.text || '',
@@ -683,6 +700,35 @@ Return only zones that are clearly the same kind of object. Do not include the o
     toast.success(`Cleared assignment for page ${sheet.page_number}`);
   };
 
+  const handlePlanVisionAnalyze = async (sheet) => {
+    if (!sheet) return;
+    setPlanVisionLoading(true);
+    try {
+      let preview = sheet.preview_url;
+      if (!preview && sheet.file_url && sheet.file_type === "application/pdf") {
+        const rendered = await renderPdfPageToDataUrl(sheet.file_url, sheet.page_number || 1, 1.5);
+        preview = rendered.dataUrl;
+      }
+      const result = await analyzeUploadedSheet({
+        fileName: sheet.file_name || "",
+        sheetText: sheet.sheet_text || "",
+        previewDataUrl: typeof preview === "string" && preview.startsWith("data:") ? preview : null,
+      });
+      const suggested = result.suggested_plan_type;
+      const nextSheets = planSheets.map((c) =>
+        c.id === sheet.id ? { ...c, vision_analysis: result, suggested_type: suggested } : c
+      );
+      setLocalPlanSheets(nextSheets);
+      await saveProjectPatch({ plan_sheets: nextSheets });
+      const hint = result.raster?.hints?.[0] || result.merged_recommendation;
+      toast.success(`${suggested}: ${hint}`);
+    } catch (e) {
+      toast.error(e?.message || "Plan analysis failed");
+    } finally {
+      setPlanVisionLoading(false);
+    }
+  };
+
   // Export functions
   const handleExportDeviceSchedule = () => {
     const schedule = generateDeviceSchedule(devices);
@@ -832,6 +878,8 @@ Return only zones that are clearly the same kind of object. Do not include the o
               onContinueToCanvas={() => setActiveTab('canvas')}
               activeFloor={activeFloor}
               onFloorFocus={setActiveFloor}
+              onVisionAnalyze={handlePlanVisionAnalyze}
+              visionLoading={planVisionLoading}
             />
           )}
           {activeTab === 'canvas' && (
@@ -1006,6 +1054,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
           analysisResults={analysisResults}
           canvasRef={canvasRef}
           onClose={() => setShowSubmittal(false)}
+          onSaveSubmittalMeta={(meta) => saveProjectPatch({ submittal_meta: { ...project?.submittal_meta, ...meta } })}
         />
       )}
 
@@ -1057,12 +1106,20 @@ function PlansPanel({
   onContinueToCanvas,
   activeFloor,
   onFloorFocus,
+  onVisionAnalyze,
+  visionLoading,
 }) {
   const [targetFloor, setTargetFloor] = useState(String(floors[0] || 1));
-  const [targetType, setTargetType] = useState('Fire Alarm');
+  const [targetType, setTargetType] = useState('Architectural');
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const assignedCount = sheets.filter((sheet) => sheet.assigned_floor).length;
+
+  React.useEffect(() => {
+    if (selectedSheet?.suggested_type && planTypes.includes(selectedSheet.suggested_type)) {
+      setTargetType(selectedSheet.suggested_type);
+    }
+  }, [selectedSheet?.id, selectedSheet?.suggested_type, planTypes]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1213,6 +1270,50 @@ function PlansPanel({
               <Button type="button" variant="secondary" className="w-full text-xs" onClick={() => { onFloorFocus?.(Number(targetFloor)); onContinueToCanvas?.(); }}>
                 Open canvas for Floor {targetFloor}
               </Button>
+              {onVisionAnalyze && (
+                <div className="space-y-2 border-t border-slate-200 pt-4">
+                  <p className="text-xs font-medium text-slate-700">Plan intelligence</p>
+                  <p className="text-[11px] text-slate-500">
+                    Classifies mechanical vs architectural vs FA sheets using filename, extracted text, and a lightweight raster scan (full ML pipeline can replace this later).
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full text-xs border-amber-300 text-amber-900 hover:bg-amber-50"
+                    disabled={visionLoading}
+                    onClick={() => onVisionAnalyze(selectedSheet)}
+                  >
+                    {visionLoading ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Scan className="mr-2 h-3.5 w-3.5" />}
+                    Analyze sheet
+                  </Button>
+                  {selectedSheet.suggested_type && (
+                    <p className="text-[11px] text-slate-600">
+                      <span className="font-medium text-slate-800">Suggested type:</span> {selectedSheet.suggested_type}
+                    </p>
+                  )}
+                  {selectedSheet.vision_analysis && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-[11px] text-slate-800 space-y-1">
+                      <p className="font-semibold text-amber-950">Last analysis</p>
+                      {selectedSheet.vision_analysis.merged_recommendation && (
+                        <p>{selectedSheet.vision_analysis.merged_recommendation}</p>
+                      )}
+                      {Array.isArray(selectedSheet.vision_analysis.raster?.hints) &&
+                        selectedSheet.vision_analysis.raster.hints.length > 0 && (
+                          <ul className="list-disc pl-4 text-slate-700">
+                            {selectedSheet.vision_analysis.raster.hints.slice(0, 5).map((h, i) => (
+                              <li key={i}>{h}</li>
+                            ))}
+                          </ul>
+                      )}
+                      {selectedSheet.vision_analysis.text_signals?.length > 0 && (
+                        <p className="text-slate-600">
+                          Text signals: {selectedSheet.vision_analysis.text_signals.slice(0, 4).join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
                 Existing uploaded PDFs are still usable here if their pages were previously stored as floor plans; they are converted into selectable sheet rows.
               </div>
@@ -1244,7 +1345,7 @@ function derivePlanSheets(floorPlans = []) {
         preview_url: plan.rendered_image_url || (plan.file_type?.startsWith('image/') ? plan.image_url : ''),
         title: plan.file_name || `Page ${plan.page_number || 1}`,
         sheet_number: plan.sheet_number || '',
-        suggested_type: plan.plan_type || inferSheetType(`${plan.file_name || ''} ${plan.sheet_text || ''}`),
+        suggested_type: plan.plan_type || classifyPlanFromText(`${plan.file_name || ''} ${plan.sheet_text || ''}`),
         plan_type: plan.plan_type || 'unassigned',
         assigned_floor: plan.floor_number || '',
         sheet_text: plan.sheet_text || '',
@@ -1283,12 +1384,7 @@ function upsertFloorPlan(floorPlans = [], plan) {
 }
 
 function inferSheetType(text = '') {
-  const normalized = text.toLowerCase();
-  if (/\b(fa|fire alarm|fire)\b/.test(normalized)) return 'Fire Alarm';
-  if (/\b(electrical|power|lighting|e-)\b/.test(normalized)) return 'Electrical';
-  if (/\b(life safety|egress)\b/.test(normalized)) return 'Life Safety';
-  if (/\b(architectural|floor plan|a-)\b/.test(normalized)) return 'Architectural';
-  return 'Architectural';
+  return classifyPlanFromText(text);
 }
 
 function DocumentWorkspaceLoading() {

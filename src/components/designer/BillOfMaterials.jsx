@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import jsPDF from 'jspdf';
 import { calculateWireLengthSummary } from '@/lib/designValidation';
+import { loadSubmittalLogoDataUrl, drawGsisLetterheadHeader, GSIS_HEADER_BAR_MM } from '@/lib/submittalBranding';
 
 const DEVICE_TYPE_LABELS = {
   smoke_detector: 'Smoke Detector',
@@ -112,28 +113,39 @@ export default function BillOfMaterials({ project, devices, floorPlans = [], wir
     URL.revokeObjectURL(url);
   };
 
-  const exportPDF = () => {
+  const exportPDF = async () => {
+    const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pName = project?.name || 'Fire Alarm System';
     const now = new Date().toLocaleDateString();
 
-    // Cover header
-    doc.setFillColor(15, 23, 42);
-    doc.rect(0, 0, 210, 35, 'F');
-    doc.setTextColor(249, 115, 22);
+    // Cover header — white + logo
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, 210, 42, 'F');
+    doc.setDrawColor(218, 165, 32);
+    doc.setLineWidth(0.45);
+    doc.line(0, 42, 210, 42);
+    if (logoDataUrl) {
+      try {
+        doc.addImage(logoDataUrl, 'PNG', 146, 8, 54, 15);
+      } catch {
+        /* ignore */
+      }
+    }
+    doc.setTextColor(30, 41, 59);
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text('BILL OF MATERIALS', 14, 14);
-    doc.setTextColor(255, 255, 255);
+    doc.text('BILL OF MATERIALS', 14, 20);
+    doc.setTextColor(51, 65, 85);
     doc.setFontSize(10);
-    doc.text(pName, 14, 22);
+    doc.text(pName, 14, 28);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184);
-    doc.text(`Generated: ${now}  ·  Total Devices: ${totalDevices}`, 14, 30);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Generated: ${now}  ·  Total Devices: ${totalDevices}`, 14, 36);
 
     // Summary table
-    let y = 45;
+    let y = 50;
     doc.setTextColor(15, 23, 42);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
@@ -154,7 +166,13 @@ export default function BillOfMaterials({ project, devices, floorPlans = [], wir
     y += 8;
 
     bom.forEach((item, i) => {
-      if (y > 270) { doc.addPage(); y = 20; }
+      if (y > 270) {
+        doc.addPage();
+        drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+        doc.setFillColor(248, 250, 252);
+        doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, "F");
+        y = 20 + GSIS_HEADER_BAR_MM;
+      }
       const bg = i % 2 === 0 ? 255 : 248;
       doc.setFillColor(bg, bg, bg);
       doc.rect(14, y - 1, 182, 7, 'F');
@@ -177,7 +195,10 @@ export default function BillOfMaterials({ project, devices, floorPlans = [], wir
 
     // Detail page
     doc.addPage();
-    y = 20;
+    drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+    doc.setFillColor(248, 250, 252);
+    doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, "F");
+    y = 20 + GSIS_HEADER_BAR_MM;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor(15, 23, 42);
@@ -196,7 +217,13 @@ export default function BillOfMaterials({ project, devices, floorPlans = [], wir
     y += 8;
 
     devices.forEach((d, i) => {
-      if (y > 278) { doc.addPage(); y = 15; }
+      if (y > 278) {
+        doc.addPage();
+        drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+        doc.setFillColor(248, 250, 252);
+        doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, "F");
+        y = 15 + GSIS_HEADER_BAR_MM;
+      }
       const bg = i % 2 === 0 ? 255 : 248;
       doc.setFillColor(bg, bg, bg);
       doc.rect(14, y - 1, 182, 6, 'F');
@@ -222,7 +249,10 @@ export default function BillOfMaterials({ project, devices, floorPlans = [], wir
 
     if (wireSummary.byCircuit.length) {
       doc.addPage();
-      y = 20;
+      drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+      doc.setFillColor(248, 250, 252);
+      doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, "F");
+      y = 20 + GSIS_HEADER_BAR_MM;
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
       doc.setTextColor(15, 23, 42);

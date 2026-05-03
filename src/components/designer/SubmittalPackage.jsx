@@ -1,11 +1,14 @@
-import { useState } from "react";
-import { X, Download, Loader2, FileText, Camera } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Download, Loader2, FileText, Camera, Layout } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import jsPDF from "jspdf";
+import { drawAhjCoverPage, SHEET_36_24_LANDSCAPE_MM } from "@/lib/ahjSubmittalPdf";
 import {
   calculateBatterySizing,
   calculateNacLoading,
@@ -15,6 +18,7 @@ import {
   generateSequenceOfOperations,
 } from "@/lib/codeEngine";
 import { calculateWireLengthSummary } from "@/lib/designValidation";
+import { loadSubmittalLogoDataUrl } from "@/lib/submittalBranding";
 
 const DEVICE_TYPE_LABELS = {
   smoke_detector: "Smoke Detector",
@@ -42,8 +46,22 @@ const NFPA_REFS = {
   facp: "NFPA 72 §10",
 };
 
-export default function SubmittalPackage({ project, devices, rooms, wires = [], floorPlans = [], analysisResults, canvasRef, onClose }) {
+export default function SubmittalPackage({ project, devices, rooms, wires = [], floorPlans = [], analysisResults, canvasRef, onClose, onSaveSubmittalMeta }) {
   const [generating, setGenerating] = useState(false);
+  const [ahjCover, setAhjCover] = useState(true);
+  const [submittalMeta, setSubmittalMeta] = useState({
+    scope_of_work: "",
+    contractor_license: "",
+  });
+  useEffect(() => {
+    const m = project?.submittal_meta;
+    if (m && typeof m === "object") {
+      setSubmittalMeta((s) => ({
+        scope_of_work: m.scope_of_work || s.scope_of_work,
+        contractor_license: m.contractor_license || s.contractor_license,
+      }));
+    }
+  }, [project?.id, project?.submittal_meta]);
   const [sections, setSections] = useState({
     cover: true,
     narrative: true,
@@ -66,42 +84,85 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
 
   const generate = async () => {
     setGenerating(true);
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    onSaveSubmittalMeta?.(submittalMeta);
+    const equipmentSpecs = project?.equipment_specs || {};
+    const meta = { ...submittalMeta };
+
+    let doc;
+    let pageNum = 1;
     const pName = project?.name || "Fire Alarm System";
     const now = new Date().toLocaleDateString();
     const reqs = analysisResults || {};
     const wireSummary = calculateWireLengthSummary({ devices, wires, floorPlans });
-    let pageNum = 1;
+    const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
 
+    if (ahjCover) {
+      doc = new jsPDF({ orientation: "landscape", unit: "mm", format: SHEET_36_24_LANDSCAPE_MM });
+      drawAhjCoverPage(doc, project, devices, analysisResults, equipmentSpecs, meta, logoDataUrl);
+      doc.addPage("a4", "portrait");
+      pageNum = 2;
+    } else {
+      doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    }
+
+    const pageW = () => doc.internal.pageSize.getWidth();
+    const pageH = () => doc.internal.pageSize.getHeight();
+    const headerBarH = 14;
+    const fillBody = () => {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(0, headerBarH, pageW(), pageH() - headerBarH, "F");
+    };
     const addHeader = (title) => {
-      doc.setFillColor(15, 23, 42);
-      doc.rect(0, 0, 210, 12, "F");
-      doc.setTextColor(249, 115, 22);
+      const W = pageW();
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, 0, W, headerBarH, "F");
+      doc.setDrawColor(218, 165, 32);
+      doc.setLineWidth(0.35);
+      doc.line(0, headerBarH, W, headerBarH);
+      if (logoDataUrl) {
+        try {
+          doc.addImage(logoDataUrl, "PNG", W - 44, 2, 38, 10);
+        } catch {
+          /* ignore */
+        }
+      }
+      doc.setTextColor(184, 134, 11);
       doc.setFontSize(7);
       doc.setFont("helvetica", "bold");
-      doc.text(pName.toUpperCase(), 10, 8);
-      doc.setTextColor(148, 163, 184);
-      doc.text(title, 105, 8, { align: "center" });
-      doc.text(`Page ${pageNum++}`, 200, 8, { align: "right" });
+      doc.text("GOLDEN STATE INTEGRATED SYSTEMS", 10, 6);
+      doc.setTextColor(51, 65, 85);
+      doc.text(pName.toUpperCase(), 10, 11);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text(title, W / 2, 8.5, { align: "center" });
+      doc.text(`Page ${pageNum++}`, W - 48, 8.5, { align: "right" });
     };
 
-    // ── COVER ───────────────────────────────────────────
-    if (sections.cover) {
-      doc.setFillColor(15, 23, 42);
+    // ── COVER (standard A4 — skipped when AHJ 36×24 cover is first page) ──
+    if (sections.cover && !ahjCover) {
+      doc.setFillColor(255, 255, 255);
       doc.rect(0, 0, 210, 297, "F");
-      doc.setFillColor(249, 115, 22);
-      doc.rect(0, 58, 210, 2, "F");
-      doc.setTextColor(249, 115, 22);
-      doc.setFontSize(22);
+      doc.setDrawColor(218, 165, 32);
+      doc.setLineWidth(0.6);
+      doc.line(0, 62, 210, 62);
+      if (logoDataUrl) {
+        try {
+          doc.addImage(logoDataUrl, "PNG", 55, 18, 100, 27);
+        } catch {
+          /* ignore */
+        }
+      }
+      doc.setTextColor(30, 41, 59);
+      doc.setFontSize(20);
       doc.setFont("helvetica", "bold");
-      doc.text("FIRE ALARM SYSTEM", 20, 44);
-      doc.text("SUBMITTAL PACKAGE", 20, 56);
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(16);
-      doc.text(pName, 20, 78);
+      doc.text("FIRE ALARM SYSTEM", 20, 54);
+      doc.text("SUBMITTAL PACKAGE", 20, 66);
+      doc.setTextColor(51, 65, 85);
+      doc.setFontSize(14);
+      doc.text(pName, 20, 88);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      doc.setTextColor(148, 163, 184);
+      doc.setTextColor(71, 85, 105);
       const meta = [
         ["Address", project?.address],
         ["Occupancy Group", `IBC Group ${project?.occupancy_group}`],
@@ -114,18 +175,19 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
         ["Report Date", now],
         ["Total Devices", devices.length],
       ];
-      let y = 98;
+      let y = 108;
       meta.forEach(([lbl, val]) => {
         if (!val) return;
         doc.setTextColor(100, 116, 139); doc.text(`${lbl}:`, 20, y);
-        doc.setTextColor(210, 220, 235); doc.text(String(val), 85, y);
+        doc.setTextColor(30, 41, 59); doc.text(String(val), 85, y);
         y += 9;
       });
-      doc.setFillColor(30, 41, 59);
-      doc.rect(20, 248, 170, 28, "F");
-      doc.setTextColor(249, 115, 22); doc.setFontSize(7); doc.setFont("helvetica", "bold");
+      doc.setFillColor(255, 251, 235);
+      doc.setDrawColor(218, 165, 32);
+      doc.rect(20, 248, 170, 28, "FD");
+      doc.setTextColor(146, 64, 14); doc.setFontSize(7); doc.setFont("helvetica", "bold");
       doc.text("AUTHORITY HAVING JURISDICTION", 25, 257);
-      doc.setFont("helvetica", "normal"); doc.setTextColor(148, 163, 184);
+      doc.setFont("helvetica", "normal"); doc.setTextColor(71, 85, 105);
       ["NFPA 72 (2022)", "NFPA 101 (2021)", "IBC (2021)", "NEC / NFPA 70 (2023)"].forEach((ref, i) => {
         doc.text(ref, 25, 264 + i * 4.5);
       });
@@ -135,7 +197,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     if (sections.narrative) {
       doc.addPage();
       addHeader("WRITTEN SYSTEM NARRATIVE");
-      doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F");
+      fillBody();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
       doc.text("1. WRITTEN SYSTEM NARRATIVE", 15, 25);
       doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(51, 65, 85);
@@ -152,7 +214,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
       para.forEach(line => {
         if (!line) { y += 5; return; }
         const lines = doc.splitTextToSize(line, 178);
-        if (y + lines.length * 5 > 285) { doc.addPage(); addHeader("NARRATIVE (cont.)"); doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F"); y = 25; }
+        if (y + lines.length * 5 > pageH() - 12) { doc.addPage(); addHeader("NARRATIVE (cont.)"); fillBody(); y = 25; }
         doc.text(lines, 15, y);
         y += lines.length * 5.5;
       });
@@ -162,7 +224,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     if (sections.codeAnalysis && reqs) {
       doc.addPage();
       addHeader("CODE ANALYSIS");
-      doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F");
+      fillBody();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
       doc.text("2. CODE ANALYSIS", 15, 25);
       let y = 35;
@@ -202,7 +264,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     if (sections.bom) {
       doc.addPage();
       addHeader("BILL OF MATERIALS");
-      doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F");
+      fillBody();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
       doc.text("3. BILL OF MATERIALS", 15, 25);
       let y = 35;
@@ -218,7 +280,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
       doc.text("#", 16, y); doc.text("Device Type", 24, y); doc.text("NFPA Ref", 120, y); doc.text("Qty", 175, y);
       y += 8;
       bomRows.forEach(([type, count], i) => {
-        if (y > 275) { doc.addPage(); addHeader("BOM (cont.)"); doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F"); y = 20; }
+        if (y > pageH() - 22) { doc.addPage(); addHeader("BOM (cont.)"); fillBody(); y = 20; }
         doc.setFillColor(i % 2 === 0 ? 248 : 241, 250, 252); doc.rect(13, y - 4, 182, 8, "F");
         doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(15, 23, 42);
         doc.text(String(i + 1), 16, y);
@@ -238,7 +300,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     if (sections.deviceSchedule) {
       doc.addPage();
       addHeader("DEVICE SCHEDULE");
-      doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F");
+      fillBody();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
       doc.text("4. DEVICE SCHEDULE", 15, 25);
       const schedule = generateDeviceSchedule(devices);
@@ -250,7 +312,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
       y += 8;
       doc.setFont("helvetica", "normal");
       schedule.forEach((row, i) => {
-        if (y > 280) { doc.addPage(); addHeader("DEVICE SCHEDULE (cont.)"); doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F"); y = 20; }
+        if (y > pageH() - 17) { doc.addPage(); addHeader("DEVICE SCHEDULE (cont.)"); fillBody(); y = 20; }
         doc.setFillColor(i % 2 === 0 ? 248 : 241, 250, 252); doc.rect(13, y - 4, 182, 7, "F");
         doc.setFontSize(6.5); doc.setTextColor(15, 23, 42);
         const vals = [
@@ -272,7 +334,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     if (sections.battery) {
       doc.addPage();
       addHeader("BATTERY & ELECTRICAL CALCULATIONS");
-      doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F");
+      fillBody();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
       doc.text("5. BATTERY SIZING CALCULATION", 15, 25);
       const batt = calculateBatterySizing(devices.length);
@@ -305,7 +367,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     if (sections.nacLoading) {
       doc.addPage();
       addHeader("NAC CIRCUIT LOADING");
-      doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F");
+      fillBody();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
       doc.text("6. NAC CIRCUIT LOADING", 15, 25);
       const nac = calculateNacLoading(devices);
@@ -342,7 +404,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     if (sections.wiring) {
       doc.addPage();
       addHeader("WIRING SPECIFICATIONS");
-      doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F");
+      fillBody();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
       doc.text("7. WIRING SPECIFICATIONS", 15, 25);
       const wiring = determineWiringType(project || {});
@@ -379,14 +441,14 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     if (sections.sequence && reqs) {
       doc.addPage();
       addHeader("SEQUENCE OF OPERATIONS");
-      doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F");
+      fillBody();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
       doc.text("8. SEQUENCE OF OPERATIONS", 15, 25);
       doc.setFont("courier", "normal"); doc.setFontSize(7); doc.setTextColor(30, 41, 59);
       const soo = generateSequenceOfOperations(reqs, project);
       let sy = 35;
       soo.split("\n").forEach(line => {
-        if (sy > 285) { doc.addPage(); addHeader("SEQUENCE (cont.)"); doc.setFillColor(248, 250, 252); doc.rect(0, 12, 210, 285, "F"); sy = 20; }
+        if (sy > pageH() - 12) { doc.addPage(); addHeader("SEQUENCE (cont.)"); fillBody(); sy = 20; }
         doc.text(line, 12, sy); sy += 4.5;
       });
     }
@@ -396,21 +458,30 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
       const imgData = captureCanvas();
       if (imgData) {
         doc.addPage("landscape");
-        doc.setFillColor(15, 23, 42); doc.rect(0, 0, 297, 210, "F");
-        doc.setTextColor(249, 115, 22); doc.setFontSize(8); doc.setFont("helvetica", "bold");
+        doc.setFillColor(255, 255, 255); doc.rect(0, 0, 297, 210, "F");
+        doc.setDrawColor(218, 165, 32); doc.setLineWidth(0.35); doc.line(0, 13, 297, 13);
+        if (logoDataUrl) {
+          try {
+            doc.addImage(logoDataUrl, "PNG", 297 - 46, 2, 40, 10);
+          } catch {
+            /* ignore */
+          }
+        }
+        doc.setTextColor(30, 41, 59); doc.setFontSize(8); doc.setFont("helvetica", "bold");
         doc.text("9. FLOOR PLAN WITH DEVICE LAYOUT", 10, 9);
-        doc.setTextColor(148, 163, 184); doc.setFont("helvetica", "normal"); doc.setFontSize(6);
-        doc.text(`${pName}  ·  Active Circuit Labeling  ·  ${now}  ·  Page ${pageNum}`, 297 - 10, 9, { align: "right" });
-        doc.addImage(imgData, "JPEG", 8, 14, 281, 190);
+        doc.setTextColor(100, 116, 139); doc.setFont("helvetica", "normal"); doc.setFontSize(6);
+        doc.text(`${pName}  ·  Active Circuit Labeling  ·  ${now}  ·  Page ${pageNum}`, 254, 9, { align: "right" });
+        doc.addImage(imgData, "JPEG", 8, 16, 281, 188);
       }
     }
 
-    doc.save(`${(pName || "project").replace(/\s+/g, "_")}_Submittal_Package.pdf`);
+    const suffix = ahjCover ? "AHJ_Submittal_Package" : "Submittal_Package";
+    doc.save(`${(pName || "project").replace(/\s+/g, "_")}_${suffix}.pdf`);
     setGenerating(false);
   };
 
   const SECTION_OPTIONS = [
-    { key: "cover", label: "Cover Page" },
+    { key: "cover", label: "Cover Page (A4 only if AHJ sheet off)" },
     { key: "narrative", label: "Written System Narrative" },
     { key: "codeAnalysis", label: "Code Analysis" },
     { key: "bom", label: "Bill of Materials" },
@@ -435,7 +506,40 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
           </Button>
         </CardHeader>
 
-        <CardContent className="p-4 space-y-4">
+        <CardContent className="p-4 space-y-4 max-h-[min(90vh,720px)] overflow-y-auto">
+          <div className="rounded-lg border border-orange-200 bg-orange-50/80 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <Layout className="h-4 w-4 text-orange-600 shrink-0" />
+              <Label className="text-xs font-semibold text-slate-800">AHJ cover (Sheet FA-0, 36×24)</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="ahj" checked={ahjCover} onCheckedChange={(c) => setAhjCover(!!c)} />
+              <Label htmlFor="ahj" className="text-xs cursor-pointer leading-snug">
+                Include professional cover: scope, drawing index, legend with CSFM placeholders (replace with uploaded cut sheets), sequence matrix, battery/NAC summary, Temporal Code-3 note.
+              </Label>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Scope of work (printed on FA-0)</Label>
+              <Textarea
+                className="text-xs min-h-[56px]"
+                placeholder="e.g. Tenant improvement — new addressable devices, duct smoke per mechanical…"
+                value={submittalMeta.scope_of_work}
+                onChange={(e) => setSubmittalMeta((m) => ({ ...m, scope_of_work: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Contractor license # (C-10 / as applicable)</Label>
+              <Input
+                className="text-xs h-8"
+                placeholder="e.g. CSLB #123456"
+                value={submittalMeta.contractor_license}
+                onChange={(e) => setSubmittalMeta((m) => ({ ...m, contractor_license: e.target.value }))}
+              />
+            </div>
+            <p className="text-[10px] text-slate-500">
+              Upload manufacturer PDFs in Documents; map models to <span className="font-mono">project.equipment_specs</span> in a future release — legend uses placeholders until then.
+            </p>
+          </div>
           <div>
             <p className="text-xs text-muted-foreground mb-3">Select sections to include in the PDF:</p>
             <div className="space-y-2">
