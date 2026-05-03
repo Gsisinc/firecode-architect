@@ -23,6 +23,9 @@ const DEVICE_TYPE_LABELS = {
   co_detector: 'CO Detector',
   facp: 'Fire Alarm Control Panel',
   elevator_recall: 'Elevator Recall Detector',
+  monitor_module: 'Monitor Module (sprinkler input)',
+  control_module: 'Control / Relay Module',
+  door_holder: 'Door Holder / Release',
 };
 
 const NFPA_REFS = {
@@ -39,6 +42,9 @@ const NFPA_REFS = {
   co_detector: 'NFPA 720 / IBC §915',
   facp: 'NFPA 72 §10',
   elevator_recall: 'ASME A17.1 / IBC §3006',
+  monitor_module: 'NFPA 72 §17.16',
+  control_module: 'NFPA 72 ch. 23 / §21',
+  door_holder: 'NFPA 101 / NFPA 72 interface',
 };
 
 function buildBOM(devices) {

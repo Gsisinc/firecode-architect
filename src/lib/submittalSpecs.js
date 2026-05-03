@@ -27,6 +27,8 @@ const DEFAULT_BY_TYPE = {
   elevator_recall: { ...PLACEHOLDER, ul_listing: 'UL 268', mounting: 'Lobby / MR / shaft' },
   door_holder: { ...PLACEHOLDER, ul_listing: '—', mounting: 'Listed holder' },
   annunciator: { ...PLACEHOLDER, ul_listing: 'UL 864', mounting: 'Listed' },
+  monitor_module: { ...PLACEHOLDER, ul_listing: 'UL 864 / module listing', mounting: 'Near supervised device / riser' },
+  control_module: { ...PLACEHOLDER, ul_listing: 'UL 864', mounting: 'FACP field wiring / relay enclosure' },
 };
 
 export function getLegendRows(devices = [], equipmentSpecs = {}) {
@@ -51,6 +53,8 @@ export function getLegendRows(devices = [], equipmentSpecs = {}) {
     elevator_recall: 'ER',
     door_holder: 'DH',
     annunciator: 'ANN',
+    monitor_module: 'MM',
+    control_module: 'CM',
   };
   return Object.values(grouped).map((g) => {
     const spec = equipmentSpecs[g.type] || {};

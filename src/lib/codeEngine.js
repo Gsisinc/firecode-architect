@@ -898,6 +898,119 @@ export function assignSprinklerMonitoringPositions(devices, rooms = []) {
   });
 }
 
+/**
+ * Addressable monitor modules supervising dedicated sprinkler riser inputs (NFPA 72 §17.16).
+ * Place offset from each waterflow / tamper symbol after coordinates exist.
+ */
+export function attachSprinklerMonitorModules(devices = []) {
+  const out = [];
+  (devices || []).forEach((d) => {
+    if (d.type !== 'waterflow_switch' && d.type !== 'valve_tamper') return;
+    if (d.x == null || d.y == null) return;
+    const isWf = d.type === 'waterflow_switch';
+    out.push({
+      id: `MM-${d.id}`,
+      type: 'monitor_module',
+      subtype: isWf ? 'waterflow_monitor' : 'tamper_monitor',
+      symbol: 'MM',
+      label: isWf ? `MM-${d.label || 'WF'}` : `MM-${d.label || 'VS'}`,
+      floor: d.floor,
+      x: Math.round(d.x + 26),
+      y: Math.round(d.y),
+      zone: d.zone,
+      circuit: d.circuit || 'SLC-1',
+      supervises_device_id: d.id,
+      codeRef: 'NFPA 72 §17.16',
+      note: isWf
+        ? 'Monitor module — sprinkler waterflow alarm input (coordinate riser / FACP terminations).'
+        : 'Monitor module — valve supervisory input (coordinate with sprinkler contractor).',
+    });
+  });
+  return out;
+}
+
+/**
+ * Elevator shunt / recall interface modules at panel cluster (one per elevator bank).
+ */
+export function calculateElevatorInterfaceModules(projectData = {}, facpPoint = { x: 80, y: 80 }, floor = 1) {
+  const n = Number(projectData.elevator_count) || 0;
+  if (n <= 0) return [];
+  const px = facpPoint?.x ?? 80;
+  const py = facpPoint?.y ?? 80;
+  const devices = [];
+  for (let i = 0; i < n; i++) {
+    devices.push({
+      id: `EI-${i + 1}`,
+      type: 'control_module',
+      subtype: 'elevator_interface',
+      symbol: 'EI',
+      label: `ELV-INT-${i + 1}`,
+      floor,
+      x: Math.round(px + 72 + i * 36),
+      y: Math.round(py),
+      zone: 'ELV-CTRL',
+      circuit: 'SLC-1',
+      codeRef: 'IBC §3006 / NFPA 72 §21.3',
+      note: 'Elevator recall / shunt-trip interface module — coordinate with elevator vendor & wiring diagrams.',
+    });
+  }
+  return devices;
+}
+
+/**
+ * Door magnetic hold-open + release control modules at egress-side spaces (NFPA 101 / NFPA 72 ch. 21).
+ */
+export function calculateDoorReleasePlacement(rooms = [], analysisResults = {}) {
+  const needs = analysisResults.fireAlarmRequired || analysisResults.pullStationsRequired;
+  if (!needs) return [];
+
+  const exitRooms = rooms.filter((r) => {
+    const t = (r.room_type || r.name || '').toLowerCase();
+    return t.includes('exit') || t.includes('stair') || t.includes('vestibule') || t.includes('corridor');
+  });
+  const targets = exitRooms.length > 0 ? exitRooms : [];
+
+  const devices = [];
+  targets.forEach((room, idx) => {
+    const floor = room.floor || 1;
+    const xEdge = room.x + Math.max(8, (Number(room.width) || 0) - 24);
+    const yMid = room.y + (Number(room.height) || 0) / 2;
+    devices.push({
+      id: `DH-${room.id}`,
+      type: 'door_holder',
+      subtype: 'magnetic_hold_open',
+      symbol: 'DH',
+      label: `DH-${String(idx + 1).padStart(2, '0')}`,
+      room_id: room.id,
+      floor,
+      x: Math.round(xEdge),
+      y: Math.round(yMid),
+      mounting_height: 'Installed per manufacturer — coordinate door hardware',
+      zone: `F${floor}-EGRESS`,
+      circuit: 'SLC-1',
+      codeRef: 'NFPA 101 §7.2 / NFPA 72 interface',
+      note: 'Magnetic door hold-open — releases on alarm / supervisory as programmed.',
+    });
+    devices.push({
+      id: `CM-DR-${room.id}`,
+      type: 'control_module',
+      subtype: 'door_release',
+      symbol: 'DR',
+      label: `DR-REL-${String(idx + 1).padStart(2, '0')}`,
+      room_id: room.id,
+      floor,
+      x: Math.round(xEdge - 22),
+      y: Math.round(yMid - 18),
+      zone: `F${floor}-EGRESS`,
+      circuit: 'SLC-1',
+      codeRef: 'NFPA 72 — releasing device interface',
+      note: 'Control module for door holder circuit — locate near FACP field wiring homerun when shown remotely.',
+    });
+  });
+
+  return devices;
+}
+
 // ─── BATTERY SIZING ──────────────────────────────────────────────────────────
 
 /**

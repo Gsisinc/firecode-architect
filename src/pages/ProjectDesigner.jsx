@@ -46,6 +46,9 @@ import {
   generateDeviceSchedule,
   generateSequenceOfOperations,
   HIGH_BAY_SMOKE_CEILING_FT,
+  attachSprinklerMonitorModules,
+  calculateElevatorInterfaceModules,
+  calculateDoorReleasePlacement,
 } from "@/lib/codeEngine";
 
 const DocumentWorkspace = lazy(() => import("@/components/designer/DocumentWorkspace"));
@@ -462,6 +465,7 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     let allDevices = [];
     const floorRooms = rooms.filter((r) => r.floor === activeFloor);
     const activeFloorZones = layoutZones.filter((zone) => zone.floor === activeFloor);
+    const facpPt = suggestFacpPlacementPx(floorRooms, activeFloorZones, activeFloor);
 
     // Smoke detectors — codeEngine returns camelCase (fireAlarmRequired)
     const needsAlarm = analysis.fireAlarmRequired || analysis.fire_alarm_required;
@@ -489,19 +493,31 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
       allDevices.push(...calculateHornPlacement(floorRooms));
     }
 
-    // Elevator recall
+    // Elevator recall (supervisory lobby / MR / shaft detectors)
     const elevDevices = calculateElevatorRecallDetectors(project).filter((d) => d.floor === activeFloor);
     allDevices.push(...elevDevices);
 
-    // Sprinkler monitoring (assign plan coordinates so symbols render on the canvas)
-    const sprinklerDevices = assignSprinklerMonitoringPositions(
-      calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor),
-      floorRooms
-    );
-    allDevices.push(...sprinklerDevices);
+    const sprinklerOk = ['Full (NFPA 13)', 'Full (NFPA 13R)', 'Partial'].includes(project.sprinkler_status || '');
+    if (sprinklerOk) {
+      const sprinklerDevices = assignSprinklerMonitoringPositions(
+        calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor),
+        floorRooms
+      );
+      allDevices.push(...sprinklerDevices);
+      allDevices.push(...attachSprinklerMonitorModules(sprinklerDevices));
+    }
+
+    // Elevator interface / shunt modules at panel cluster (floor 1)
+    if (needsAlarm && activeFloor === 1 && (Number(project.elevator_count) || 0) > 0) {
+      allDevices.push(...calculateElevatorInterfaceModules(project, facpPt, activeFloor));
+    }
+
+    // Door hold-open + door release control modules (exit / stair / vestibule rooms)
+    if (needsAlarm) {
+      allDevices.push(...calculateDoorReleasePlacement(floorRooms, analysis));
+    }
 
     if (needsAlarm && activeFloor === 1) {
-      const facpPt = suggestFacpPlacementPx(floorRooms, activeFloorZones, activeFloor);
       const defH = ceilingPayload.default;
       const highBay = defH >= HIGH_BAY_SMOKE_CEILING_FT;
       allDevices.push(
@@ -547,7 +563,31 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     // Assign addresses
     allDevices = allDevices.map((d, i) => ({
       ...d,
-      address: d.address || `${d.type === "smoke_detector" ? "SD" : d.type === "heat_detector" ? "HD" : d.type === "pull_station" ? "PS" : d.type === "horn_strobe" ? "HS" : d.type === "strobe" ? "STR" : d.type === "waterflow_switch" ? "WF" : d.type === "valve_tamper" ? "VS" : d.type === "duct_detector" ? "DD" : "DEV"}-${String(i + 1).padStart(3, "0")}`,
+      address:
+        d.address ||
+        `${d.type === "smoke_detector"
+          ? "SD"
+          : d.type === "heat_detector"
+            ? "HD"
+            : d.type === "pull_station"
+              ? "PS"
+              : d.type === "horn_strobe"
+                ? "HS"
+                : d.type === "strobe"
+                  ? "STR"
+                  : d.type === "waterflow_switch"
+                    ? "WF"
+                    : d.type === "valve_tamper"
+                      ? "VS"
+                      : d.type === "duct_detector"
+                        ? "DD"
+                        : d.type === "monitor_module"
+                          ? "MM"
+                          : d.type === "control_module"
+                            ? "CM"
+                            : d.type === "door_holder"
+                              ? "DH"
+                              : "DEV"}-${String(i + 1).padStart(3, "0")}`,
       zone: d.zone || `Floor ${d.floor || 1}`,
       generated_by: "auto_place",
     }));

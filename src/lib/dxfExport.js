@@ -17,6 +17,9 @@ const DEVICE_LAYERS = {
   duct_detector:    { layer: "FA-DUCT", color: 5 },  // blue
   waterflow_switch: { layer: "FA-SPKL", color: 3 },  // green
   valve_tamper:     { layer: "FA-SPKL", color: 3 },  // green
+  monitor_module:   { layer: "FA-MOD",  color: 3 },
+  control_module:   { layer: "FA-MOD",  color: 8 },
+  door_holder:      { layer: "FA-DOOR", color: 1 },
   co_detector:      { layer: "FA-CO",   color: 92 }, // light green
   facp:             { layer: "FA-FACP", color: 1 },  // red
   elevator_recall:  { layer: "FA-ELEV", color: 5 },  // blue
@@ -32,6 +35,9 @@ const DEVICE_SYMBOL = {
   duct_detector:    "DD",
   waterflow_switch: "WF",
   valve_tamper:     "VS",
+  monitor_module:   "MM",
+  control_module:   "CM",
+  door_holder:      "DH",
   co_detector:      "CO",
   facp:             "FACP",
   elevator_recall:  "SD-E",

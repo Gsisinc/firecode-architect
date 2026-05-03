@@ -16,6 +16,8 @@ export default function NFPALegend({ visible }) {
     { symbol: 'SW', shape: 'square', color: '#06b6d4', label: 'Speaker' },
     { symbol: 'WF', shape: 'circle', color: '#10b981', label: 'Waterflow Switch' },
     { symbol: 'VS', shape: 'circle', color: '#14b8a6', label: 'Valve Tamper Switch' },
+    { symbol: 'MM', shape: 'circle', color: '#0f766e', label: 'Monitor Module (supervisory input)' },
+    { symbol: 'CM', shape: 'square', color: '#475569', label: 'Control / Relay Module' },
     { symbol: 'D', shape: 'circle', color: '#6366f1', label: 'Duct Smoke Detector' },
     { symbol: 'CO', shape: 'circle', color: '#84cc16', label: 'CO Detector' },
     { symbol: 'FACP', shape: 'rect', color: '#ef4444', label: 'Fire Alarm Control Panel' },

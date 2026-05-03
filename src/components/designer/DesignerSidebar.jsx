@@ -23,6 +23,8 @@ export const DEVICE_PALETTE = [
   { type: 'beam_detector',    symbol: 'B',    prefix: 'BD',   label: 'Beam Smoke Detector',  color: '#7c3aed', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 beam detector / NFPA 72 §17.7' },
   { type: 'waterflow_switch', symbol: 'WF',   prefix: 'WF',   label: 'Waterflow Switch',     color: '#059669', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 sprinkler waterflow / NFPA 72 §17.16' },
   { type: 'valve_tamper',     symbol: 'VS',   prefix: 'VS',   label: 'Valve Tamper Switch',  color: '#0d9488', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 supervisory valve / NFPA 72 §17.16' },
+  { type: 'monitor_module',   symbol: 'MM',   prefix: 'MM',   label: 'Monitor Module',       color: '#0f766e', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 72 — addressable module supervising sprinkler device circuit' },
+  { type: 'control_module',   symbol: 'CM',   prefix: 'CM',   label: 'Control / Relay Module', color: '#475569', shape: 'square', defaultCircuitType: 'SLC', nfpa: 'NFPA 72 — door release, elevator, fan interface modules' },
   { type: 'co_detector',      symbol: 'CO',   prefix: 'CO',   label: 'CO Detector',          color: '#65a30d', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 gas detector family / IBC §915' },
   { type: 'door_holder',      symbol: 'DH',   prefix: 'DH',   label: 'Door Holdback',        color: '#dc2626', shape: 'square',  defaultCircuitType: 'AUX', nfpa: 'NFPA 170 door release/hold-open interface' },
   { type: 'annunciator',      symbol: 'ANN',  prefix: 'ANN',  label: 'Remote Annunciator',   color: '#dc2626', shape: 'panel',   defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm annunciator' },

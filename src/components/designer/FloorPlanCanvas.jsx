@@ -60,6 +60,10 @@ const NFPA_SYMBOLS = {
   horn: diamondSymbol('H', '#ef4444'),
   waterflow_switch: diamondSymbol('WF', '#059669'),
   valve_tamper: diamondSymbol('VS', '#0d9488'),
+  monitor_module: diamondSymbol('MM', '#0f766e'),
+  control_module: rectSymbol('CM', '#475569', 2.4, 1.35),
+  door_release: rectSymbol('DR', '#64748b', 2.2, 1.25),
+  elevator_interface: rectSymbol('EI', '#6366f1', 2.5, 1.35),
   duct_detector: rectSymbol('D', '#4f46e5', 2.5, 1.4, (ctx, x, y, r) => {
     const w = r * 2.5;
     ctx.setLineDash([3, 2]);

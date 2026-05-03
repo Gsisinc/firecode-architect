@@ -2,6 +2,9 @@ import { useMemo } from 'react';
 import { generateRiserDiagram } from '@/lib/codeEngine';
 
 const DEVICE_COLORS = {
+  monitor_module: '#0f766e',
+  control_module: '#475569',
+  door_holder: '#dc2626',
   smoke_detector: '#2563eb',
   heat_detector: '#d97706',
   pull_station: '#dc2626',
@@ -17,6 +20,9 @@ const DEVICE_COLORS = {
 };
 
 const DEVICE_SYMBOL = {
+  monitor_module: 'MM',
+  control_module: 'CM',
+  door_holder: 'DH',
   smoke_detector: 'S', heat_detector: 'H', pull_station: 'PS',
   horn_strobe: 'H/S', strobe: 'CD', speaker: 'SP',
   duct_detector: 'D', waterflow_switch: 'WF', valve_tamper: 'VS',
@@ -26,11 +32,15 @@ const DEVICE_SYMBOL = {
 function glyphForDevice(d) {
   if (d?.symbol) return String(d.symbol);
   if (d?.type === 'smoke_detector' && d?.subtype === 'photoelectric_beam') return 'B';
+  if (d?.subtype === 'door_release') return 'DR';
+  if (d?.subtype === 'elevator_interface') return 'EI';
   return DEVICE_SYMBOL[d?.type] || '?';
 }
 
 function colorForDevice(d) {
   if (d?.type === 'smoke_detector' && d?.subtype === 'photoelectric_beam') return '#b45309';
+  if (d?.subtype === 'elevator_interface') return '#6366f1';
+  if (d?.subtype === 'door_release') return '#64748b';
   return DEVICE_COLORS[d?.type] || '#64748b';
 }
 
@@ -87,7 +97,7 @@ function SchematicRiser({ project, devices }) {
     return Array.from({ length: numFloors }, (_, i) => {
       const floor = numFloors - i; // draw top floor first
       const devs = byFloor[floor] || [];
-      const slc = devs.filter(d => ['smoke_detector','heat_detector','pull_station','duct_detector','waterflow_switch','valve_tamper','co_detector','elevator_recall'].includes(d.type));
+      const slc = devs.filter(d => ['smoke_detector','heat_detector','pull_station','duct_detector','waterflow_switch','valve_tamper','co_detector','elevator_recall','monitor_module','control_module','door_holder'].includes(d.type));
       const nac = devs.filter(d => ['horn_strobe','strobe','speaker','horn'].includes(d.type));
       return { floor, slc, nac, y: (i * FLOOR_H) + 40 };
     });

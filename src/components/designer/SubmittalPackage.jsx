@@ -33,6 +33,9 @@ const DEVICE_TYPE_LABELS = {
   valve_tamper: "Valve Tamper Switch",
   co_detector: "CO Detector",
   facp: "Fire Alarm Control Panel",
+  monitor_module: "Monitor Module",
+  control_module: "Control / Relay Module",
+  door_holder: "Door Holder (hold-open)",
 };
 
 const NFPA_REFS = {
@@ -44,6 +47,9 @@ const NFPA_REFS = {
   waterflow_switch: "NFPA 72 §17.12",
   valve_tamper: "NFPA 72 §17.13",
   facp: "NFPA 72 §10",
+  monitor_module: "NFPA 72 §17.16",
+  control_module: "NFPA 72 ch. 23",
+  door_holder: "NFPA 72 / NFPA 101",
 };
 
 export default function SubmittalPackage({ project, devices, rooms, wires = [], floorPlans = [], analysisResults, canvasRef, onClose, onSaveSubmittalMeta }) {
