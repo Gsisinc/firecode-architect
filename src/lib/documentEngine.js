@@ -1,5 +1,13 @@
-import * as pdfjsLib from 'pdfjs-dist/webpack.mjs';
 import { createWorker } from 'tesseract.js';
+
+let pdfjsPromise;
+
+async function loadPdfjs() {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import('pdfjs-dist/webpack.mjs');
+  }
+  return pdfjsPromise;
+}
 
 export const DOCUMENT_PERMISSIONS = {
   owner: ['view', 'markup', 'measure', 'ocr', 'batch', 'manage_sets', 'manage_permissions', 'collaborate'],
@@ -56,6 +64,7 @@ export function createDocumentRecord(fileOrData, options = {}) {
 }
 
 export async function extractPdfMetadataAndText(fileUrl) {
+  const pdfjsLib = await loadPdfjs();
   const loadingTask = pdfjsLib.getDocument(fileUrl);
   const pdf = await loadingTask.promise;
   const pages = [];
@@ -82,6 +91,7 @@ export async function extractPdfMetadataAndText(fileUrl) {
 }
 
 export async function extractPdfPageInfo(fileUrl) {
+  const pdfjsLib = await loadPdfjs();
   const loadingTask = pdfjsLib.getDocument(fileUrl);
   const pdf = await loadingTask.promise;
   const pages = [];
@@ -104,6 +114,7 @@ export async function extractPdfPageInfo(fileUrl) {
 }
 
 export async function renderPdfPageToDataUrl(fileUrl, pageNumber = 1, scale = 2) {
+  const pdfjsLib = await loadPdfjs();
   const source = fileUrl?.startsWith?.('data:')
     ? { data: Uint8Array.from(atob(fileUrl.split(',')[1]), char => char.charCodeAt(0)) }
     : fileUrl;
