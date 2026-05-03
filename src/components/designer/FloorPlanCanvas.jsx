@@ -328,6 +328,16 @@ function drawLayoutZone(ctx, zone, selected = false) {
   ctx.restore();
 }
 
+function getLayoutZoneCanvasStyle(type) {
+  const meta = getLayoutZoneMeta(type);
+  return {
+    label: meta.label,
+    color: meta.color,
+    fill: `${meta.color}18`,
+    dash: meta.blocksPlacement ? [8, 4] : [4, 3],
+  };
+}
+
 export default function FloorPlanCanvas({
   floorPlanUrl,
   floorPlanFileType,
@@ -357,6 +367,8 @@ export default function FloorPlanCanvas({
   onCircuitTypeChange,
   onCircuitIdChange,
   onOpenDeviceProperties,
+  onDetectSimilarLayoutZones,
+  detectingSimilarLayoutZones = false,
 }) {
   const internalCanvasRef = useRef(null);
   const canvasRef = externalCanvasRef || internalCanvasRef;
@@ -586,41 +598,17 @@ export default function FloorPlanCanvas({
     }
 
     if (layers.layout_zones !== false) {
-      layoutZones.filter((zone) => zone.floor === currentFloor).forEach((zone) => {
-        const style = getLayoutZoneStyle(zone.zone_type);
-        ctx.save();
-        ctx.strokeStyle = style.color;
-        ctx.fillStyle = style.fill;
-        ctx.lineWidth = 1.6;
-        ctx.setLineDash(style.dash);
-        ctx.beginPath();
-        ctx.rect(zone.x, zone.y, zone.width, zone.height);
-        ctx.fill();
-        ctx.stroke();
-        ctx.setLineDash([]);
-        if (layers.labels !== false) {
-          ctx.fillStyle = 'rgba(255,255,255,0.9)';
-          const label = zone.name || style.label;
-          ctx.font = 'bold 9px Inter, sans-serif';
-          const labelWidth = ctx.measureText(label).width + 8;
-          ctx.fillRect(zone.x + 4, zone.y + 4, labelWidth, 15);
-          ctx.fillStyle = style.color;
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'top';
-          ctx.fillText(label, zone.x + 8, zone.y + 7);
-        }
-        ctx.restore();
-      });
+      layoutZones.filter((zone) => zone.floor === currentFloor).forEach((zone) => drawLayoutZone(ctx, zone));
     }
 
     if (drawingLayoutZone) {
       const { x, y, ex, ey, zoneType } = drawingLayoutZone;
-      const style = getLayoutZoneStyle(zoneType);
+      const meta = getLayoutZoneMeta(zoneType);
       const w = Math.abs(ex - x);
       const h = Math.abs(ey - y);
       ctx.save();
-      ctx.strokeStyle = style.color;
-      ctx.fillStyle = style.fill;
+      ctx.strokeStyle = meta.color;
+      ctx.fillStyle = `${meta.color}18`;
       ctx.lineWidth = 2;
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
@@ -629,7 +617,7 @@ export default function FloorPlanCanvas({
       ctx.stroke();
       ctx.restore();
       if (w > 20 && h > 20) {
-        drawLabel(ctx, style.label, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, style.color);
+        drawLabel(ctx, meta.label, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, meta.color);
       }
     }
 
@@ -956,7 +944,7 @@ export default function FloorPlanCanvas({
       const rh = Math.abs(ey - y);
       if (rw > 15 && rh > 15) {
         const meta = getLayoutZoneMeta(zoneType);
-        onLayoutZonesChange?.([...(layoutZones || []), {
+        const newZone = {
           id: `zone-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           floor: currentFloor,
           zone_type: zoneType,
@@ -966,7 +954,9 @@ export default function FloorPlanCanvas({
           width: Math.round(rw),
           height: Math.round(rh),
           source: 'manual',
-        }]);
+        };
+        onLayoutZonesChange?.([...(layoutZones || []), newZone]);
+        onDetectSimilarLayoutZones?.(newZone);
       }
       setDrawingLayoutZone(null);
     }
@@ -979,7 +969,7 @@ export default function FloorPlanCanvas({
       setDrawingMarkup(null);
     }
     setDragging(null);
-  }, [currentFloor, drawingLayoutZone, drawingMarkup, drawingRoom, layoutZones, markups, onLayoutZonesChange, onMarkupsChange, onRoomNameRequest, onRoomsChange, rooms, selectedTool]);
+  }, [currentFloor, drawingLayoutZone, drawingMarkup, drawingRoom, layoutZones, markups, onDetectSimilarLayoutZones, onLayoutZonesChange, onMarkupsChange, onRoomNameRequest, onRoomsChange, rooms, selectedTool]);
 
   const handleWheel = useCallback((event) => {
     event.preventDefault();
@@ -1019,7 +1009,7 @@ export default function FloorPlanCanvas({
 
   const getCursor = () => {
     if (selectedTool === 'pan' || dragging?.type === 'pan') return dragging ? 'grabbing' : 'grab';
-    if (selectedTool === 'room' || isMarkupTool(selectedTool)) return 'crosshair';
+    if (selectedTool === 'room' || isMarkupTool(selectedTool) || isLayoutZoneTool(selectedTool)) return 'crosshair';
     if (selectedTool === 'delete') return 'not-allowed';
     if (selectedTool === 'wire') return wireStart ? 'cell' : 'crosshair';
     if (selectedTool?.startsWith('place_device_')) return 'copy';
@@ -1087,6 +1077,9 @@ export default function FloorPlanCanvas({
         {selectedTool?.startsWith('place_device_') && <><span className="text-gray-300">|</span><span className="text-orange-500 font-semibold">PLACE - click or drag from palette</span></>}
         {selectedTool === 'wire' && <><span className="text-gray-300">|</span><span className="font-semibold" style={{ color: getCircuitMeta(selectedCircuitType).color }}>{wireStart ? `WIRE ${selectedCircuitId} - click target` : `WIRE ${selectedCircuitId} - click source`}</span></>}
         {selectedTool === 'room' && <><span className="text-gray-300">|</span><span className="text-orange-500 font-semibold">DRAW ROOM</span></>}
+        {isLayoutZoneTool(selectedTool) && (
+          <><span className="text-gray-300">|</span><span className="text-violet-600 font-semibold">{detectingSimilarLayoutZones ? 'AI FINDING SIMILAR...' : 'DRAW LAYOUT ZONE'}</span></>
+        )}
         {selectedTool === 'delete' && <><span className="text-gray-300">|</span><span className="text-red-500 font-semibold">DELETE</span></>}
         {isMarkupTool(selectedTool) && <><span className="text-gray-300">|</span><span className="text-emerald-600 font-semibold">MARKUP - {getMarkupTool(selectedTool)?.label}</span></>}
       </div>

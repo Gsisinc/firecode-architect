@@ -91,6 +91,7 @@ export default function ProjectDesigner() {
   const [selectedCircuitId, setSelectedCircuitId] = useState('SLC-1');
   const [selectedSheetId, setSelectedSheetId] = useState(null);
   const [customPlanType, setCustomPlanType] = useState('');
+  const [detectingSimilarZones, setDetectingSimilarZones] = useState(false);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -515,6 +516,67 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     toast.success("Layout zone deleted");
   };
 
+  const handleDetectSimilarLayoutZones = async (seedZone) => {
+    if (!seedZone || detectingSimilarZones) return;
+    const plan = floorPlans.find(fp => fp.floor_number === activeFloor);
+    if (!plan?.image_url) {
+      toast.error("Assign a floor plan before detecting similar racks or aisles");
+      return;
+    }
+
+    setDetectingSimilarZones(true);
+    try {
+      let analysisImageUrl = plan.rendered_image_url || plan.image_url;
+      if (!plan.rendered_image_url && plan.file_type === 'application/pdf') {
+        const renderedPage = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
+        analysisImageUrl = renderedPage.dataUrl;
+      }
+      const zoneType = seedZone.zone_type || seedZone.type || 'rack';
+      const metaLabel = zoneType.replace(/_/g, ' ');
+      const result = await base44.integrations.Core.InvokeLLM({
+        prompt: `This is a floor plan image. The user manually identified one ${metaLabel} zone at pixel rectangle x=${seedZone.x}, y=${seedZone.y}, width=${seedZone.width}, height=${seedZone.height}.
+
+Find other visually similar ${metaLabel} zones on the same drawing. Look for repeated shapes, parallel rows, fixture/rack blocks, aisle corridors, or similar geometry matching the marked example.
+
+Return only zones that are clearly the same kind of object. Do not include the original marked rectangle unless needed for context.`,
+        file_urls: [analysisImageUrl],
+        response_json_schema: {
+          type: "object",
+          properties: {
+            layout_zones: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  zone_type: { type: "string" },
+                  name: { type: "string" },
+                  x1_px: { type: "number" },
+                  y1_px: { type: "number" },
+                  x2_px: { type: "number" },
+                  y2_px: { type: "number" },
+                  confidence: { type: "number" },
+                  reason: { type: "string" }
+                }
+              }
+            }
+          }
+        }
+      });
+      const detectedZones = normalizeDetectedLayoutZones(
+        (result?.layout_zones || []).map((zone) => ({ ...zone, zone_type: zoneType, name: zone.name || seedZone.name })),
+        activeFloor
+      );
+      const nextZones = mergeLayoutZones(layoutZones, detectedZones);
+      setLocalLayoutZones(nextZones);
+      await saveProjectPatch({ layout_zones: nextZones });
+      toast.success(`Detected ${Math.max(0, nextZones.length - layoutZones.length)} similar ${metaLabel} zone(s)`);
+    } catch (error) {
+      toast.error(`Similar zone detection failed: ${error?.message || "Unknown error"}`);
+    } finally {
+      setDetectingSimilarZones(false);
+    }
+  };
+
   const handleDeleteWire = (wireId) => {
     setLocalWires(wires.filter((wire) => wire.id !== wireId));
     toast.success("Wire segment deleted");
@@ -781,6 +843,8 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
                   setSelectedDevice(device);
                   setRightPanel(null);
                 }}
+                onDetectSimilarLayoutZones={handleDetectSimilarLayoutZones}
+                detectingSimilarLayoutZones={detectingSimilarZones}
               />
               <FloorPlanUploader
                 floorNumber={activeFloor}
