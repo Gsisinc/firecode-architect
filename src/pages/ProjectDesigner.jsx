@@ -725,6 +725,8 @@ Return only zones that are clearly the same kind of object. Do not include the o
     [floorPlans, activeFloor]
   );
 
+  const canvasPxPerFt = useMemo(() => getFloorScale(floorPlans, activeFloor), [floorPlans, activeFloor]);
+
   if (isLoading || !project) {
     return (
       <div className="h-screen flex items-center justify-center">
@@ -857,7 +859,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 onWiresChange={setLocalWires}
                 markups={markups}
                 onMarkupsChange={setLocalMarkups}
-                pxPerFt={10}
+                pxPerFt={canvasPxPerFt}
                 selectedCircuitType={selectedCircuitType}
                 selectedCircuitId={selectedCircuitId}
                 onCircuitTypeChange={setSelectedCircuitType}
@@ -965,7 +967,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                   project={project}
                   markups={markups}
                   currentFloor={activeFloor}
-                  pxPerFt={10}
+                  pxPerFt={canvasPxPerFt}
                   onUpdateMarkup={handleUpdateMarkup}
                   onDeleteMarkup={handleDeleteMarkup}
                 />

@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CheckCircle2, XCircle, AlertTriangle, ClipboardList } from "lucide-react";
 import { validateDesign } from "@/lib/designValidation";
+import { buildLifeSafetyReviewFlags } from "@/lib/lifeSafetyReview";
 
 const DEVICE_TYPES = {
   smoke_detector: "Smoke Detector",
@@ -213,6 +214,10 @@ export default function ComplianceChecklist({ project, devices, analysisResults,
     () => buildChecklist(project, devices, analysisResults, rooms),
     [project, devices, analysisResults, rooms]
   );
+  const lifeSafetyFlags = useMemo(
+    () => buildLifeSafetyReviewFlags(project, analysisResults, floorPlans),
+    [project, analysisResults, floorPlans]
+  );
   const validation = useMemo(
     () => validateDesign({ project, devices, rooms, wires, floorPlans, analysisResults }),
     [project, devices, rooms, wires, floorPlans, analysisResults]
@@ -255,6 +260,35 @@ export default function ComplianceChecklist({ project, devices, analysisResults,
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-5">
+          {lifeSafetyFlags.length > 0 && (
+            <div>
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                Life safety — engineer review
+              </h3>
+              <p className="text-[10px] text-slate-500 mb-2">
+                Items IBC / NFPA 101 / NFPA 72 cannot resolve from geometry alone (high bays, mechanical, smoke control).
+              </p>
+              <div className="space-y-1.5">
+                {lifeSafetyFlags.map((f) => (
+                  <div
+                    key={f.code}
+                    className={`p-2.5 rounded-lg border text-xs ${
+                      f.severity === "error"
+                        ? "bg-red-50 border-red-100 text-red-900"
+                        : f.severity === "warning"
+                          ? "bg-amber-50 border-amber-100 text-amber-900"
+                          : "bg-blue-50 border-blue-100 text-blue-900"
+                    }`}
+                  >
+                    <p className="font-semibold">{f.title}</p>
+                    <p className="text-[10px] mt-1 leading-snug opacity-90">{f.detail}</p>
+                    {f.action && <p className="text-[10px] mt-1 opacity-80">{f.action}</p>}
+                    <p className="text-[9px] mt-1 font-mono opacity-70">{f.refs?.join(" · ")}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {validation.issues.length > 0 && (
             <div>
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Design Validation</h3>

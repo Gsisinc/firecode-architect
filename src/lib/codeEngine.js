@@ -41,7 +41,11 @@ export function determineSystemRequirements(projectData) {
     pullStationException: null,
     smokeDetectionRequired: false,
     coDetectionRequired: false,
-    elevatorRecallRequired: elevator_count >= 1 && num_floors >= 3,
+    elevatorRecallRequired: false,
+    stairPressurizationReviewRequired: false,
+    hvacFanShutdownReviewRequired: false,
+    mechanicalHvacDrawingReviewRequired: false,
+    highBayCeilingReviewRequired: false,
     handicappedRoomsRequired: 0,
     miniHornsInSleepingRooms: false,
     smokeAlarmsInSleepingRooms: false,
@@ -300,6 +304,17 @@ export function determineSystemRequirements(projectData) {
     result.specialNotes.push('CO detection may be required in dwelling/sleeping units with fuel-burning appliances (IBC §915)');
   }
 
+  /* IBC §3006 / NFPA 72 §21.3 — elevator Phase I when FA serves elevators (typ. any occupied building with elevators + FA). */
+  result.elevatorRecallRequired =
+    (elevator_count >= 1) &&
+    (result.fireAlarmRequired || num_floors >= 2);
+
+  /* Smoke control / mechanical packages — cannot auto-place; flag for PE review (IBC §909, NFPA 101 egress). */
+  result.stairPressurizationReviewRequired = num_floors >= 2 && result.fireAlarmRequired;
+  result.hvacFanShutdownReviewRequired = result.fireAlarmRequired && (isFullySprinklered || num_floors >= 2);
+  result.mechanicalHvacDrawingReviewRequired = result.fireAlarmRequired;
+  result.highBayCeilingReviewRequired = (projectData.default_ceiling_height || 0) >= 18;
+
   return result;
 }
 
@@ -324,6 +339,9 @@ export function calculateHandicappedRooms(totalSleepingUnits) {
 
 // ─── SMOKE DETECTOR PLACEMENT ────────────────────────────────────────────────
 
+/** Above this ceiling height (ft), spot-type density grids are not used — beam/projected smoke placeholders only (NFPA 72 §17.7.5). */
+export const HIGH_BAY_SMOKE_CEILING_FT = 18;
+
 /** NFPA 72 §17.7 - Smoke detector spacing calculations */
 export function calculateSmokeDetectorPlacement(rooms, ceilingData = {}) {
   const devices = [];
@@ -335,6 +353,31 @@ export function calculateSmokeDetectorPlacement(rooms, ceilingData = {}) {
     const ceilingHeight = room.ceiling_height || ceilingData.default || 9;
     const ceilingType = room.ceiling_type || ceilingData.default_type || 'smooth_flat';
     const sqft = room.sqft || (room.width * room.height) || 0;
+
+    /* High-bay / rack retail (e.g. 30 ft clear height): listed projected beam or aspiration — not a ceiling spot grid. */
+    if (ceilingHeight >= HIGH_BAY_SMOKE_CEILING_FT) {
+      const cx = room.x + (room.width || 0) / 2;
+      const cy = room.y + (room.height || 0) / 2;
+      devices.push({
+        id: `BS-${addressCounter}`,
+        type: 'smoke_detector',
+        subtype: 'photoelectric_beam',
+        symbol: 'B',
+        x: Math.round(cx),
+        y: Math.round(cy),
+        address: `1-${String(addressCounter).padStart(3, '0')}`,
+        label: `BS-${String(addressCounter).padStart(3, '0')}`,
+        room_id: room.id,
+        floor: room.floor,
+        mounting_height: `${ceilingHeight} ft stratified layer — projected beam / aspiration (NFPA 72 §17.7.5)`,
+        zone: `F${room.floor}-HIGHBAY`,
+        circuit: `SLC-1`,
+        codeRef: 'NFPA 72 §17.7.5',
+        note: 'High bay: verify transmitter/receiver paths with structural bays; coordinate with mechanical smoke management.',
+      });
+      addressCounter++;
+      return;
+    }
 
     // NFPA 72 §17.7.3.2 - Max 900 sq ft per detector, 30' x 30' grid
     let maxSpacing = 30; // feet
@@ -350,13 +393,10 @@ export function calculateSmokeDetectorPlacement(rooms, ceilingData = {}) {
       maxSpacing = 25; // Conservative reduction for beamed ceilings
     }
 
-    // High bay detection - use projected beam for > 15 ft (NFPA 72 §17.7.5)
     const detectorType = ceilingHeight > 15 ? 'photoelectric_beam' : 'photoelectric';
 
     const cols = Math.max(1, Math.ceil(Math.sqrt(sqft / 900)));
     const rows = Math.max(1, Math.ceil(sqft / (cols * maxSpacing * maxSpacing)));
-    const totalDetectors = cols * rows;
-
     const cellWidth = room.width / cols;
     const cellHeight = room.height / rows;
 

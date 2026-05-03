@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Layers, Zap, Download, ChevronDown, ChevronRight,
   Eye, EyeOff, LayoutList, AlertTriangle, CheckCircle2,
@@ -7,6 +7,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { MARKUP_TOOLS } from '@/lib/bluebeamMarkupTools';
 import { feetBetween, getFloorScale } from '@/lib/designScale';
+import { buildLifeSafetyReviewFlags } from '@/lib/lifeSafetyReview';
 
 // NFPA 170-aligned fire alarm device palette. Lettering follows common NFPA 170 plan-symbol
 // conventions; device engineering requirements still come from NFPA 72/NEC checks elsewhere.
@@ -77,6 +78,11 @@ export default function DesignerSidebar({
   }, {});
   const floorWireSummary = summarizeWireByType({ wires, devices, floorPlans, floor: currentFloor });
   const allWireSummary = summarizeWireByType({ wires, devices, floorPlans });
+
+  const lifeSafetyFlags = useMemo(
+    () => buildLifeSafetyReviewFlags(project, requirements, floorPlans),
+    [project, requirements, floorPlans]
+  );
 
   const toggle = (s) => setOpenSection(p => p === s ? null : s);
 
@@ -291,6 +297,29 @@ export default function DesignerSidebar({
             })}
           </div>
         </SidebarSection>
+
+        {lifeSafetyFlags.length > 0 && (
+          <SidebarSection title="Life safety — review" icon={AlertTriangle} open={openSection === 'lfs'} onToggle={() => toggle('lfs')}>
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-0.5">
+              {lifeSafetyFlags.map((f) => (
+                <div
+                  key={f.code}
+                  className={`text-[10px] rounded p-1.5 border ${
+                    f.severity === 'error'
+                      ? 'bg-red-950/50 border-red-500/30 text-red-200'
+                      : f.severity === 'warning'
+                        ? 'bg-amber-950/40 border-amber-500/30 text-amber-100'
+                        : 'bg-slate-800/80 border-white/10 text-slate-300'
+                  }`}
+                >
+                  <p className="font-semibold text-white/90">{f.title}</p>
+                  <p className="text-white/60 mt-0.5 leading-snug">{f.detail}</p>
+                  <p className="text-white/35 mt-1 text-[9px]">{f.refs?.join(' · ')}</p>
+                </div>
+              ))}
+            </div>
+          </SidebarSection>
+        )}
 
         {/* Code Requirements */}
         {requirements && (

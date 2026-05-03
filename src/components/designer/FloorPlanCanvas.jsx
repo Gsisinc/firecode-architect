@@ -14,6 +14,14 @@ const NOTIFICATION_TYPES = ['horn_strobe', 'strobe', 'speaker', 'horn'];
 // while preserving app-specific coloring for readability on uploaded drawings.
 const NFPA_SYMBOLS = {
   smoke_detector: circleSymbol('S', '#2563eb'),
+  photoelectric_beam: circleSymbol('B', '#1d4ed8', (ctx, x, y, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x - r * 1.1, y);
+    ctx.lineTo(x + r * 1.1, y);
+    ctx.strokeStyle = '#1d4ed8';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }),
   heat_detector: circleSymbol('H', '#d97706'),
   beam_detector: circleSymbol('B', '#7c3aed', (ctx, x, y, r) => {
     ctx.beginPath();
