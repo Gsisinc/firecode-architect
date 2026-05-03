@@ -50,11 +50,6 @@ export default function ProjectDesigner() {
   const queryClient = useQueryClient();
 
   const [activeFloor, setActiveFloor] = useState(1);
-  const [showGrid, setShowGrid] = useState(false);
-  const [showCircuits, setShowCircuits] = useState(true);
-  const [showLabels, setShowLabels] = useState(true);
-  const [drawingRoom, setDrawingRoom] = useState(false);
-  const [roomDrawType, setRoomDrawType] = useState("office");
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [activeTab, setActiveTab] = useState('canvas');
   const [showCalculations, setShowCalculations] = useState(false);
@@ -87,6 +82,8 @@ export default function ProjectDesigner() {
   const [localDocumentWorkspace, setLocalDocumentWorkspace] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
   const [localWires, setLocalWires] = useState(null);
+  const [selectedCircuitType, setSelectedCircuitType] = useState('SLC');
+  const [selectedCircuitId, setSelectedCircuitId] = useState('SLC-1');
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -382,12 +379,6 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
     setLocalRooms([...rooms, newRoom]);
   };
 
-  const handleDeviceDrag = (deviceId, x, y) => {
-    setLocalDevices(
-      devices.map((d) => (d.id === deviceId ? { ...d, x, y } : d))
-    );
-  };
-
   const handleUpdateDevice = (deviceId, updates) => {
     const updated = devices.map((d) => (d.id === deviceId ? { ...d, ...updates } : d));
     setLocalDevices(updated);
@@ -396,6 +387,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
 
   const handleDeleteDevice = (deviceId) => {
     setLocalDevices(devices.filter((d) => d.id !== deviceId));
+    setLocalWires(wires.filter((wire) => wire.from !== deviceId && wire.to !== deviceId));
     setSelectedDevice(null);
   };
 
@@ -498,6 +490,10 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
           onToggleLayer={(key) => setLayers(prev => ({ ...prev, [key]: !prev[key] }))}
           selectedTool={selectedTool}
           onToolSelect={setSelectedTool}
+          selectedCircuitType={selectedCircuitType}
+          selectedCircuitId={selectedCircuitId}
+          onCircuitTypeChange={setSelectedCircuitType}
+          onCircuitIdChange={setSelectedCircuitId}
           onAddDeviceType={() => {}}
           requirements={analysisResults}
           onAutoPlace={handleAutoPlace}
@@ -575,6 +571,14 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 markups={markups}
                 onMarkupsChange={setLocalMarkups}
                 pxPerFt={10}
+                selectedCircuitType={selectedCircuitType}
+                selectedCircuitId={selectedCircuitId}
+                onCircuitTypeChange={setSelectedCircuitType}
+                onCircuitIdChange={setSelectedCircuitId}
+                onOpenDeviceProperties={(device) => {
+                  setSelectedDevice(device);
+                  setRightPanel(null);
+                }}
               />
               <FloorPlanUploader
                 floorNumber={activeFloor}

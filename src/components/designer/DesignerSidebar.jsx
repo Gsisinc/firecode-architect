@@ -2,25 +2,37 @@ import { useState } from 'react';
 import {
   Layers, Zap, Download, ChevronDown, ChevronRight,
   Eye, EyeOff, LayoutList, AlertTriangle, CheckCircle2,
-  MousePointer, Square, Hand, Trash2, Settings2, Cable, MessageSquare
+  MousePointer, Square, Hand, Trash2, Settings2, Cable, MessageSquare, Network
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MARKUP_TOOLS } from '@/lib/bluebeamMarkupTools';
 
-// NFPA 170 device palette with proper symbols
+// NFPA 170-aligned fire alarm device palette. Lettering follows common NFPA 170 plan-symbol
+// conventions; device engineering requirements still come from NFPA 72/NEC checks elsewhere.
 export const DEVICE_PALETTE = [
-  { type: 'smoke_detector',   symbol: 'S',    label: 'Smoke Detector',    color: '#2563eb', shape: 'circle',  nfpa: 'NFPA 72 §17.7' },
-  { type: 'heat_detector',    symbol: 'H',    label: 'Heat Detector',     color: '#d97706', shape: 'circle',  nfpa: 'NFPA 72 §17.6' },
-  { type: 'pull_station',     symbol: 'MPS',  label: 'Manual Pull Stn.',  color: '#dc2626', shape: 'square',  nfpa: 'NFPA 72 §17.14' },
-  { type: 'horn_strobe',      symbol: 'H/S',  label: 'Horn/Strobe',       color: '#ea580c', shape: 'square',  nfpa: 'NFPA 72 §18.4' },
-  { type: 'strobe',           symbol: 'CD',   label: 'Strobe Only',       color: '#7c3aed', shape: 'square',  nfpa: 'NFPA 72 §18.5' },
-  { type: 'speaker',          symbol: 'SP',   label: 'Speaker',           color: '#0891b2', shape: 'speaker', nfpa: 'NFPA 72 §18.4' },
-  { type: 'duct_detector',    symbol: 'D',    label: 'Duct Detector',     color: '#4f46e5', shape: 'rect',    nfpa: 'NFPA 72 §17.7.5' },
-  { type: 'waterflow_switch', symbol: 'WF',   label: 'Waterflow Switch',  color: '#059669', shape: 'diamond', nfpa: 'NFPA 72 §17.16' },
-  { type: 'valve_tamper',     symbol: 'VS',   label: 'Valve Tamper',      color: '#0d9488', shape: 'diamond', nfpa: 'NFPA 72 §17.16' },
-  { type: 'co_detector',      symbol: 'CO',   label: 'CO Detector',       color: '#65a30d', shape: 'circle',  nfpa: 'IBC §915' },
-  { type: 'facp',             symbol: 'FACP', label: 'FACP',              color: '#dc2626', shape: 'panel',   nfpa: 'NFPA 72 §10.4' },
-  { type: 'elevator_recall',  symbol: 'ER',   label: 'Elevator Recall',   color: '#7c3aed', shape: 'circle',  nfpa: 'IBC §3006' },
+  { type: 'smoke_detector',   symbol: 'S',    prefix: 'SD',   label: 'Smoke Detector',       color: '#2563eb', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm symbol / NFPA 72 §17.7' },
+  { type: 'heat_detector',    symbol: 'H',    prefix: 'HD',   label: 'Heat Detector',        color: '#d97706', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm symbol / NFPA 72 §17.6' },
+  { type: 'pull_station',     symbol: 'MPS',  prefix: 'MPS',  label: 'Manual Pull Station',  color: '#dc2626', shape: 'square',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 manual station / NFPA 72 §17.14' },
+  { type: 'horn_strobe',      symbol: 'H/S',  prefix: 'HS',   label: 'Horn/Strobe',          color: '#ea580c', shape: 'hex',     defaultCircuitType: 'NAC', nfpa: 'NFPA 170 notification appliance / NFPA 72 ch. 18' },
+  { type: 'horn',             symbol: 'H',    prefix: 'HN',   label: 'Horn Only',            color: '#ef4444', shape: 'diamond', defaultCircuitType: 'NAC', nfpa: 'NFPA 170 audible notification appliance / NFPA 72 ch. 18' },
+  { type: 'strobe',           symbol: 'CD',   prefix: 'STR',  label: 'Strobe Only',          color: '#7c3aed', shape: 'circle',  defaultCircuitType: 'NAC', nfpa: 'NFPA 170 visual notification appliance / NFPA 72 §18.5' },
+  { type: 'speaker',          symbol: 'SP',   prefix: 'SP',   label: 'Speaker',              color: '#0891b2', shape: 'speaker', defaultCircuitType: 'NAC', nfpa: 'NFPA 170 speaker notification appliance / NFPA 72 ch. 18' },
+  { type: 'duct_detector',    symbol: 'D',    prefix: 'DD',   label: 'Duct Smoke Detector',  color: '#4f46e5', shape: 'rect',    defaultCircuitType: 'SLC', nfpa: 'NFPA 170 duct detector / NFPA 72 §17.7.5' },
+  { type: 'beam_detector',    symbol: 'B',    prefix: 'BD',   label: 'Beam Smoke Detector',  color: '#7c3aed', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 beam detector / NFPA 72 §17.7' },
+  { type: 'waterflow_switch', symbol: 'WF',   prefix: 'WF',   label: 'Waterflow Switch',     color: '#059669', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 sprinkler waterflow / NFPA 72 §17.16' },
+  { type: 'valve_tamper',     symbol: 'VS',   prefix: 'VS',   label: 'Valve Tamper Switch',  color: '#0d9488', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 supervisory valve / NFPA 72 §17.16' },
+  { type: 'co_detector',      symbol: 'CO',   prefix: 'CO',   label: 'CO Detector',          color: '#65a30d', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 gas detector family / IBC §915' },
+  { type: 'door_holder',      symbol: 'DH',   prefix: 'DH',   label: 'Door Holdback',        color: '#dc2626', shape: 'square',  defaultCircuitType: 'AUX', nfpa: 'NFPA 170 door release/hold-open interface' },
+  { type: 'annunciator',      symbol: 'ANN',  prefix: 'ANN',  label: 'Remote Annunciator',   color: '#dc2626', shape: 'panel',   defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm annunciator' },
+  { type: 'facp',             symbol: 'FACP', prefix: 'FACP', label: 'FACP',                 color: '#dc2626', shape: 'panel',   defaultCircuitType: 'SLC', nfpa: 'NFPA 170 control equipment / NFPA 72 §10.4' },
+  { type: 'elevator_recall',  symbol: 'ER',   prefix: 'ER',   label: 'Elevator Recall',      color: '#7c3aed', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 elevator recall detector / IBC §3006' },
+];
+
+export const CIRCUIT_TYPES = [
+  { value: 'SLC', label: 'SLC', description: 'Signaling Line Circuit', color: '#2563eb' },
+  { value: 'NAC', label: 'NAC', description: 'Notification Appliance Circuit', color: '#ea580c' },
+  { value: 'IDC', label: 'IDC', description: 'Initiating Device Circuit', color: '#16a34a' },
+  { value: 'AUX', label: 'AUX', description: 'Auxiliary / Control Circuit', color: '#64748b' },
 ];
 
 export default function DesignerSidebar({
@@ -36,6 +48,10 @@ export default function DesignerSidebar({
   requirements,
   selectedTool,
   onToolSelect,
+  selectedCircuitType = 'SLC',
+  selectedCircuitId = 'SLC-1',
+  onCircuitTypeChange,
+  onCircuitIdChange,
 }) {
   const [openSection, setOpenSection] = useState('tools');
 
@@ -78,6 +94,45 @@ export default function DesignerSidebar({
             <ToolBtn active={selectedTool === 'room'} onClick={() => onToolSelect('room')} icon={<Square className="w-3 h-3" />} label="Room" />
             <ToolBtn active={selectedTool === 'wire'} onClick={() => onToolSelect('wire')} icon={<Cable className="w-3 h-3" />} label="Wire" />
             <ToolBtn active={selectedTool === 'delete'} onClick={() => onToolSelect('delete')} icon={<Trash2 className="w-3 h-3" />} label="Delete" danger />
+          </div>
+        </SidebarSection>
+
+        {/* Circuit selection */}
+        <SidebarSection title="Circuits" icon={Network} open={openSection === 'circuits'} onToggle={() => toggle('circuits')}>
+          <div className="space-y-2">
+            <p className="text-[10px] text-white/35 px-1 leading-snug">
+              Select the circuit type and ID before using the Wire tool. Saved line segments keep this assignment.
+            </p>
+            <div className="grid grid-cols-2 gap-1">
+              {CIRCUIT_TYPES.map((circuit) => (
+                <button
+                  key={circuit.value}
+                  type="button"
+                  onClick={() => {
+                    onCircuitTypeChange?.(circuit.value);
+                    if (!selectedCircuitId || selectedCircuitId.startsWith(selectedCircuitType)) {
+                      onCircuitIdChange?.(`${circuit.value}-1`);
+                    }
+                  }}
+                  title={circuit.description}
+                  className={`rounded px-2 py-1.5 text-xs font-semibold border transition-colors ${
+                    selectedCircuitType === circuit.value
+                      ? 'bg-white text-slate-950 border-white'
+                      : 'text-white/60 border-white/10 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: circuit.color }} />
+                  {circuit.label}
+                </button>
+              ))}
+            </div>
+            <label className="block text-[10px] uppercase tracking-wider text-white/35 px-1">Circuit ID</label>
+            <input
+              value={selectedCircuitId}
+              onChange={(event) => onCircuitIdChange?.(event.target.value)}
+              className="w-full h-8 rounded bg-white/5 border border-white/10 px-2 text-xs font-mono text-white outline-none focus:border-orange-400"
+              placeholder={`${selectedCircuitType}-1`}
+            />
           </div>
         </SidebarSection>
 
@@ -128,6 +183,12 @@ export default function DesignerSidebar({
                 <button
                   key={key + device.label}
                   onClick={() => onToolSelect(toolId)}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('application/x-fire-device', JSON.stringify(device));
+                    event.dataTransfer.setData('text/plain', toolId);
+                    event.dataTransfer.effectAllowed = 'copy';
+                  }}
                   title={`${device.label} — ${device.nfpa}`}
                   className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
                     selectedTool === toolId ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40' : 'text-white/60 hover:bg-white/5 hover:text-white'
@@ -199,6 +260,7 @@ export default function DesignerSidebar({
               { shape: 'diamond', label: 'Supervisory Device (diamond)' },
               { shape: 'panel', label: 'Control Panel (rectangle)' },
               { shape: 'speaker', label: 'Speaker (trapezoid)' },
+              { shape: 'hex', label: 'Combination appliance (hexagon)' },
             ].map(item => (
               <div key={item.shape} className="flex items-center gap-2 text-[10px] text-white/50">
                 <LegendShape shape={item.shape} />
@@ -267,6 +329,7 @@ function LegendShape({ shape }) {
   if (shape === 'circle') return <svg width="14" height="14"><circle cx="7" cy="7" r="6" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
   if (shape === 'square') return <svg width="14" height="14"><rect x="1" y="1" width="12" height="12" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
   if (shape === 'diamond') return <svg width="14" height="14"><polygon points="7,1 13,7 7,13 1,7" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
+  if (shape === 'hex') return <svg width="16" height="14"><polygon points="5,1 11,1 15,7 11,13 5,13 1,7" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
   if (shape === 'panel') return <svg width="20" height="12"><rect x="1" y="1" width="18" height="10" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
   if (shape === 'speaker') return <svg width="14" height="14"><polygon points="4,4 10,2 10,12 4,10" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
   return null;
@@ -294,6 +357,12 @@ export function DeviceSymbol({ device, size = 20, selected = false }) {
     <svg width={s} height={s} viewBox="0 0 20 20">
       <polygon points="10,2 18,10 10,18 2,10" fill={c + '20'} stroke={c} strokeWidth={selected ? 2 : 1.5} />
       <text x="10" y="13" textAnchor="middle" fontSize={label.length > 2 ? 5 : 6} fill={c} fontWeight="bold" fontFamily="Arial, sans-serif">{label}</text>
+    </svg>
+  );
+  if (shape === 'hex') return (
+    <svg width={s} height={s} viewBox="0 0 20 20">
+      <polygon points="6,2 14,2 18,10 14,18 6,18 2,10" fill={c + '20'} stroke={c} strokeWidth={selected ? 2 : 1.5} />
+      <text x="10" y="13" textAnchor="middle" fontSize={label.length > 2 ? 5 : 7} fill={c} fontWeight="bold" fontFamily="Arial, sans-serif">{label}</text>
     </svg>
   );
   if (shape === 'rect' || shape === 'panel') return (
