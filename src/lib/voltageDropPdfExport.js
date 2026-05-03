@@ -7,6 +7,7 @@ import {
   addGsisLogoTopRight,
   GSIS_LOGO_ASPECT,
 } from '@/lib/submittalBranding';
+import { GSIS_PDF, drawSectionTitle } from '@/lib/submittalPdfTheme';
 
 const WIRE_RESISTANCE = { 14: 2.525, 16: 4.016, 18: 6.385, 20: 10.15, 22: 16.14 };
 const DEVICE_CURRENT_mA = {
@@ -85,33 +86,44 @@ export async function exportVoltageDropPdf({
   const pName = project?.name || 'Fire Alarm System';
   const now = new Date().toLocaleDateString();
 
-  doc.setFillColor(255, 255, 255);
-  doc.rect(0, 0, 210, 38, 'F');
-  doc.setDrawColor(218, 165, 32);
-  doc.setLineWidth(0.45);
-  doc.line(0, 38, 210, 38);
+  const HB = 14;
+  doc.setFillColor(...GSIS_PDF.white);
+  doc.rect(0, 0, 210, HB, 'F');
+  doc.setDrawColor(...GSIS_PDF.goldRule);
+  doc.setLineWidth(0.35);
+  doc.line(0, HB, 210, HB);
   addGsisLogoTopRight(doc, logoDataUrl, 210, {
-    maxWidthMm: 58,
-    maxHeightMm: 15,
-    rightMarginMm: 8,
-    topMm: 6,
+    maxWidthMm: 40,
+    maxHeightMm: 10,
+    rightMarginMm: 6,
+    topMm: 2,
     aspectRatio: logoAspect,
   });
-  doc.setTextColor(30, 41, 59);
-  doc.setFontSize(13);
+  doc.setTextColor(...GSIS_PDF.gold);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.text('NAC VOLTAGE DROP ANALYSIS', 14, 18);
-  doc.setFontSize(9);
-  doc.setTextColor(71, 85, 105);
-  doc.text(pName, 14, 26);
+  doc.text('GOLDEN STATE INTEGRATED SYSTEMS', 10, 6);
+  doc.setTextColor(...GSIS_PDF.navy);
+  doc.text(pName.toUpperCase(), 10, 11);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  doc.text(`${now} · ${wireGauge} AWG · ${supplyVoltage} VDC supply · NEC §760 / NFPA 72`, 14, 33);
+  doc.setTextColor(...GSIS_PDF.label);
+  doc.text('TECHNICAL CALCULATION', 105, 8.5, { align: 'center' });
 
-  let y = 48;
+  doc.setFillColor(...GSIS_PDF.white);
+  doc.rect(0, HB, 210, 297 - HB, 'F');
+  drawSectionTitle(doc, 14, HB + 10, 'NAC VOLTAGE DROP ANALYSIS', 115);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...GSIS_PDF.navyMuted);
+  doc.text(pName, 14, HB + 22);
+  doc.setFontSize(7.5);
+  doc.setTextColor(...GSIS_PDF.body);
+  doc.text(`${now} · ${wireGauge} AWG · ${supplyVoltage} VDC supply · NEC §760 / NFPA 72`, 14, HB + 28);
+
+  let y = HB + 38;
   if (circuits.length === 0) {
     doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
+    doc.setTextColor(...GSIS_PDF.label);
     doc.text('No notification appliances (horn/strobe/speaker) in the device list.', 14, y);
     doc.save(`${pName.replace(/\s+/g, '_')}_Voltage_Drop.pdf`);
     return;
@@ -124,33 +136,37 @@ export async function exportVoltageDropPdf({
       c.devices.length;
     const r = calcDrop(c.devices.length, avgMa, wireGauge, distFt, supplyVoltage);
 
-    if (y > 230 && idx > 0) {
+    if (y > 220 && idx > 0) {
       doc.addPage();
       drawGsisLetterheadHeader(doc, 210, logoDataUrl, logoAspect);
-      doc.setFillColor(248, 250, 252);
+      doc.setFillColor(...GSIS_PDF.white);
       doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, 'F');
-      y = 18 + GSIS_HEADER_BAR_MM;
+      drawSectionTitle(doc, 14, GSIS_HEADER_BAR_MM + 8, 'NAC VOLTAGE DROP (cont.)', 100);
+      y = GSIS_HEADER_BAR_MM + 22;
     }
 
-    doc.setFillColor(248, 250, 252);
-    doc.rect(14, y - 2, 182, 42, 'F');
+    doc.setDrawColor(...GSIS_PDF.goldRule);
+    doc.setLineWidth(0.35);
+    doc.setFillColor(...GSIS_PDF.white);
+    doc.rect(13, y - 2, 184, 46, 'FD');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`${c.circuit} · Floor ${c.floor}`, 18, y + 5);
+    doc.setTextColor(...GSIS_PDF.navy);
+    doc.text(`${c.circuit} · Floor ${c.floor}`, 18, y + 6);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
-    doc.setTextColor(71, 85, 105);
-    doc.text(`Devices: ${c.devices.length} · Est. run: ${distFt} ft · Avg draw: ${Math.round(avgMa)} mA/device`, 18, y + 11);
+    doc.setTextColor(...GSIS_PDF.body);
+    doc.text(`Devices: ${c.devices.length} · Est. run: ${distFt} ft · Avg draw: ${Math.round(avgMa)} mA/device`, 18, y + 13);
     doc.text(
       `Drop: ${r.dropPercent}% (${r.voltageDrop} V) · At last appliance: ${r.receivedVoltage} V · Current: ${r.totalCurrentA} A`,
       18,
-      y + 17
+      y + 20
     );
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(r.compliant ? 22 : 220, r.compliant ? 163 : 38, r.compliant ? 74 : 38);
-    doc.text(r.compliant ? 'WITHIN 10% DROP LIMIT' : 'EXCEEDS 10% LIMIT — INCREASE WIRE SIZE OR SPLIT CIRCUIT', 18, y + 26);
-    y += 48;
+    doc.setFontSize(8);
+    doc.setTextColor(...(r.compliant ? GSIS_PDF.yes : [185, 28, 28]));
+    doc.text(r.compliant ? 'WITHIN 10% DROP LIMIT' : 'EXCEEDS 10% LIMIT — INCREASE WIRE SIZE OR SPLIT CIRCUIT', 18, y + 30);
+    y += 52;
   });
 
   doc.save(`${pName.replace(/\s+/g, '_')}_Voltage_Drop.pdf`);

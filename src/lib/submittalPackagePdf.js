@@ -21,6 +21,12 @@ import {
   fitLogoSizeMm,
   GSIS_LOGO_ASPECT,
 } from "@/lib/submittalBranding";
+import {
+  GSIS_PDF,
+  resolveAnalysisForPdf,
+  formatRequirementValue,
+  drawSectionTitle,
+} from "@/lib/submittalPdfTheme";
 
 const DEVICE_TYPE_LABELS = {
   smoke_detector: "Smoke Detector",
@@ -102,7 +108,7 @@ export async function runSubmittalPackagePdf({
     let pageNum = 1;
     const pName = project?.name || "Fire Alarm System";
     const now = new Date().toLocaleDateString();
-    const reqs = analysisResults || {};
+    const reqs = resolveAnalysisForPdf(project, analysisResults || project?.analysis_results || {});
     const wireSummary = calculateWireLengthSummary({ devices, wires, floorPlans });
     const { dataUrl: logoDataUrl, aspect: logoAspectRaw } = await loadSubmittalLogoWithMetrics();
     const logoAspect = logoAspectRaw > 0 ? logoAspectRaw : GSIS_LOGO_ASPECT;
@@ -143,7 +149,7 @@ export async function runSubmittalPackagePdf({
     const pageH = () => doc.internal.pageSize.getHeight();
     const headerBarH = 14;
     const fillBody = () => {
-      doc.setFillColor(248, 250, 252);
+      doc.setFillColor(...GSIS_PDF.white);
       doc.rect(0, headerBarH, pageW(), pageH() - headerBarH, "F");
     };
     const addHeader = (title) => {
@@ -176,22 +182,22 @@ export async function runSubmittalPackagePdf({
     if (sections.cover && !ahjCover) {
       doc.setFillColor(255, 255, 255);
       doc.rect(0, 0, 210, 297, "F");
-      doc.setDrawColor(218, 165, 32);
-      doc.setLineWidth(0.6);
-      doc.line(0, 62, 210, 62);
+      doc.setDrawColor(...GSIS_PDF.goldRule);
+      doc.setLineWidth(0.55);
       if (logoDataUrl) {
         try {
           const { w: lw, h: lh } = fitLogoSizeMm(100, 27, logoAspect);
-          doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 55, 18, lw, lh);
+          doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 55, 16, lw, lh);
         } catch {
           /* ignore */
         }
       }
-      doc.setTextColor(30, 41, 59);
-      doc.setFontSize(20);
+      doc.setTextColor(...GSIS_PDF.navy);
+      doc.setFontSize(18);
       doc.setFont("helvetica", "bold");
-      doc.text("FIRE ALARM SYSTEM", 20, 54);
-      doc.text("SUBMITTAL PACKAGE", 20, 66);
+      doc.text("FIRE ALARM SYSTEM", 20, 52);
+      doc.line(20, 55.5, 190, 55.5);
+      doc.text("SUBMITTAL PACKAGE", 20, 64);
       doc.setTextColor(51, 65, 85);
       doc.setFontSize(14);
       doc.text(pName, 20, 88);
@@ -260,9 +266,8 @@ export async function runSubmittalPackagePdf({
       doc.addPage();
       addHeader("CODE ANALYSIS");
       fillBody();
-      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
-      doc.text("2. CODE ANALYSIS", 15, 25);
-      let y = 35;
+      drawSectionTitle(doc, 15, 22, "2. CODE ANALYSIS", 85);
+      let y = 34;
       const items = [
         ["Fire Alarm System Required", reqs.fireAlarmRequired],
         ["Voice Evacuation Required", reqs.voiceEvacRequired],
@@ -271,19 +276,24 @@ export async function runSubmittalPackagePdf({
         ["CO Detection Required", reqs.coDetectionRequired],
         ["Elevator Recall Required", reqs.elevatorRecallRequired],
         ["Mini Horns in Sleeping Rooms", reqs.miniHornsInSleepingRooms],
-        ["Fire Command Center", reqs.fireCommandCenterRequired],
+        ["Smoke Alarms in Sleeping Rooms", reqs.smokeAlarmsInSleepingRooms],
+        ["Fire Command Center Required", reqs.fireCommandCenterRequired],
         ["Firefighter Comm Required", reqs.firefighterCommRequired],
+        ["Accessible Rooms (visible notification)", reqs.handicappedRoomsRequired > 0 ? `${reqs.handicappedRoomsRequired} rooms` : "N/A"],
       ];
       items.forEach(([lbl, val]) => {
-        const isYes = val === true;
-        doc.setFillColor(isYes ? 240 : 248, isYes ? 253 : 250, isYes ? 244 : 252);
-        doc.rect(15, y - 4, 178, 8, "F");
-        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(71, 85, 105);
+        const display = formatRequirementValue(val);
+        const isYes = display === "YES";
+        const isNo = display === "NO";
+        doc.setDrawColor(...GSIS_PDF.tableBorder);
+        doc.setLineWidth(0.15);
+        doc.setFillColor(...GSIS_PDF.white);
+        doc.rect(15, y - 4, 178, 8, "FD");
+        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...GSIS_PDF.body);
         doc.text(lbl, 18, y);
-        const display = val === true ? "YES" : val === false ? "NO" : String(val || "—");
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(isYes ? 22 : val === false ? 100 : 15, isYes ? 163 : 116, isYes ? 74 : 116);
-        doc.text(display, 145, y);
+        doc.setTextColor(...(isYes ? GSIS_PDF.yes : isNo ? GSIS_PDF.no : GSIS_PDF.navy));
+        doc.text(display, 150, y);
         y += 10;
       });
       if (reqs.codeReferences?.length) {

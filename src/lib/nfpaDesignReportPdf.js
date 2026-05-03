@@ -8,6 +8,12 @@ import {
   fitLogoSizeMm,
   GSIS_LOGO_ASPECT,
 } from '@/lib/submittalBranding';
+import {
+  GSIS_PDF,
+  resolveAnalysisForPdf,
+  formatRequirementValue,
+  drawSectionTitle,
+} from '@/lib/submittalPdfTheme';
 
 /**
  * Multi-page NFPA 72 design narrative PDF (same output as toolbar export).
@@ -26,7 +32,7 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pName = project?.name || 'Fire Alarm System';
     const now = new Date().toLocaleDateString();
-    const reqs = project?.analysis_results || {};
+    const reqs = resolveAnalysisForPdf(project, project?.analysis_results || {});
 
     const addPageHeader = (title, pageNum) => {
       doc.setFillColor(255, 255, 255);
@@ -57,22 +63,22 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     // ── PAGE 1: COVER ─────────────────────────────────────
     doc.setFillColor(255, 255, 255);
     doc.rect(0, 0, 210, 297, 'F');
-    doc.setDrawColor(218, 165, 32);
-    doc.setLineWidth(0.6);
-    doc.line(0, 62, 210, 62);
+    doc.setDrawColor(...GSIS_PDF.goldRule);
+    doc.setLineWidth(0.55);
     if (logoDataUrl) {
       try {
         const { w: lw, h: lh } = fitLogoSizeMm(100, 27, logoAspect);
-        doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 55, 18, lw, lh);
+        doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 55, 16, lw, lh);
       } catch {
         /* ignore */
       }
     }
-    doc.setTextColor(30, 41, 59);
-    doc.setFontSize(20);
+    doc.setTextColor(...GSIS_PDF.navy);
+    doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
-    doc.text('FIRE ALARM SYSTEM', 20, 54);
-    doc.text('DESIGN REPORT', 20, 66);
+    doc.text('FIRE ALARM SYSTEM', 20, 52);
+    doc.line(20, 55.5, 190, 55.5);
+    doc.text('DESIGN REPORT', 20, 64);
     doc.setTextColor(51, 65, 85);
     doc.setFontSize(14);
     doc.text(pName, 20, 88);
@@ -121,12 +127,9 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     doc.addPage();
     addPageHeader('WRITTEN SYSTEM NARRATIVE', 2);
     doc.setTextColor(15, 23, 42);
-    doc.setFillColor(248, 250, 252);
+    doc.setFillColor(...GSIS_PDF.white);
     doc.rect(0, HB, 210, 297 - HB, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text('1. WRITTEN SYSTEM NARRATIVE', 15, 25);
+    drawSectionTitle(doc, 15, 22, '1. WRITTEN SYSTEM NARRATIVE', 100);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(51, 65, 85);
@@ -147,7 +150,7 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     narrative.forEach(line => {
       if (line === '') { y += 5; return; }
       const lines = doc.splitTextToSize(line, 178);
-      if (y + lines.length * 5 > 285) { doc.addPage(); addPageHeader('WRITTEN SYSTEM NARRATIVE (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 25; }
+      if (y + lines.length * 5 > 285) { doc.addPage(); addPageHeader('WRITTEN SYSTEM NARRATIVE (cont.)', ''); doc.setFillColor(...GSIS_PDF.white); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 25; }
       doc.text(lines, 15, y);
       y += lines.length * 5.2;
     });
@@ -155,14 +158,11 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     // ── PAGE 3: CODE ANALYSIS ─────────────────────────────
     doc.addPage();
     addPageHeader('CODE ANALYSIS', 3);
-    doc.setFillColor(248, 250, 252);
+    doc.setFillColor(...GSIS_PDF.white);
     doc.rect(0, HB, 210, 297 - HB, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text('2. CODE ANALYSIS', 15, 25);
+    drawSectionTitle(doc, 15, 22, '2. CODE ANALYSIS', 85);
     doc.setFontSize(8.5);
-    y = 35;
+    y = 34;
 
     const reqItems = [
       ['Fire Alarm System Required', reqs.fireAlarmRequired],
@@ -179,22 +179,21 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     ];
 
     reqItems.forEach(([label, value]) => {
-      const isYes = value === true || (typeof value === 'string' && value !== 'N/A');
-      const isNo = value === false;
-      doc.setFillColor(isYes && value !== 'N/A' ? 240 : 248, isYes && value !== 'N/A' ? 253 : 250, isYes && value !== 'N/A' ? 244 : 252);
-      doc.rect(15, y - 4, 178, 8, 'F');
-      doc.setTextColor(71, 85, 105);
+      const displayVal = formatRequirementValue(value);
+      const isYes = displayVal === 'YES';
+      const isNo = displayVal === 'NO';
+      doc.setDrawColor(...GSIS_PDF.tableBorder);
+      doc.setLineWidth(0.15);
+      doc.setFillColor(...GSIS_PDF.white);
+      doc.rect(15, y - 4, 178, 8, 'FD');
+      doc.setTextColor(...GSIS_PDF.body);
       doc.setFont('helvetica', 'normal');
       doc.text(label, 18, y);
-      const displayVal = value === true ? 'YES' : value === false ? 'NO' : String(value);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(isYes && value !== false ? 22 : isNo ? 100 : 15, isYes && value !== false ? 163 : 116, isYes && value !== false ? 74 : isNo ? 116 : 139);
-      doc.text(displayVal, 140, y);
-      doc.setTextColor(148, 163, 184);
+      doc.setTextColor(...(isYes ? GSIS_PDF.yes : isNo ? GSIS_PDF.no : GSIS_PDF.navy));
+      doc.text(displayVal, 150, y);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6.5);
       y += 10;
-      doc.setFontSize(8.5);
     });
 
     if (reqs.pullStationException) {
@@ -216,7 +215,7 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
       reqs.specialNotes.forEach(note => {
         const lines = doc.splitTextToSize(`• ${note}`, 174);
         doc.setTextColor(71, 85, 105);
-        if (y + lines.length * 5 > 285) { doc.addPage(); addPageHeader('CODE ANALYSIS (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 25; }
+        if (y + lines.length * 5 > 285) { doc.addPage(); addPageHeader('CODE ANALYSIS (cont.)', ''); doc.setFillColor(...GSIS_PDF.white); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 25; }
         doc.text(lines, 18, y);
         y += lines.length * 5;
       });
@@ -225,19 +224,16 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     // ── PAGE 4: SEQUENCE OF OPERATIONS ───────────────────
     doc.addPage();
     addPageHeader('SEQUENCE OF OPERATIONS', 4);
-    doc.setFillColor(248, 250, 252);
+    doc.setFillColor(...GSIS_PDF.white);
     doc.rect(0, HB, 210, 297 - HB, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text('3. SEQUENCE OF OPERATIONS', 15, 25);
+    drawSectionTitle(doc, 15, 22, '3. SEQUENCE OF OPERATIONS', 115);
     doc.setFont('courier', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(30, 41, 59);
     const soo = generateSequenceOfOperations(reqs, project);
-    let sy = 35;
+    let sy = 34;
     soo.split('\n').forEach(line => {
-      if (sy > 285) { doc.addPage(); addPageHeader('SEQUENCE OF OPERATIONS (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, HB, 210, 297 - HB, 'F'); sy = 25; }
+      if (sy > 285) { doc.addPage(); addPageHeader('SEQUENCE OF OPERATIONS (cont.)', ''); doc.setFillColor(...GSIS_PDF.white); doc.rect(0, HB, 210, 297 - HB, 'F'); sy = 25; }
       doc.text(line, 12, sy);
       sy += 4.5;
     });
@@ -245,12 +241,9 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     // ── PAGE 5: BATTERY CALCULATIONS ──────────────────────
     doc.addPage();
     addPageHeader('BATTERY & ELECTRICAL CALCULATIONS', 5);
-    doc.setFillColor(248, 250, 252);
+    doc.setFillColor(...GSIS_PDF.white);
     doc.rect(0, HB, 210, 297 - HB, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text('4. BATTERY CALCULATIONS', 15, 25);
+    drawSectionTitle(doc, 15, 22, '4. BATTERY CALCULATIONS', 105);
     doc.setFontSize(8.5);
     y = 35;
 
@@ -285,11 +278,10 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     doc.text(`Reference: ${batt.code_ref}`, 18, y + 2);
     y += 15;
 
-    // Voltage drop
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text('5. VOLTAGE DROP CALCULATIONS', 15, y); y += 12;
+    y += 4;
+    drawSectionTitle(doc, 15, y, '5. VOLTAGE DROP CALCULATIONS', 115);
+    y += 14;
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
 
     const nacDevices = (project?.devices || []).filter(d => ['horn_strobe', 'horn', 'strobe', 'speaker'].includes(d.type));
@@ -315,17 +307,13 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     // ── PAGE 6: DEVICE SCHEDULE ───────────────────────────
     doc.addPage();
     addPageHeader('DEVICE SCHEDULE', 6);
-    doc.setFillColor(248, 250, 252);
+    doc.setFillColor(...GSIS_PDF.white);
     doc.rect(0, HB, 210, 297 - HB, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text('6. DEVICE SCHEDULE', 15, 25);
+    drawSectionTitle(doc, 15, 22, '6. DEVICE SCHEDULE', 95);
 
     const schedule = generateDeviceSchedule(project?.devices || []);
-    const headers = ['#', 'Type', 'Label', 'Address', 'Zone', 'Fl', 'Mount'];
-    const colWidths = [10, 45, 30, 25, 25, 10, 35];
-    const colX = [15, 25, 70, 100, 125, 150, 160];
+    const headers = ['#', 'Type', 'Address', 'Zone', 'Fl', 'Mount'];
+    const colX = [15, 24, 88, 118, 148, 158];
     y = 35;
 
     // Table header
@@ -338,11 +326,18 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
 
     doc.setFont('helvetica', 'normal');
     schedule.forEach((row, i) => {
-      if (y > 280) { doc.addPage(); addPageHeader('DEVICE SCHEDULE (cont.)', ''); doc.setFillColor(248, 250, 252); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 20; doc.setFillColor(30, 41, 59); doc.rect(13, y - 5, 182, 8, 'F'); doc.setTextColor(255, 255, 255); headers.forEach((h, j) => doc.text(h, colX[j], y)); y += 8; doc.setFont('helvetica', 'normal'); }
-      doc.setFillColor(i % 2 === 0 ? 248 : 241, 250, 252);
+      if (y > 280) { doc.addPage(); addPageHeader('DEVICE SCHEDULE (cont.)', ''); doc.setFillColor(...GSIS_PDF.white); doc.rect(0, HB, 210, 297 - HB, 'F'); y = 20; doc.setFillColor(...GSIS_PDF.tableHeaderBg); doc.rect(13, y - 5, 182, 8, 'F'); doc.setTextColor(255, 255, 255); headers.forEach((h, j) => doc.text(h, colX[j], y)); y += 8; doc.setFont('helvetica', 'normal'); }
+      doc.setFillColor(...(i % 2 === 0 ? GSIS_PDF.white : [248, 250, 252]));
       doc.rect(13, y - 4, 182, 7, 'F');
-      doc.setTextColor(30, 41, 59);
-      const vals = [String(row.item), row.type_label.substring(0, 22), row.address, row.zone, String(row.floor), row.mounting_height?.substring(0, 14) || '—'];
+      doc.setTextColor(...GSIS_PDF.navy);
+      const vals = [
+        String(row.item),
+        String(row.type_label || '').substring(0, 26),
+        String(row.address || '—'),
+        String(row.zone || '—'),
+        String(row.floor),
+        String(row.mounting_height || '—').substring(0, 18),
+      ];
       vals.forEach((v, j) => doc.text(v || '—', colX[j], y));
       y += 7;
     });
@@ -356,12 +351,9 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     // ── PAGE 7: WIRING NOTES ──────────────────────────────
     doc.addPage();
     addPageHeader('WIRING SPECIFICATIONS', 7);
-    doc.setFillColor(248, 250, 252);
+    doc.setFillColor(...GSIS_PDF.white);
     doc.rect(0, HB, 210, 297 - HB, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text('7. WIRING SPECIFICATIONS', 15, 25);
+    drawSectionTitle(doc, 15, 22, '7. WIRING SPECIFICATIONS', 115);
     y = 35;
 
     const wiring = determineWiringType(project || {});
