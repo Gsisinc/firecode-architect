@@ -7,7 +7,7 @@ import gsisSvgUrl from '@/assets/branding/gsis-logo.svg?url';
 
 const PUBLIC_PNG = '/branding/gsis-logo.png';
 
-/** Matches bundled `gsis-logo.svg` viewBox (280×140) — wide lockup. Custom PNGs may differ. */
+/** Matches bundled `gsis-logo.svg` viewBox (280×140). Custom PNGs may differ. */
 export const GSIS_LOGO_ASPECT = 280 / 140;
 
 /**
@@ -35,7 +35,7 @@ function naturalSizeFromDataUrl(dataUrl) {
  * Logo box in mm preserving aspect (critical for portrait vs landscape brand art).
  * @param {number} maxWidthMm
  * @param {number} maxHeightMm
- * @param {number} [aspectRatio] width/height; default bundled SVG ratio
+ * @param {number} [aspectRatio] width/height
  * @returns {{ w: number, h: number }}
  */
 export function fitLogoSizeMm(maxWidthMm, maxHeightMm, aspectRatio = GSIS_LOGO_ASPECT) {
@@ -63,7 +63,7 @@ export function dataUrlImageFormat(dataUrl) {
  * @param {import('jspdf').jsPDF} doc
  * @param {string|null} logoDataUrl
  * @param {number} pageWidthMm
- * @param {{ maxWidthMm?: number, maxHeightMm?: number, rightMarginMm?: number, topMm?: number }} [opts]
+ * @param {{ maxWidthMm?: number, maxHeightMm?: number, rightMarginMm?: number, topMm?: number, aspectRatio?: number }} [opts]
  */
 export function addGsisLogoTopRight(doc, logoDataUrl, pageWidthMm, opts = {}) {
   if (!logoDataUrl) return;
@@ -92,47 +92,75 @@ function blobToDataUrl(blob) {
 }
 
 /**
- * Rasterize SVG or load PNG to PNG data URL for jsPDF addImage(..., 'PNG', ...).
+ * Rasterize SVG or load PNG — returns data URL only (legacy).
  * @param {{ width?: number, height?: number }} opts
  * @returns {Promise<string|null>}
  */
 export async function loadSubmittalLogoDataUrl(opts = {}) {
-  const w = opts.width ?? 1120;
-  const h = opts.height ?? 560;
+  const bundle = await loadSubmittalLogoWithMetrics({
+    rasterMaxWidth: opts.width ?? 3200,
+    rasterMaxHeight: opts.height ?? 3200,
+  });
+  return bundle.dataUrl;
+}
+
+/**
+ * High-res logo for PDFs plus natural aspect ratio (fixes stretched portrait art).
+ * @param {{ rasterMaxWidth?: number, rasterMaxHeight?: number }} [opts]
+ * @returns {Promise<{ dataUrl: string|null, aspect: number }>}
+ */
+export async function loadSubmittalLogoWithMetrics(opts = {}) {
+  const maxW = opts.rasterMaxWidth ?? 3600;
+  const maxH = opts.rasterMaxHeight ?? 3600;
 
   try {
     const pngRes = await fetch(PUBLIC_PNG, { method: 'GET' });
     if (pngRes.ok) {
       const blob = await pngRes.blob();
       if (blob.type.startsWith('image/')) {
-        return blobToDataUrl(blob);
+        const dataUrl = await blobToDataUrl(blob);
+        const { width, height } = await naturalSizeFromDataUrl(dataUrl);
+        return { dataUrl, aspect: width / height };
       }
     }
   } catch {
-    /* use SVG */
+    /* fall through */
   }
 
-  return rasterizeSvgUrlToPngDataUrl(gsisSvgUrl, w, h);
+  const dataUrl = await rasterizeSvgUrlToPngDataUrl(gsisSvgUrl, maxW, maxH);
+  if (!dataUrl) return { dataUrl: null, aspect: GSIS_LOGO_ASPECT };
+  const { width, height } = await naturalSizeFromDataUrl(dataUrl);
+  return { dataUrl, aspect: width / height };
 }
 
-export function rasterizeSvgUrlToPngDataUrl(svgUrl, width, height) {
+/**
+ * Rasterize SVG into PNG at up to maxW×maxH, letterboxed on white (no stretch).
+ */
+export function rasterizeSvgUrlToPngDataUrl(svgUrl, maxWidth, maxHeight) {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
+        const iw = img.naturalWidth || img.width || 280;
+        const ih = img.naturalHeight || img.height || 140;
+        const s = Math.min(maxWidth / iw, maxHeight / ih, 4);
+        const cw = Math.max(1, Math.round(iw * s));
+        const ch = Math.max(1, Math.round(ih * s));
         const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = cw;
+        canvas.height = ch;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           resolve(null);
           return;
         }
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/png'));
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, cw, ch);
+        resolve(canvas.toDataURL('image/png', 1));
       } catch {
         resolve(null);
       }
@@ -148,16 +176,11 @@ export { gsisSvgUrl as GSIS_LOGO_SVG_URL, PUBLIC_PNG as GSIS_LOGO_PUBLIC_PNG };
 export const GSIS_HEADER_BAR_MM = 14;
 
 /**
- * White strip + gold rule + optional raster logo (right). Use under jsPDF.
+ * White strip + gold rule + optional raster logo (right).
  * @param {import('jspdf').jsPDF} doc
  * @param {number} pageWidthMm
  * @param {string|null} logoDataUrl
- */
-/**
- * @param {import('jspdf').jsPDF} doc
- * @param {number} pageWidthMm
- * @param {string|null} logoDataUrl
- * @param {number} [logoAspect]
+ * @param {number} [logoAspect] width/height; defaults to bundled SVG ratio
  */
 export function drawGsisLetterheadHeader(doc, pageWidthMm, logoDataUrl, logoAspect) {
   const H = GSIS_HEADER_BAR_MM;
@@ -171,7 +194,7 @@ export function drawGsisLetterheadHeader(doc, pageWidthMm, logoDataUrl, logoAspe
     maxHeightMm: 10,
     rightMarginMm: 6,
     topMm: 2,
-    aspectRatio: logoAspect,
+    aspectRatio: logoAspect ?? GSIS_LOGO_ASPECT,
   });
   doc.setTextColor(184, 134, 11);
   doc.setFontSize(7);

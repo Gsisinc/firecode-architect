@@ -31,6 +31,7 @@ const SLC_RISER_TYPES = new Set([
   'monitor_module',
   'control_module',
   'door_holder',
+  'annunciator',
   'facp',
 ]);
 
@@ -50,6 +51,7 @@ const RISER_DEVICE_COLORS = {
   co_detector: '#a3e635',
   facp: '#f87171',
   elevator_recall: '#c084fc',
+  annunciator: '#dc2626',
 };
 
 const RISER_SYMBOL = {
@@ -69,6 +71,7 @@ const RISER_SYMBOL = {
   co_detector: 'CO',
   facp: 'FACP',
   elevator_recall: 'ER',
+  annunciator: 'ANN',
 };
 
 const DEMO_INITIATORS = [
@@ -190,6 +193,50 @@ export default function FireAlarmSimulation({
     [floorDevicesAll]
   );
 
+  const placedAnnunciators = useMemo(
+    () => floorDevicesAll.filter((d) => d.type === 'annunciator'),
+    [floorDevicesAll]
+  );
+
+  const zonesList = useMemo(() => {
+    const set = new Set();
+    floorDevicesAll.forEach((d) => {
+      const z = (d.zone || '').trim();
+      if (z) set.add(z);
+    });
+    if (set.size === 0 && initiatingList.length === 0) {
+      DEMO_INITIATORS.forEach((d) => set.add(d.zone));
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [floorDevicesAll, initiatingList.length]);
+
+  const annunciatorZones = useMemo(() => {
+    const set = new Set(zonesList);
+    if (source?.zone) set.add(String(source.zone).trim());
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [zonesList, source?.zone]);
+
+  const zoneStatuses = useMemo(() => {
+    return annunciatorZones.map((zone) => {
+      let status = 'normal';
+      const srcActive =
+        (phase === 'alarming' || phase === 'silenced') &&
+        source &&
+        String(source.zone || '').trim() === zone;
+      if (srcActive) {
+        status =
+          source.device && isSupervisoryInitiator(source.device) ? 'supervisory' : 'alarm';
+      }
+      if (troubleDeviceId) {
+        const td = floorDevicesAll.find((d) => d.id === troubleDeviceId);
+        if (td && String(td.zone || '').trim() === zone && status === 'normal') {
+          status = 'trouble';
+        }
+      }
+      return { zone, status };
+    });
+  }, [annunciatorZones, phase, source, troubleDeviceId, floorDevicesAll]);
+
   const displayInitiators = useMemo(() => {
     if (initiatingList.length > 0) {
       return initiatingList.map((d) => ({
@@ -292,9 +339,13 @@ export default function FireAlarmSimulation({
           0%, 100% { transform: rotate(-6deg); }
           50% { transform: rotate(6deg); }
         }
+        @keyframes fa-flow-dash {
+          to { stroke-dashoffset: -24; }
+        }
         .fa-strobe-on { animation: fa-strobe-flash 1s ease-in-out infinite; }
         .fa-panel-alarm-led { animation: fa-panel-alarm-pulse 0.8s ease-in-out infinite; }
         .fa-bell-on { animation: fa-bell-swing 0.12s ease-in-out infinite; }
+        .fa-flow-path { stroke-dasharray: 8 6; animation: fa-flow-dash 1.2s linear infinite; }
       `}</style>
 
       <header className="shrink-0 border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-2 bg-[#14171d]">
@@ -375,7 +426,7 @@ export default function FireAlarmSimulation({
         <section className="flex-1 min-w-0 flex flex-col gap-3">
           <div className="flex items-center gap-2 text-[10px] text-slate-500">
             <Radio className="w-3.5 h-3.5 text-cyan-400" />
-            Riser view — each symbol is a placed device. Red ALM = alarm, amber SUP = supervisory, yellow TRB = trouble (click a device to toggle trouble).
+            Riser view — SLC/NAC tee from vertical riser; red dashed trace = initiating signal to FACP when tripped; annunciator lists every zone on this floor.
           </div>
           <div className="rounded-xl border border-white/10 bg-[#12151c] overflow-hidden">
             <SimulationRiserDiagram
@@ -389,6 +440,24 @@ export default function FireAlarmSimulation({
               source={source}
               troubleDeviceId={troubleDeviceId}
               onToggleTrouble={toggleRiserTrouble}
+              hasPlacedAnnunciator={placedAnnunciators.length > 0}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <ZoneAnnunciatorPanel
+              floor={activeFloor}
+              zoneRows={zoneStatuses}
+              placedAnnunciators={placedAnnunciators}
+              phase={phase}
+              source={source}
+            />
+            <SignalIoMatrix
+              phase={phase}
+              stage={stage}
+              source={source}
+              troubleDeviceId={troubleDeviceId}
+              nacCount={nacList.length}
             />
           </div>
 
@@ -546,6 +615,125 @@ export default function FireAlarmSimulation({
   );
 }
 
+function ZoneAnnunciatorPanel({ floor, zoneRows, placedAnnunciators, phase, source }) {
+  const bezel = 'rounded-lg border-4 border-[#1a1a1a] bg-[#0a0c10] shadow-[inset_0_0_24px_rgba(0,0,0,0.85)]';
+  return (
+    <div className={`${bezel} p-3 flex flex-col min-h-[200px] max-h-[320px]`}>
+      <div className="flex items-center justify-between gap-2 mb-2 border-b border-white/10 pb-2">
+        <div>
+          <p className="text-[9px] uppercase tracking-[0.2em] text-red-400/90 font-bold">Remote annunciator</p>
+          <p className="text-[10px] text-slate-500 font-mono">Floor {floor} · zone LED / LCD preview</p>
+        </div>
+        {placedAnnunciators.length > 0 ? (
+          <span className="text-[9px] font-mono text-emerald-400/90 shrink-0">
+            {placedAnnunciators.length} ANN on plan
+          </span>
+        ) : (
+          <span className="text-[9px] font-mono text-slate-600 shrink-0">No ANN symbol — panel still shows zones</span>
+        )}
+      </div>
+      <div className="overflow-y-auto flex-1 pr-1 space-y-1 font-mono text-[10px]">
+        {zoneRows.length === 0 ? (
+          <p className="text-slate-600 italic p-2">Add devices with zone labels on the floor plan to populate this list.</p>
+        ) : (
+          zoneRows.map(({ zone, status }) => {
+            const activeAlarm = status === 'alarm' && (phase === 'alarming' || phase === 'silenced');
+            const activeSup = status === 'supervisory' && phase !== 'standby';
+            const trb = status === 'trouble';
+            const label =
+              status === 'alarm'
+                ? 'FIRE ALARM'
+                : status === 'supervisory'
+                  ? 'SUPERVISORY'
+                  : status === 'trouble'
+                    ? 'TROUBLE'
+                    : 'NORMAL';
+            return (
+              <div
+                key={zone}
+                className={`flex items-center justify-between gap-2 rounded border px-2 py-1.5 ${
+                  activeAlarm
+                    ? 'border-red-500/60 bg-red-950/40 fa-panel-alarm-led'
+                    : activeSup
+                      ? 'border-amber-500/50 bg-amber-950/25 fa-panel-alarm-led'
+                      : trb
+                        ? 'border-yellow-500/50 bg-yellow-950/20'
+                        : 'border-white/10 bg-black/30'
+                }`}
+              >
+                <span className={`font-bold truncate ${activeAlarm ? 'text-red-300' : activeSup ? 'text-amber-200' : trb ? 'text-yellow-200' : 'text-slate-400'}`}>
+                  {zone}
+                </span>
+                <span
+                  className={`shrink-0 uppercase text-[9px] tracking-wide ${
+                    activeAlarm ? 'text-red-400' : activeSup ? 'text-amber-300' : trb ? 'text-yellow-300' : 'text-emerald-600/90'
+                  }`}
+                >
+                  {label}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+      {(phase === 'alarming' || phase === 'silenced') && source && (
+        <p className="text-[9px] text-slate-600 mt-2 border-t border-white/5 pt-2 truncate" title={source.label}>
+          Active event: {source.label} · {source.zone}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SignalIoMatrix({ phase, stage, source, troubleDeviceId, nacCount }) {
+  const live = phase !== 'standby';
+  const inputLabel =
+    live && source
+      ? `${source.label || 'Input'} (${source.zone || '—'})`
+      : troubleDeviceId
+        ? 'Trouble on riser device'
+        : '—';
+  const facpState =
+    !live ? 'Idle' : stage.supervisory ? 'Supervisory' : stage.panelLed ? 'Alarm / active' : 'Processing…';
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#1a1e28] p-3 flex flex-col min-h-[200px] max-h-[320px]">
+      <p className="text-[9px] uppercase tracking-wider text-cyan-400/90 font-bold mb-1">Signal path · I/O</p>
+      <p className="text-[10px] text-slate-500 mb-3">What triggers what: initiating → panel → outputs (mirrors simulation delays).</p>
+      <div className="space-y-2 text-[10px] font-mono flex-1">
+        <div className="flex justify-between gap-2 border-b border-white/10 pb-2">
+          <span className="text-slate-500">INPUT (SLC)</span>
+          <span className={`text-right truncate ${live ? 'text-amber-200' : 'text-slate-600'}`}>{inputLabel}</span>
+        </div>
+        <div className="flex justify-between gap-2 border-b border-white/10 pb-2">
+          <span className="text-slate-500">FACP</span>
+          <span className={live ? 'text-white' : 'text-slate-600'}>{facpState}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <IoPill label="NAC" on={stage.nac && phase === 'alarming'} sub={`${nacCount} devices`} />
+          <IoPill label="Elevator" on={stage.elevator && live} />
+          <IoPill label="HVAC fan" on={stage.fan && live} />
+          <IoPill label="Fire pump" on={stage.pump && live} />
+        </div>
+      </div>
+      <p className="text-[9px] text-slate-600 mt-2">Silence clears NAC preview only; zones stay latched until reset.</p>
+    </div>
+  );
+}
+
+function IoPill({ label, on, sub }) {
+  return (
+    <div
+      className={`rounded-md border px-2 py-1.5 flex flex-col ${
+        on ? 'border-orange-500/60 bg-orange-950/30 text-orange-100' : 'border-white/10 bg-black/25 text-slate-600'
+      }`}
+    >
+      <span className="text-[9px] uppercase">{label}</span>
+      <span className="text-[9px]">{on ? 'ENERGIZED' : 'off'}</span>
+      {sub && <span className="text-[8px] text-slate-500 mt-0.5">{sub}</span>}
+    </div>
+  );
+}
+
 function SimulationRiserDiagram({
   activeFloor,
   projectName,
@@ -557,6 +745,7 @@ function SimulationRiserDiagram({
   source,
   troubleDeviceId,
   onToggleTrouble,
+  hasPlacedAnnunciator = false,
 }) {
   const DEV_GAP = 52;
   const RISER_X = 72;
@@ -566,7 +755,7 @@ function SimulationRiserDiagram({
   const branchY = 118;
   const nacY = 182;
   const PANEL_TOP = 238;
-  const SVG_H = 288;
+  const SVG_H = 304;
 
   const deviceLeds = (d) => {
     const isNac = NAC_TYPES.has(d.type);
@@ -585,7 +774,9 @@ function SimulationRiserDiagram({
     const t = device?.type;
     const color = riserColor(device);
     const label = riserGlyph(device);
-    const isSquare = ['pull_station', 'horn_strobe', 'strobe', 'facp', 'speaker', 'horn'].includes(t);
+    const isSquare = ['pull_station', 'horn_strobe', 'strobe', 'facp', 'speaker', 'horn', 'annunciator'].includes(
+      t
+    );
     const isDiamond = ['waterflow_switch', 'valve_tamper'].includes(t);
     const fill = `${color}33`;
     if (isDiamond) {
@@ -661,29 +852,92 @@ function SimulationRiserDiagram({
   const nacShow = nacDevices.slice(0, maxShow);
   const branchX = RISER_X + 56;
 
+  const demoSource = source?.id?.startsWith('demo-');
+  const srcIdx = !demoSource && source?.id ? slcShow.findIndex((d) => d.id === source.id) : -1;
+  const showInputFlow = (phase === 'alarming' || phase === 'silenced') && (srcIdx >= 0 || demoSource);
+  const sx = srcIdx >= 0 ? branchX + 20 + srcIdx * DEV_GAP : branchX + 20;
+  const nacHot = stage.nac && phase === 'alarming';
+
   return (
     <div className="w-full overflow-x-auto">
       <svg width="100%" height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="min-w-[720px] select-none">
+        <defs>
+          <filter id="fa-flow-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="1.2" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
         <rect width={SVG_W} height={SVG_H} fill="#0f1218" />
         <text x={SVG_W / 2} y={20} textAnchor="middle" fontSize={12} fill="#e2e8f0" fontWeight="bold" fontFamily="system-ui, sans-serif">
           SIMULATION RISER — Floor {activeFloor} · {projectName}
         </text>
         <text x={SVG_W / 2} y={34} textAnchor="middle" fontSize={8} fill="#64748b" fontFamily="system-ui, sans-serif">
-          SLC dashed · NAC solid · Click device to toggle trouble (TRB)
+          SLC dashed · NAC solid · Red trace = initiating → FACP · Click device for TRB
+          {hasPlacedAnnunciator ? ' · ANN on SLC' : ''}
+        </text>
+
+        <text x={RISER_X} y={38} textAnchor="middle" fontSize={7} fill="#64748b" fontFamily="system-ui, sans-serif">
+          trunk
         </text>
 
         <line x1={RISER_X} y1={42} x2={RISER_X} y2={PANEL_TOP} stroke="#475569" strokeWidth="4" strokeLinecap="round" />
 
         <line x1={RISER_X} y1={branchY} x2={branchX} y2={branchY} stroke="#64748b" strokeWidth="2.5" />
 
-        <line x1={branchX} y1={branchY} x2={branchX} y2={slcY} stroke="#38bdf8" strokeWidth="2" strokeDasharray="6 4" />
+        <line
+          x1={branchX}
+          y1={branchY}
+          x2={branchX}
+          y2={slcY}
+          stroke="#38bdf8"
+          strokeWidth="2"
+          strokeDasharray="6 4"
+        />
         <text x={branchX + 6} y={slcY - 10} fontSize={9} fill="#38bdf8" fontWeight="bold" fontFamily="system-ui, sans-serif">
           SLC · initiating / modules
         </text>
+        {slcShow.length > 0 && (
+          <line
+            x1={branchX}
+            y1={slcY}
+            x2={branchX + 20 - 14}
+            y2={slcY}
+            stroke="#38bdf8"
+            strokeWidth="1.25"
+            strokeDasharray="4 3"
+            opacity={0.9}
+          />
+        )}
+        {showInputFlow && (
+          <polyline
+            points={`${sx},${slcY} ${branchX},${slcY} ${branchX},${branchY} ${RISER_X},${branchY} ${RISER_X},${PANEL_TOP}`}
+            fill="none"
+            stroke="#ef4444"
+            strokeWidth="2.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity="0.92"
+            filter="url(#fa-flow-glow)"
+            className="fa-flow-path"
+          />
+        )}
         {slcShow.map((d, i) => {
           const dx = branchX + 20 + i * DEV_GAP;
           return (
             <g key={d.id}>
+              <line
+                x1={dx}
+                y1={slcY}
+                x2={dx}
+                y2={slcY + 22}
+                stroke="#38bdf8"
+                strokeWidth="0.9"
+                strokeDasharray="2 2"
+                opacity={0.45}
+              />
               {i > 0 && (
                 <line x1={dx - DEV_GAP + 14} y1={slcY} x2={dx - 14} y2={slcY} stroke="#38bdf8" strokeWidth="1.25" strokeDasharray="4 3" opacity={0.85} />
               )}
@@ -697,14 +951,57 @@ function SimulationRiserDiagram({
           </text>
         )}
 
-        <line x1={branchX} y1={branchY} x2={branchX} y2={nacY} stroke="#fb923c" strokeWidth="2" strokeDasharray="6 4" />
+        <line
+          x1={branchX}
+          y1={branchY}
+          x2={branchX}
+          y2={nacY}
+          stroke={nacHot ? '#fdba74' : '#fb923c'}
+          strokeWidth={nacHot ? 3.25 : 2}
+          strokeDasharray="6 4"
+          opacity={nacHot ? 1 : 0.95}
+        />
         <text x={branchX + 6} y={nacY + 36} fontSize={9} fill="#fb923c" fontWeight="bold" fontFamily="system-ui, sans-serif">
           NAC · notification
         </text>
+        {nacShow.length > 0 && (
+          <line
+            x1={branchX}
+            y1={nacY}
+            x2={branchX + 20 - 14}
+            y2={nacY}
+            stroke={nacHot ? '#fdba74' : '#fb923c'}
+            strokeWidth="1.25"
+            strokeDasharray="4 3"
+            opacity={0.9}
+          />
+        )}
+        {nacHot && (
+          <polyline
+            points={`${RISER_X},${branchY} ${branchX},${branchY} ${branchX},${nacY} ${branchX + 20 + Math.max(0, nacShow.length - 1) * DEV_GAP},${nacY}`}
+            fill="none"
+            stroke="#fb923c"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity="0.55"
+            strokeDasharray="6 4"
+          />
+        )}
         {nacShow.map((d, i) => {
           const dx = branchX + 20 + i * DEV_GAP;
           return (
             <g key={d.id}>
+              <line
+                x1={dx}
+                y1={nacY}
+                x2={dx}
+                y2={nacY + 22}
+                stroke="#fb923c"
+                strokeWidth="0.9"
+                strokeDasharray="2 2"
+                opacity={0.45}
+              />
               {i > 0 && (
                 <line x1={dx - DEV_GAP + 14} y1={nacY} x2={dx - 14} y2={nacY} stroke="#fb923c" strokeWidth="1.25" strokeDasharray="4 3" opacity={0.85} />
               )}
@@ -731,6 +1028,9 @@ function SimulationRiserDiagram({
         </text>
         <text x={RISER_X} y={PANEL_TOP + 48} textAnchor="middle" fontSize={7} fill="#64748b" fontFamily="system-ui, sans-serif">
           Class B SLC / NAC · preview
+        </text>
+        <text x={SVG_W - 8} y={SVG_H - 8} textAnchor="end" fontSize={7} fill="#475569" fontFamily="system-ui, sans-serif">
+          INPUT ↑ trunk · tee → SLC / NAC · FACP
         </text>
       </svg>
     </div>
