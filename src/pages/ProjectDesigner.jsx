@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Files } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -120,7 +120,7 @@ export default function ProjectDesigner() {
   });
 
   const saveProjectPatch = (patch) => {
-    saveMutation.mutate({
+    return saveMutation.mutateAsync({
       rooms,
       devices,
       markups,
@@ -161,9 +161,9 @@ export default function ProjectDesigner() {
         file_name: upload.fileName,
         page_number: page.page,
         page_count: upload.pageCount || upload.pages?.length || 1,
-        preview_url: page.previewUrl,
-        width: page.previewWidth || page.width,
-        height: page.previewHeight || page.height,
+        preview_url: '',
+        width: page.width,
+        height: page.height,
         title: page.title || `Page ${page.page}`,
         sheet_number: page.sheetNumber || '',
         suggested_type: page.suggestedType || inferSheetType(`${upload.fileName || ''} ${page.text || ''}`),
@@ -177,6 +177,7 @@ export default function ProjectDesigner() {
       setLocalPlanSheets(nextSheets);
       saveProjectPatch({ plan_sheets: nextSheets });
       setActiveTab('plans');
+      if (uploadedSheets[0]) setSelectedSheetId(uploadedSheets[0].id);
       toast.success(`Uploaded ${uploadedSheets.length} PDF sheets. Assign floor-plan pages in the Plans tab.`);
       return;
     }
@@ -527,7 +528,7 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     setPendingRoomName('');
   };
 
-  const handleAssignSheet = ({ sheet, floor, planType }) => {
+  const handleAssignSheet = async ({ sheet, floor, planType }) => {
     if (!sheet) return;
     const finalPlanType = planType === 'Custom' ? customPlanType.trim() : planType;
     if (!finalPlanType) {
@@ -553,7 +554,7 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
         file_name: sheet.file_name,
         page_number: sheet.page_number,
         page_count: sheet.page_count,
-        rendered_image_url: sheet.preview_url,
+        rendered_image_url: '',
         sheet_text: sheet.sheet_text,
         plan_type: finalPlanType,
         sheet_id: sheet.id,
@@ -561,11 +562,12 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
       setLocalFloorPlans(nextFloorPlans);
     }
     setLocalPlanSheets(nextSheets);
-    saveProjectPatch({ floor_plans: nextFloorPlans, plan_sheets: nextSheets, plan_categories: nextCategories });
+    await saveProjectPatch({ floor_plans: nextFloorPlans, plan_sheets: nextSheets, plan_categories: nextCategories });
+    setActiveTab('plans');
     toast.success(assignedFloor ? `Assigned page ${sheet.page_number} to floor ${assignedFloor}` : `Tagged page ${sheet.page_number} as ${finalPlanType}`);
   };
 
-  const handleClearSheetAssignment = (sheet) => {
+  const handleClearSheetAssignment = async (sheet) => {
     if (!sheet) return;
     const nextSheets = planSheets.map((candidate) => (
       candidate.id === sheet.id ? { ...candidate, assigned_floor: '', plan_type: 'unassigned' } : candidate
@@ -573,7 +575,8 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     const nextFloorPlans = floorPlans.filter((plan) => plan.sheet_id !== sheet.id);
     setLocalPlanSheets(nextSheets);
     setLocalFloorPlans(nextFloorPlans);
-    saveProjectPatch({ floor_plans: nextFloorPlans, plan_sheets: nextSheets });
+    await saveProjectPatch({ floor_plans: nextFloorPlans, plan_sheets: nextSheets });
+    setActiveTab('plans');
     toast.success(`Cleared assignment for page ${sheet.page_number}`);
   };
 
@@ -694,17 +697,7 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
                 onWorkspaceChange={setLocalDocumentWorkspace}
                 onSave={(workspace) => {
                   setLocalDocumentWorkspace(workspace);
-                  saveMutation.mutate({
-                    rooms,
-                    devices,
-                    markups,
-                    layout_zones: layoutZones,
-                    floor_plans: floorPlans,
-                    wires,
-                    document_workspace: workspace,
-                    analysis_results: analysisResults,
-                    status: devices.length > 0 ? "in_progress" : "draft",
-                  });
+                  saveProjectPatch({ document_workspace: workspace });
                 }}
               />
             </Suspense>
@@ -944,7 +937,29 @@ function PlansPanel({
 }) {
   const [targetFloor, setTargetFloor] = useState(String(floors[0] || 1));
   const [targetType, setTargetType] = useState('Fire Alarm');
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
   const assignedCount = sheets.filter((sheet) => sheet.assigned_floor).length;
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setPreviewUrl(selectedSheet?.preview_url || '');
+    if (!selectedSheet || selectedSheet.preview_url || selectedSheet.file_type !== 'application/pdf') return undefined;
+    setPreviewLoading(true);
+    renderPdfPageToDataUrl(selectedSheet.file_url, selectedSheet.page_number || 1, 1.5)
+      .then((rendered) => {
+        if (!cancelled) setPreviewUrl(rendered.dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewUrl('');
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSheet]);
 
   return (
     <div className="h-full grid grid-cols-[320px_minmax(0,1fr)] bg-slate-100">
@@ -965,13 +980,9 @@ function PlansPanel({
               }`}
             >
               <div className="flex gap-2">
-                {sheet.preview_url ? (
-                  <img src={sheet.preview_url} alt="" className="h-16 w-12 object-cover rounded border border-slate-200 bg-slate-100" />
-                ) : (
-                  <div className="h-16 w-12 rounded border border-slate-200 bg-slate-100 flex items-center justify-center">
-                    <Files className="h-5 w-5 text-slate-400" />
-                  </div>
-                )}
+                <div className="h-16 w-12 rounded border border-slate-200 bg-slate-100 flex items-center justify-center overflow-hidden">
+                  {sheet.preview_url ? <img src={sheet.preview_url} alt="" className="h-full w-full object-cover" /> : <span className="text-[10px] font-semibold text-slate-500">P{sheet.page_number}</span>}
+                </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold text-slate-900 truncate">{sheet.sheet_number || `Page ${sheet.page_number}`}</p>
                   <p className="text-[11px] text-slate-500 truncate">{sheet.title || sheet.file_name || 'Imported sheet'}</p>
@@ -1006,11 +1017,15 @@ function PlansPanel({
                 )}
               </div>
               <div className="flex justify-center rounded-lg bg-slate-900/5 p-4">
-                {selectedSheet.preview_url ? (
-                  <img src={selectedSheet.preview_url} alt="" className="max-h-[70vh] max-w-full rounded border border-slate-200 bg-white object-contain" />
+                {previewLoading ? (
+                  <div className="flex h-96 w-full items-center justify-center rounded border border-dashed border-slate-300 text-slate-500">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Rendering page preview...
+                  </div>
+                ) : previewUrl ? (
+                  <img src={previewUrl} alt="" className="max-h-[70vh] max-w-full rounded border border-slate-200 bg-white object-contain" />
                 ) : (
                   <div className="flex h-96 w-full items-center justify-center rounded border border-dashed border-slate-300 text-slate-400">
-                    No preview available
+                    No preview available for this sheet
                   </div>
                 )}
               </div>
@@ -1051,7 +1066,7 @@ function PlansPanel({
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   className="bg-orange-500 text-white hover:bg-orange-600"
-                  onClick={() => onAssign(selectedSheet, targetFloor, targetType)}
+                  onClick={() => onAssign({ sheet: selectedSheet, floor: targetFloor, planType: targetType })}
                 >
                   Assign
                 </Button>

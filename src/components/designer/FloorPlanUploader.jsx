@@ -45,7 +45,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
     setUploadState("uploading");
     try {
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      setUploadProgress(66);
+        setUploadProgress(66);
       if (isPdf) {
         setUploadState("processing");
         const localUrl = URL.createObjectURL(file);
