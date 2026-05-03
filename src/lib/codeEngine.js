@@ -702,6 +702,61 @@ export function calculateSprinklerMonitoring(sprinklerData = {}) {
   return devices;
 }
 
+function unionBoundsFromRooms(rooms) {
+  if (!rooms || !rooms.length) {
+    return { minX: 100, minY: 100, maxX: 700, maxY: 500 };
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const r of rooms) {
+    if (r == null || !Number.isFinite(Number(r.x))) continue;
+    const w = Number(r.width) || 0;
+    const h = Number(r.height) || 0;
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + w);
+    maxY = Math.max(maxY, r.y + h);
+  }
+  if (!Number.isFinite(minX)) {
+    return { minX: 100, minY: 100, maxX: 700, maxY: 500 };
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Waterflow and valve/tamper devices from calculateSprinklerMonitoring() have no x/y; the
+ * canvas skips them. Lays symbols along the bottom center of each floor's room union.
+ */
+export function assignSprinklerMonitoringPositions(devices, rooms = []) {
+  const unplacedIdsByFloor = new Map();
+  for (const d of devices || []) {
+    if ((d.type !== 'waterflow_switch' && d.type !== 'valve_tamper') || (d.x != null && d.y != null)) continue;
+    const f = Number(d.floor);
+    const list = unplacedIdsByFloor.get(f) || [];
+    list.push(d.id);
+    unplacedIdsByFloor.set(f, list);
+  }
+
+  return (devices || []).map((d) => {
+    if (d.type !== 'waterflow_switch' && d.type !== 'valve_tamper') return d;
+    if (d.x != null && d.y != null) return d;
+    const f = Number(d.floor);
+    const floorRooms = (rooms || []).filter((r) => Number(r.floor) === f);
+    const bounds = unionBoundsFromRooms(floorRooms);
+    const cx = (bounds.minX + bounds.maxX) / 2;
+    const baseY = bounds.maxY - 28;
+    const ids = unplacedIdsByFloor.get(f) || [];
+    const i = ids.indexOf(d.id);
+    const n = Math.max(1, ids.length);
+    const spread = 44;
+    const x = Math.round(cx + (i - (n - 1) / 2) * spread);
+    const y = Math.round(baseY);
+    return { ...d, x, y };
+  });
+}
+
 // ─── BATTERY SIZING ──────────────────────────────────────────────────────────
 
 /**

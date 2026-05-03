@@ -185,6 +185,11 @@ function snapToGrid(val, enabled) {
   return Math.round(val / GRID_SIZE) * GRID_SIZE;
 }
 
+/** JSON/API often stores floor as string; strict === hid rooms, zones, and devices on the canvas. */
+function sameFloor(floor, currentFloor) {
+  return Number(floor) === Number(currentFloor);
+}
+
 function getSymbol(type, subtype) {
   return NFPA_SYMBOLS[subtype] || NFPA_SYMBOLS[type] || NFPA_SYMBOLS.smoke_detector;
 }
@@ -214,7 +219,7 @@ function makeDeviceLabel(type, existingDevices) {
 
 function deviceHitTest(devices, currentFloor, world, padding = 4) {
   return [...devices]
-    .filter((device) => device.floor === currentFloor)
+    .filter((device) => sameFloor(device.floor, currentFloor))
     .reverse()
     .find((device) => device.x != null && Math.hypot(world.x - device.x, world.y - device.y) < DEVICE_RADIUS + padding);
 }
@@ -391,7 +396,7 @@ export default function FloorPlanCanvas({
   const activeToolbarDevice = useMemo(() => {
     const id = hoveredDeviceId || selectedDevice?.id;
     if (id && id === toolbarDismissedDeviceId) return null;
-    return devices.find((device) => device.id === id && device.floor === currentFloor);
+    return devices.find((device) => device.id === id && sameFloor(device.floor, currentFloor));
   }, [devices, currentFloor, hoveredDeviceId, selectedDevice?.id, toolbarDismissedDeviceId]);
 
   const toolbarPosition = activeToolbarDevice
@@ -554,7 +559,7 @@ export default function FloorPlanCanvas({
     }
 
     if (layers.rooms !== false) {
-      rooms.filter((room) => room.floor === currentFloor).forEach((room) => {
+      rooms.filter((room) => sameFloor(room.floor, currentFloor)).forEach((room) => {
         ctx.strokeStyle = 'rgba(249,115,22,0.7)';
         ctx.fillStyle = 'rgba(249,115,22,0.05)';
         ctx.lineWidth = 1.5;
@@ -598,7 +603,7 @@ export default function FloorPlanCanvas({
     }
 
     if (layers.layout_zones !== false) {
-      layoutZones.filter((zone) => zone.floor === currentFloor).forEach((zone) => drawLayoutZone(ctx, zone));
+      layoutZones.filter((zone) => sameFloor(zone.floor, currentFloor)).forEach((zone) => drawLayoutZone(ctx, zone));
     }
 
     if (drawingLayoutZone) {
@@ -629,7 +634,7 @@ export default function FloorPlanCanvas({
       }
     }
 
-    wires.filter((wire) => wire.floor === currentFloor).forEach((wire) => {
+    wires.filter((wire) => sameFloor(wire.floor, currentFloor)).forEach((wire) => {
       const a = devices.find((device) => device.id === wire.from);
       const b = devices.find((device) => device.id === wire.to);
       if (!a || !b || a.x == null || b.x == null) return;
@@ -682,7 +687,7 @@ export default function FloorPlanCanvas({
       ctx.restore();
     }
 
-    devices.filter((device) => device.floor === currentFloor).forEach((device) => {
+    devices.filter((device) => sameFloor(device.floor, currentFloor)).forEach((device) => {
       if (device.x == null || device.y == null) return;
       const isSelected = selectedDevice?.id === device.id;
       const isHovered = hoveredDeviceId === device.id;
@@ -713,7 +718,7 @@ export default function FloorPlanCanvas({
 
     if (layers.markups !== false) {
       markups
-        .filter((markup) => markup.floor === currentFloor && layers[getMarkupLayerKey(markup.layer)] !== false)
+        .filter((markup) => sameFloor(markup.floor, currentFloor) && layers[getMarkupLayerKey(markup.layer)] !== false)
         .forEach((markup) => drawMarkup(ctx, markup, pxPerFt));
     }
 
@@ -907,7 +912,7 @@ export default function FloorPlanCanvas({
           : device
       )));
     }
-  }, [currentFloor, devices, dragging, drawingMarkup, drawingRoom, onDevicesChange, selectedTool, snapGrid, toWorld]);
+  }, [currentFloor, devices, dragging, drawingLayoutZone, drawingMarkup, drawingRoom, onDevicesChange, selectedTool, snapGrid, toWorld]);
 
   const handleMouseUp = useCallback(() => {
     if (selectedTool === 'room' && drawingRoom) {

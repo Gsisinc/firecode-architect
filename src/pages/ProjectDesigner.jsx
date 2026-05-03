@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useCallback, useRef } from "react";
+import React, { Suspense, lazy, useState, useCallback, useRef, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -40,6 +40,7 @@ import {
   calculateHornPlacement,
   calculateElevatorRecallDetectors,
   calculateSprinklerMonitoring,
+  assignSprinklerMonitoringPositions,
   generateDeviceSchedule,
   generateSequenceOfOperations,
 } from "@/lib/codeEngine";
@@ -111,6 +112,11 @@ export default function ProjectDesigner() {
   const planCategories = project?.plan_categories ?? [];
   const selectedSheet = planSheets.find(sheet => sheet.id === selectedSheetId) || planSheets[0] || null;
   const planTypes = Array.from(new Set(['Architectural', 'Fire Alarm', 'Electrical', 'Life Safety', 'Custom', ...planCategories, ...floorPlans.map(plan => plan.plan_type).filter(Boolean)]));
+
+  const canvasDevices = useMemo(
+    () => assignSprinklerMonitoringPositions(devices, rooms),
+    [devices, rooms]
+  );
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
@@ -461,8 +467,11 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     const elevDevices = calculateElevatorRecallDetectors(project).filter((d) => d.floor === activeFloor);
     allDevices.push(...elevDevices);
 
-    // Sprinkler monitoring
-    const sprinklerDevices = calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor);
+    // Sprinkler monitoring (assign plan coordinates so symbols render on the canvas)
+    const sprinklerDevices = assignSprinklerMonitoringPositions(
+      calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor),
+      floorRooms
+    );
     allDevices.push(...sprinklerDevices);
 
     const activeFloorZones = layoutZones.filter((zone) => zone.floor === activeFloor);
@@ -818,7 +827,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 floorPlanPageNumber={currentFloorPlan?.page_number || 1}
                 rooms={rooms}
                 layoutZones={layoutZones}
-                devices={devices}
+                devices={canvasDevices}
                 layers={layers}
                 selectedTool={selectedTool}
                 snapGrid={snapGrid}
@@ -879,7 +888,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                     <ToolbarBtn active={rightPanel === 'battery'} onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')} icon={<Battery className="h-3 w-3" />} label="Battery" />
                     <ToolbarBtn active={rightPanel === 'voltagedrop'} onClick={() => setRightPanel(p => p === 'voltagedrop' ? null : 'voltagedrop')} icon={<Zap className="h-3 w-3" />} label="V-Drop" />
                     <ToolbarBtn active={rightPanel === 'markups'} onClick={() => setRightPanel(p => p === 'markups' ? null : 'markups')} icon={<MessageSquare className="h-3 w-3" />} label="Markups" />
-                    <ToolbarBtn onClick={() => downloadDXF(project, rooms, devices, activeFloor, { wires })} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
+                    <ToolbarBtn onClick={() => downloadDXF(project, rooms, canvasDevices, activeFloor, { wires })} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
                     <ToolbarBtn onClick={() => setShowSubmittal(true)} icon={<BookOpen className="h-3 w-3" />} label="Submittal PDF" orange />
                   </div>
                 </div>
