@@ -39,6 +39,7 @@ export default function ProjectSetup() {
     default_ceiling_type: 'smooth_flat',
     elevator_count: 0,
     air_handling_units: '',
+    level_of_exit_discharge_floor: 1,
     ahj_contact: '',
     adopted_code_edition: '2021 IBC / 2022 NFPA 72',
     communication_pathway: 'IP/GSM',
@@ -212,6 +213,17 @@ export default function ProjectSetup() {
                 </Field>
                 <Field label="Number of Floors" required>
                   <Input type="number" min={1} max={50} value={f.num_floors} onChange={e => setFloorCount(e.target.value)} className="input-dark" />
+                </Field>
+                <Field label="Level of exit discharge (floor #)">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={f.level_of_exit_discharge_floor ?? 1}
+                    onChange={e => setForm(p => ({ ...p, level_of_exit_discharge_floor: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+                    className="input-dark"
+                  />
+                  <p className="text-[11px] text-white/35 mt-1">Used with per-floor OL for IBC §907.2.7 “{'>'}100 above/below discharge” (Group M, B).</p>
                 </Field>
                 <Field label="Total Occupant Load">
                   <Input type="number" min={0} value={f.total_occupant_load} onChange={e => setForm(p => ({ ...p, total_occupant_load: +e.target.value }))} className="input-dark" />

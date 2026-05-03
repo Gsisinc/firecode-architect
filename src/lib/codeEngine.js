@@ -6,6 +6,14 @@
 
 // ─── IBC OCCUPANCY RULES ────────────────────────────────────────────────────
 
+/** Sum occupant load on floors other than the level of exit discharge (IBC §907.2 “above or below” triggers). */
+export function sumOccupantLoadOffExitDischarge(occupant_load_per_floor = [], dischargeFloor = 1) {
+  return (occupant_load_per_floor || []).reduce((sum, f) => {
+    if (Number(f?.floor) === Number(dischargeFloor)) return sum;
+    return sum + (Number(f?.load) || 0);
+  }, 0);
+}
+
 /** IBC Table 907.2 - Determine if fire alarm system is required */
 export function determineSystemRequirements(projectData) {
   const {
@@ -17,12 +25,13 @@ export function determineSystemRequirements(projectData) {
     sprinkler_status,
     elevator_count,
     total_sleeping_units,
+    level_of_exit_discharge_floor = 1,
   } = projectData;
 
   const isFullySprinklered = ['Full (NFPA 13)', 'Full (NFPA 13R)'].includes(sprinkler_status);
   const totalSqft = gross_sqft_per_floor.reduce((sum, f) => sum + (f.sqft || 0), 0);
   const maxFloorSqft = Math.max(...gross_sqft_per_floor.map(f => f.sqft || 0), 0);
-  const maxFloorAboveDischarge = Math.max(...occupant_load_per_floor.map(f => f.load || 0), 0);
+  const occupantLoadAboveBelowDischarge = sumOccupantLoadOffExitDischarge(occupant_load_per_floor, level_of_exit_discharge_floor);
 
   const result = {
     fireAlarmRequired: false,
@@ -62,7 +71,7 @@ export function determineSystemRequirements(projectData) {
       break;
 
     case 'B': // IBC §907.2.2
-      result.fireAlarmRequired = total_occupant_load >= 500 || maxFloorAboveDischarge > 100;
+      result.fireAlarmRequired = (total_occupant_load || 0) >= 500 || occupantLoadAboveBelowDischarge > 100;
       if (isFullySprinklered) {
         result.pullStationsRequired = false;
         result.pullStationException = 'One pull station at AHJ-directed location (IBC §907.2.2)';
@@ -161,17 +170,37 @@ export function determineSystemRequirements(projectData) {
       result.codeReferences.push('IBC §907.2.6.4');
       break;
 
-    case 'M': // IBC §907.2.7
-      result.fireAlarmRequired = total_occupant_load >= 500 || maxFloorAboveDischarge > 100;
+    case 'M': { // IBC §907.2.7 — Mercantile (manual fire alarm + occupant notification when triggered)
+      const aggregateOl = total_occupant_load || 0;
+      result.fireAlarmRequired = aggregateOl >= 500 || occupantLoadAboveBelowDischarge > 100;
       result.sprinklerRequired = maxFloorSqft > 12000 || num_floors > 3;
       if (isFullySprinklered) {
         result.pullStationsRequired = false;
         result.pullStationException = 'One pull station at AHJ-directed location (IBC §907.2.7)';
       }
       result.notificationDevices = { horns: true, strobes: true, speakers: false };
-      result.specialNotes.push('Covered malls: occupant notification not required if constantly attended location with voice capability (IBC §907.2.7)');
-      result.codeReferences.push('IBC §907.2.7');
+      /* When a building fire alarm is in scope, detection & notification are engineered per NFPA 72; IBC §907.2.7 names the system, not every spot smoke. */
+      result.smokeDetectionRequired = result.fireAlarmRequired;
+      result.specialNotes.push('IBC §907.2.7: Fire alarm where aggregate mercantile occupant load ≥ 500 OR >100 persons above/below level of exit discharge (off-discharge OL shown in analysis).');
+      result.specialNotes.push('NFPA 101 §9.6 / Ch. 36: Where a fire alarm system is provided for mercantile, it shall meet NFPA 72 — coordinate detection & notification with Ch. 36 means-of-egress package.');
+      result.specialNotes.push('Covered mall exception: constantly attended location with voice capability may alter notification (IBC §907.2.7).');
+      result.codeReferences.push('IBC §907.2.7', 'NFPA 101 §9.6', 'NFPA 101 Ch. 36');
+      result.mercantileIbcTriggers = {
+        aggregateOccupantLoad: aggregateOl,
+        occupantLoadAboveBelowExitDischarge: occupantLoadAboveBelowDischarge,
+        dischargeFloorAssumed: level_of_exit_discharge_floor,
+        aggregate500: aggregateOl >= 500,
+        over100OffDischarge: occupantLoadAboveBelowDischarge > 100,
+      };
+      result.requiredDevicesNarrative = [
+        { device: 'Manual fire alarm boxes', ibc: '§907.2.7', nfpa: 'NFPA 72 §17.14', when: result.fireAlarmRequired },
+        { device: 'Occupant notification (audible/visible)', ibc: '§907.5', nfpa: 'NFPA 101 §9.6 / NFPA 72 §§17–18', when: result.fireAlarmRequired },
+        { device: 'Automatic initiating devices (smoke/heat as designed)', ibc: '§907.5 / engineered', nfpa: 'NFPA 72 Ch. 17', when: result.fireAlarmRequired },
+        { device: 'Sprinkler supervisory (waterflow, tamper)', ibc: 'Ch. 9 + NFPA 13 tie-in', nfpa: 'NFPA 72 §17.16', when: ['Full (NFPA 13)', 'Full (NFPA 13R)', 'Partial'].includes(sprinkler_status) },
+        { device: 'FACP smoke detector within 21 ft of FACP', ibc: '—', nfpa: 'NFPA 72 §26.2', when: result.fireAlarmRequired },
+      ];
       break;
+    }
 
     case 'R-1': // IBC §907.2.8
       result.fireAlarmRequired = num_floors > 2;

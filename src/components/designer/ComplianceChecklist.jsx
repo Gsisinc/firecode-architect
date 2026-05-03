@@ -176,6 +176,21 @@ function buildChecklist(project, devices, analysisResults, rooms) {
     });
   }
 
+  if (og === "M") {
+    occChecks.push({
+      label: "Per-floor occupant loads entered (IBC §907.2.7 >100 above/below discharge)",
+      ok: (project?.occupant_load_per_floor || []).some((f) => Number(f.load) > 0),
+      ref: "IBC §907.2.7",
+      warn: false,
+    });
+    occChecks.push({
+      label: "NFPA 101 §9.6 / Ch. 36 — fire alarm life safety basis documented in analysis",
+      ok: !!reqs.codeReferences?.some((r) => String(r).includes("NFPA 101")),
+      ref: "NFPA 101 §9.6, Ch. 36",
+      warn: false,
+    });
+  }
+
   if (occChecks.length > 0) {
     items.push({ section: `Occupancy Group ${og} Requirements`, checks: occChecks });
   }

@@ -311,6 +311,30 @@ export default function DesignerSidebar({
                   {requirements.pullStationException}
                 </div>
               )}
+              {requirements.mercantileIbcTriggers && (
+                <div className="text-[10px] text-slate-200 p-2 bg-white/5 rounded space-y-1">
+                  <p className="font-semibold text-white/90">IBC §907.2.7 (mercantile)</p>
+                  <p className="text-white/60">
+                    Aggregate OL {requirements.mercantileIbcTriggers.aggregateOccupantLoad} — {requirements.mercantileIbcTriggers.aggregate500 ? '≥500 (trigger)' : 'under 500'}
+                  </p>
+                  <p className="text-white/60">
+                    OL not at exit discharge (floor ≠ {requirements.mercantileIbcTriggers.dischargeFloorAssumed}):{' '}
+                    {requirements.mercantileIbcTriggers.occupantLoadAboveBelowExitDischarge} —{' '}
+                    {requirements.mercantileIbcTriggers.over100OffDischarge ? '>100 (trigger)' : '≤100'}
+                  </p>
+                </div>
+              )}
+              {requirements.requiredDevicesNarrative && (
+                <div className="text-[10px] text-slate-200 p-2 bg-violet-950/40 border border-violet-500/20 rounded mt-1 space-y-0.5">
+                  <p className="font-semibold text-violet-200">Device types (IBC + NFPA 101 / 72)</p>
+                  {requirements.requiredDevicesNarrative.filter((r) => r.when).map((r) => (
+                    <p key={r.device} className="text-white/70">
+                      <span className="text-white/90">{r.device}</span>
+                      <span className="text-white/40"> — {r.ibc} · {r.nfpa}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           </SidebarSection>
         )}
