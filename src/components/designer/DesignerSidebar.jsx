@@ -433,6 +433,50 @@ function ReqItem({ label, value }) {
   );
 }
 
+function LayerItemGroup({ title, open, onToggle, items = [], emptyText, getLabel, getMeta, onDelete }) {
+  return (
+    <div className="rounded border border-white/10 bg-white/[0.03]">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-2 py-1.5 text-left text-[11px] font-medium text-white/60 hover:bg-white/5"
+      >
+        <span>{title}</span>
+        {open ? <ChevronDown className="h-3 w-3 text-white/30" /> : <ChevronRight className="h-3 w-3 text-white/30" />}
+      </button>
+      {open && (
+        <div className="space-y-1 border-t border-white/10 p-1.5">
+          {items.length === 0 ? (
+            <p className="px-1 py-1 text-[10px] text-white/25">{emptyText}</p>
+          ) : (
+            items.map((item) => (
+              <div key={item.id} className="flex items-center gap-1 rounded px-1 py-1 hover:bg-white/5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[11px] text-white/70">{getLabel(item)}</p>
+                  <p className="truncate text-[9px] text-white/30">{getMeta(item)}</p>
+                </div>
+                {onDelete && (
+                  <button
+                    type="button"
+                    title="Delete"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDelete(item.id);
+                    }}
+                    className="rounded p-1 text-red-300/60 hover:bg-red-500/10 hover:text-red-300"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function summarizeWireByType({ wires = [], devices = [], floorPlans = [], floor }) {
   const summary = {};
   let totalFeet = 0;
