@@ -88,13 +88,21 @@ export async function runSubmittalPackagePdf({
   sections = DEFAULT_SUBMITTAL_SECTIONS,
   ahjCover = true,
   submittalMeta = {},
+  /** Floor shown on the designer canvas — embedded drawing is for this level. */
+  activeFloor = 1,
 }) {
   void _rooms;
+  /** Full drawing bounds (plan + devices), not the current zoom/pan viewport. */
   const captureCanvas = () => {
     const hi =
       captureRef?.current &&
       typeof captureRef.current.getLayoutDataURL === "function" &&
-      captureRef.current.getLayoutDataURL({ mimeType: "image/png" });
+      captureRef.current.getLayoutDataURL({
+        mimeType: "image/png",
+        fitContent: true,
+        maxOutputEdge: 8192,
+        exportMarginPx: 48,
+      });
     if (hi) return hi;
     if (!canvasRef?.current || typeof canvasRef.current.toDataURL !== "function") return null;
     return canvasRef.current.toDataURL("image/png");
@@ -137,6 +145,7 @@ export async function runSubmittalPackagePdf({
           imgWidth: floorImgDims.width,
           imgHeight: floorImgDims.height,
           submittalMeta: meta,
+          exportFloor: activeFloor,
         });
       }
       doc.addPage("a4", "portrait");
@@ -363,7 +372,7 @@ export async function runSubmittalPackagePdf({
         const vals = [
           String(row.item),
           (DEVICE_TYPE_LABELS[row.device_type] || row.device_type || "").slice(0, 20),
-          (row.address || "—").slice(0, 10),
+          String(row.label || "—").slice(0, 14),
           (row.address || "—").slice(0, 10),
           (row.zone || "—").slice(0, 10),
           (row.circuit || "—").slice(0, 8),
@@ -524,7 +533,12 @@ export async function runSubmittalPackagePdf({
       doc.setTextColor(100, 116, 139);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(6);
-      doc.text(`${pName}  ·  ${now}  ·  Page ${pageNum}`, fpW - 8, 9, { align: "right" });
+      doc.text(
+        `${pName}  ·  Floor ${activeFloor} (full sheet)  ·  ${now}  ·  Page ${pageNum}`,
+        fpW - 8,
+        9,
+        { align: "right" }
+      );
       const imgTop = 16;
       const boxH = fpH - imgTop - 8;
       const boxW = fpW - 16;

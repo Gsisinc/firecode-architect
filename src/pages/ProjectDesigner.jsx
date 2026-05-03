@@ -984,6 +984,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 canvasRef={canvasRef}
                 captureRef={floorPlanCaptureRef}
                 rooms={rooms}
+                activeFloor={activeFloor}
               />
             </Suspense>
           )}
@@ -1179,6 +1180,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
           analysisResults={analysisResults}
           canvasRef={canvasRef}
           captureRef={floorPlanCaptureRef}
+          activeFloor={activeFloor}
           onClose={() => setShowSubmittal(false)}
           onSaveSubmittalMeta={(meta) => saveProjectPatch({ submittal_meta: { ...project?.submittal_meta, ...meta } })}
         />

@@ -202,6 +202,84 @@ function sameFloor(floor, currentFloor) {
   return Number(floor) === Number(currentFloor);
 }
 
+/**
+ * World-space bounds for PDF/submittal export — independent of on-screen zoom/pan.
+ * @returns {{ minX: number, minY: number, maxX: number, maxY: number, width: number, height: number } | null}
+ */
+function computeContentBoundsForExport({
+  floorImg,
+  devices,
+  rooms,
+  layoutZones,
+  wires,
+  markups,
+  currentFloor,
+}) {
+  const labelPad = 28;
+  const pad = DEVICE_RADIUS + labelPad;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let has = false;
+  const addRect = (x0, y0, x1, y1) => {
+    minX = Math.min(minX, x0, x1);
+    minY = Math.min(minY, y0, y1);
+    maxX = Math.max(maxX, x0, x1);
+    maxY = Math.max(maxY, y0, y1);
+    has = true;
+  };
+
+  const fw = floorImg?.naturalWidth || floorImg?.width;
+  const fh = floorImg?.naturalHeight || floorImg?.height;
+  if (fw > 0 && fh > 0) {
+    addRect(0, 0, fw, fh);
+  }
+
+  devices
+    .filter((d) => sameFloor(d.floor, currentFloor))
+    .forEach((d) => {
+      if (d.x == null || d.y == null) return;
+      addRect(d.x - pad, d.y - pad, d.x + pad, d.y + pad + 18);
+    });
+
+  rooms
+    .filter((r) => sameFloor(r.floor, currentFloor))
+    .forEach((r) => {
+      addRect(r.x, r.y, r.x + (r.width || 0), r.y + (r.height || 0));
+    });
+
+  layoutZones
+    .filter((z) => sameFloor(z.floor, currentFloor))
+    .forEach((z) => {
+      addRect(z.x, z.y, z.x + (z.width || 0), z.y + (z.height || 0));
+    });
+
+  const devMap = Object.fromEntries(
+    devices.filter((d) => sameFloor(d.floor, currentFloor)).map((d) => [d.id, d])
+  );
+  (wires || [])
+    .filter((w) => sameFloor(w.floor ?? currentFloor, currentFloor))
+    .forEach((w) => {
+      const a = devMap[w.from];
+      const b = devMap[w.to];
+      if (a?.x != null && b?.x != null) addRect(a.x, a.y, b.x, b.y);
+    });
+
+  (markups || [])
+    .filter((mu) => sameFloor(mu.floor ?? currentFloor, currentFloor))
+    .forEach((mu) => {
+      const b = getMarkupBounds(mu);
+      if (b) addRect(b.left, b.top, b.left + b.width, b.top + b.height);
+    });
+
+  if (!has || !Number.isFinite(minX)) return null;
+  const width = maxX - minX;
+  const height = maxY - minY;
+  if (width < 2 || height < 2) return null;
+  return { minX, minY, maxX, maxY, width, height };
+}
+
 function getSymbol(type, subtype) {
   return NFPA_SYMBOLS[subtype] || NFPA_SYMBOLS[type] || NFPA_SYMBOLS.smoke_detector;
 }
@@ -1086,9 +1164,47 @@ export default function FloorPlanCanvas({
         const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
         const pixelRatio =
           options.pixelRatio ?? Math.min(4, Math.max(2.5, dpr * 2));
+
+        let outSize = canvasSize;
+        let outOffset = offset;
+        let outScale = scale;
+
+        if (options.fitContent) {
+          const b = computeContentBoundsForExport({
+            floorImg,
+            devices,
+            rooms,
+            layoutZones,
+            wires,
+            markups,
+            currentFloor,
+          });
+          if (b) {
+            const marginPx = options.exportMarginPx ?? 44;
+            const maxEdge = options.maxOutputEdge ?? 4096;
+            const cw = Math.max(b.width, 1);
+            const ch = Math.max(b.height, 1);
+            const ar = cw / ch;
+            let baseW;
+            let baseH;
+            if (ar >= 1) {
+              baseW = Math.min(maxEdge, Math.max(720, Math.round(cw * 1.25)));
+              baseH = Math.round(baseW / ar);
+            } else {
+              baseH = Math.min(maxEdge, Math.max(720, Math.round(ch * 1.25)));
+              baseW = Math.round(baseH * ar);
+            }
+            outScale = Math.min((baseW - 2 * marginPx) / cw, (baseH - 2 * marginPx) / ch);
+            const canvasW = Math.round(cw * outScale + 2 * marginPx);
+            const canvasH = Math.round(ch * outScale + 2 * marginPx);
+            outSize = { w: canvasW, h: canvasH };
+            outOffset = { x: marginPx - b.minX * outScale, y: marginPx - b.minY * outScale };
+          }
+        }
+
         const canvasEl = document.createElement('canvas');
-        const bw = Math.max(1, Math.round(canvasSize.w * pixelRatio));
-        const bh = Math.max(1, Math.round(canvasSize.h * pixelRatio));
+        const bw = Math.max(1, Math.round(outSize.w * pixelRatio));
+        const bh = Math.max(1, Math.round(outSize.h * pixelRatio));
         canvasEl.width = bw;
         canvasEl.height = bh;
         const ctx = canvasEl.getContext('2d');
@@ -1097,9 +1213,9 @@ export default function FloorPlanCanvas({
         ctx.imageSmoothingQuality = 'high';
         ctx.scale(pixelRatio, pixelRatio);
         drawFloorPlanScene(ctx, {
-          canvasSize,
-          offset,
-          scale,
+          canvasSize: outSize,
+          offset: outOffset,
+          scale: outScale,
           floorImg,
           layers,
           rooms,

@@ -120,10 +120,25 @@ function drawAhjRiserSchematic(doc, riser, x, y, w, h) {
       (dc.heat_detectors || 0) +
       (dc.pull_stations || 0) +
       (dc.waterflow || 0) +
-      (dc.tamper || 0);
+      (dc.tamper || 0) +
+      (dc.duct_detectors || 0) +
+      (dc.co_detectors || 0) +
+      (dc.elevator_recall || 0) +
+      (dc.monitor_modules || 0) +
+      (dc.control_modules || 0) +
+      (dc.door_holders || 0) +
+      (dc.annunciators || 0);
     const nac = (dc.horn_strobes || 0) + (dc.speakers || 0);
     doc.setTextColor(30, 41, 59);
-    doc.text(`F${fl.floor}  SLC devices: ${init}  ·  NAC: ${nac}`, trunkX + 36, yy + 2);
+    const detail =
+      init === 0 && nac === 0
+        ? 'No devices on this floor in model — add on Floor Plan tab'
+        : `SLC ${init} (init./modules) · NAC ${nac}`;
+    doc.text(`Floor ${fl.floor}`, trunkX + 36, yy - 1.5);
+    doc.setFontSize(5.6);
+    doc.setTextColor(71, 85, 105);
+    doc.text(detail, trunkX + 36, yy + 3.5);
+    doc.setFontSize(6.2);
   });
   doc.setFillColor(254, 226, 226);
   doc.setDrawColor(220, 38, 38);
@@ -158,6 +173,7 @@ export function drawAhjFloorPlanSheet(doc, opts) {
     imgWidth = 4,
     imgHeight = 3,
     submittalMeta = {},
+    exportFloor,
   } = opts;
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
@@ -185,8 +201,16 @@ export function drawAhjFloorPlanSheet(doc, opts) {
   doc.setFontSize(9);
   doc.setTextColor(100, 116, 139);
   doc.text(pName || project?.name || 'Project', 12, 21);
+  if (exportFloor != null && exportFloor !== '') {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Floor ${exportFloor} — full sheet export (not viewport zoom)`, 12, 27);
+  }
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
-  doc.text(`Sheet date: ${now}  ·  Graphic export — verify scale in field`, W - 12, 16, { align: 'right' });
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Sheet date: ${now}  ·  Vector layout from device coordinates + base plan`, W - 12, 16, { align: 'right' });
 
   const notesW = 72;
   const tbReserve = 36;

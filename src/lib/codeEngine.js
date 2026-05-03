@@ -1177,6 +1177,7 @@ export function generateDeviceSchedule(deviceArray = []) {
     item: index + 1,
     id: device.id,
     device_type: device.type,
+    label: device.label || '—',
     type_label: formatDeviceType(device.type),
     subtype: device.subtype || '—',
     symbol: device.symbol || '—',
@@ -1340,6 +1341,14 @@ export function generateRiserDiagram(projectData = {}, devicesByFloor = {}) {
     const speakers = floorDevices.filter(d => d.type === 'speaker');
     const waterflow = floorDevices.filter(d => d.type === 'waterflow_switch');
     const tamper = floorDevices.filter(d => d.type === 'valve_tamper');
+    const ductDetectors = floorDevices.filter(d => d.type === 'duct_detector');
+    const coDetectors = floorDevices.filter(d => d.type === 'co_detector');
+    const elevatorRecall = floorDevices.filter(d => d.type === 'elevator_recall');
+    const monitorModules = floorDevices.filter(d => d.type === 'monitor_module');
+    const controlModules = floorDevices.filter(d => d.type === 'control_module');
+    const doorHolders = floorDevices.filter(d => d.type === 'door_holder');
+    const annunciators = floorDevices.filter(d => d.type === 'annunciator');
+    const facpDevices = floorDevices.filter(d => d.type === 'facp');
 
     riser.floors.push({
       floor,
@@ -1381,6 +1390,14 @@ export function generateRiserDiagram(projectData = {}, devicesByFloor = {}) {
         speakers: speakers.length,
         waterflow: waterflow.length,
         tamper: tamper.length,
+        duct_detectors: ductDetectors.length,
+        co_detectors: coDetectors.length,
+        elevator_recall: elevatorRecall.length,
+        monitor_modules: monitorModules.length,
+        control_modules: controlModules.length,
+        door_holders: doorHolders.length,
+        annunciators: annunciators.length,
+        facp: facpDevices.length,
       },
     });
   }

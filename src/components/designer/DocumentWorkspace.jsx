@@ -63,6 +63,7 @@ export default function DocumentWorkspace({
   canvasRef,
   captureRef,
   rooms = [],
+  activeFloor = 1,
 }) {
   const { documents, documentSets, permissions, collaboration, batchJobs } = useMemo(
     () => normalizeDocumentWorkspace(workspace),
@@ -290,6 +291,7 @@ export default function DocumentWorkspace({
                   sections: DEFAULT_SUBMITTAL_SECTIONS,
                   ahjCover: true,
                   submittalMeta: project?.submittal_meta || {},
+                  activeFloor,
                 })
               )
             }

@@ -19,7 +19,12 @@ export async function exportFloorPlanLayoutPdf({ project, canvasRef, captureRef 
   const imgData =
     (captureRef?.current &&
       typeof captureRef.current.getLayoutDataURL === 'function' &&
-      captureRef.current.getLayoutDataURL({ mimeType: 'image/png' })) ||
+      captureRef.current.getLayoutDataURL({
+        mimeType: 'image/png',
+        fitContent: true,
+        maxOutputEdge: 8192,
+        exportMarginPx: 48,
+      })) ||
     (canvasRef?.current && typeof canvasRef.current.toDataURL === 'function'
       ? canvasRef.current.toDataURL('image/png')
       : null);

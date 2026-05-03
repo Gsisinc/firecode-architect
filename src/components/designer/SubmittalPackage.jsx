@@ -9,7 +9,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { runSubmittalPackagePdf } from "@/lib/submittalPackagePdf";
 
-export default function SubmittalPackage({ project, devices, rooms, wires = [], floorPlans = [], analysisResults, canvasRef, captureRef, onClose, onSaveSubmittalMeta }) {
+export default function SubmittalPackage({
+  project,
+  devices,
+  rooms,
+  wires = [],
+  floorPlans = [],
+  analysisResults,
+  canvasRef,
+  captureRef,
+  activeFloor = 1,
+  onClose,
+  onSaveSubmittalMeta,
+}) {
   const [generating, setGenerating] = useState(false);
   const [ahjCover, setAhjCover] = useState(true);
   const [submittalMeta, setSubmittalMeta] = useState({
@@ -72,7 +84,10 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
     { key: "nacLoading", label: "NAC Circuit Loading" },
     { key: "wiring", label: "Wiring Specifications" },
     { key: "sequence", label: "Sequence of Operations" },
-    { key: "floorPlanSnapshot", label: "Floor Plan Snapshot (canvas)" },
+    {
+      key: "floorPlanSnapshot",
+      label: `Floor plan drawing (Floor ${activeFloor}) — full sheet, not zoom`,
+    },
   ];
 
   return (
@@ -97,7 +112,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
             <div className="flex items-center gap-2">
               <Checkbox id="ahj" checked={ahjCover} onCheckedChange={(c) => setAhjCover(!!c)} />
               <Label htmlFor="ahj" className="text-xs cursor-pointer leading-snug">
-                Sheet FA-0 (36″×24″): project/site block, scope, legend, sequence matrix, schematic system riser, battery &amp; NAC, Code-3 note. With “Floor plan” checked, Sheet FA-1 is the same size and holds the device layout (scaled to fit, not stretched).
+                Sheet FA-0 (36″×24″): project/site block, scope, legend, sequence matrix, schematic system riser, battery &amp; NAC, Code-3 note. With “Floor plan” checked, Sheet FA-1 embeds the <strong>full plan + devices for the floor you have selected</strong> in the designer (not a zoomed viewport screenshot). Switch floors and run again for another floor&apos;s sheet.
               </Label>
             </div>
             <div className="space-y-1.5">
