@@ -1,0 +1,16 @@
+---
+description: After substantive code changes, commit and push to origin so work is not left only locally.
+alwaysApply: true
+---
+
+# Git: commit and push
+
+When you finish a **substantive** set of code or config changes (features, fixes, refactors the user cares about):
+
+1. **Stage** relevant files (`git add` as appropriate; avoid committing secrets or unrelated local junk).
+2. **Commit** with a clear message (what changed and why, in full sentences).
+3. **Push** to the tracked remote branch (e.g. `git push origin main` or the current branch).
+
+Do this **without waiting to be asked**, unless the user explicitly says not to push, or the repo has no remote / auth will fail (then say so and stop).
+
+For **tiny** one-line typo fixes the user might want to squash, still push if the user has asked for habitual pushes—use judgment to batch only when the user is mid-edit across multiple messages.
