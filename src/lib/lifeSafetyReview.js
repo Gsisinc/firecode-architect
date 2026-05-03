@@ -1,7 +1,8 @@
 /**
  * Consolidates mandatory REVIEW items when IBC + NFPA 101 + NFPA 72 cannot be fully
  * resolved from geometry alone (high bays, mechanical drawings, smoke control).
- * Cross-checked with GSIS “NFPA 72 Fire Alarm System Design Guide” (spacing, §8–14, MNS).
+ * Cross-checked with GSIS guides (legacy NFPA-72-focused workbook + v2 “Fire Alarm Design
+ * Reference Guide” 2024 Ed. — NFPA 101 chapters first, then NFPA 72).
  */
 
 import { HIGH_BAY_SMOKE_CEILING_FT } from '@/lib/codeEngine';
@@ -119,7 +120,29 @@ export function buildLifeSafetyReviewFlags(project = {}, analysis = {}, floorPla
     });
   }
 
+  if (fa && project.occupancy_group === 'I-2') {
+    flags.push({
+      severity: 'warning',
+      code: 'I2_DEFEND_IN_PLACE',
+      title: 'Healthcare (I-2) — NFPA 101 Ch.18 basis before NFPA 72 detail',
+      detail:
+        'Hospital-type occupancies use defend-in-place: alarm primarily notifies staff to locate the smoke compartment and execute procedures (§18.3.4.3). Coordinate private-mode notification (NFPA 72 Ch.23), compartment zoning at the FACP, and emergency control functions (doors, HVAC, elevators) in the sequence-of-operations matrix.',
+      refs: ['NFPA 101 Ch.18', 'NFPA 72 Ch.23', 'NFPA 72 Ch.21'],
+      action: 'Peer-review zoning vs smoke compartments; align with GSIS v2 healthcare case study.',
+    });
+  }
+
   if (fa) {
+    flags.push({
+      severity: 'info',
+      code: 'NFPA101_IBC_LSC_BASIS',
+      title: 'NFPA 101 (LSC) “when/why” vs IBC §907 “when” in this app',
+      detail:
+        'GSIS Fire Alarm Design Reference Guide v2 sequences NFPA 101 occupancy chapters (IF/WHY per §9.6 + Ch.11–43, including new vs existing per §4.6) before NFPA 72 design (HOW). Mercantile, business, and other thresholds in NFPA 101 may differ from IBC §907.2 used here — reconcile which code basis governs your permit and record it in a design basis statement.',
+      refs: ['NFPA 101 §9.6', 'NFPA 101 §4.6', 'IBC §907'],
+      action: 'Confirm AHJ-adopted LSC/IBC editions; keep internal GSIS v2 PDF with project documentation.',
+    });
+
     flags.push({
       severity: 'info',
       code: 'MEP_SMOKE_COORDINATION',
@@ -133,11 +156,11 @@ export function buildLifeSafetyReviewFlags(project = {}, analysis = {}, floorPla
     flags.push({
       severity: 'info',
       code: 'DOCUMENTATION_LIFECYCLE',
-      title: 'Plan review & closeout package (Ch.7 / §13-style checklist)',
+      title: 'Plan review & closeout (NFPA 72 Ch.7 + GSIS v2 submittal checklist)',
       detail:
-        'Submittal: floor plans (labels, circuits, addresses), riser, point-to-point wiring, device schedule with mounting heights, NAC load & battery calcs, sequence of operations, Div 28 specs, panel/device cut sheets, CS monitoring intent. Closeout: as-builts, FACP manuals & programming printout (zones/sensitivity), owner training §10.4.2, first acceptance §14.2, CS certificate, battery maintenance logs, vendor contacts — retain at FACP per §14.6.2.',
-      refs: ['NFPA 72 Ch.7', 'NFPA 72 Ch.13-style packages', 'NFPA 72 §14.6.2', 'NFPA 72 Table 14.4.5'],
-      action: 'Use exports as working papers; EOR completes AHJ submittal and turnover binder.',
+        'Permit set (typical): permit/basis-of-design/admin as AHJ requires; floor plans to scale (often ≥1/8 in = 1 ft per §7.3.2); riser; point-to-point; voltage drop ≤10% on NAC/SLC; battery worksheet (standby + alarm × 1.2); schedules; SOO matrix; interfaces (elevator, HVAC, suppression). Closeout: acceptance §14.4, as-builts, Record of Completion §7.8, owner training, monitoring certificate.',
+      refs: ['NFPA 72 §7.3', 'NFPA 72 §7.8', 'NFPA 72 §14.4'],
+      action: 'Use repo `docs/reference/GSIS_FireAlarm_Guide_v2.pdf` pages 11 & 17 as Turnover checklists; app exports are drafts only.',
     });
 
     flags.push({
