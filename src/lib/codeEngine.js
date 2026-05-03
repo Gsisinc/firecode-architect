@@ -4,6 +4,9 @@
  * All rule functions cite the applicable code section in comments.
  */
 
+/** Above this ceiling height (ft), spot grids yield to beam/air-sampling placeholders (NFPA 72 §17.7; GSIS spacing table >20 ft “special application”). */
+export const HIGH_BAY_SMOKE_CEILING_FT = 20;
+
 // ─── IBC OCCUPANCY RULES ────────────────────────────────────────────────────
 
 /** Sum occupant load on floors other than the level of exit discharge (IBC §907.2 “above or below” triggers). */
@@ -313,7 +316,7 @@ export function determineSystemRequirements(projectData) {
   result.stairPressurizationReviewRequired = num_floors >= 2 && result.fireAlarmRequired;
   result.hvacFanShutdownReviewRequired = result.fireAlarmRequired && (isFullySprinklered || num_floors >= 2);
   result.mechanicalHvacDrawingReviewRequired = result.fireAlarmRequired;
-  result.highBayCeilingReviewRequired = (projectData.default_ceiling_height || 0) >= 18;
+  result.highBayCeilingReviewRequired = (projectData.default_ceiling_height || 0) >= HIGH_BAY_SMOKE_CEILING_FT;
 
   return result;
 }
@@ -338,9 +341,6 @@ export function calculateHandicappedRooms(totalSleepingUnits) {
 }
 
 // ─── SMOKE DETECTOR PLACEMENT ────────────────────────────────────────────────
-
-/** Above this ceiling height (ft), spot-type density grids are not used — beam/projected smoke placeholders only (NFPA 72 §17.7.5). */
-export const HIGH_BAY_SMOKE_CEILING_FT = 18;
 
 /** NFPA 72 §17.7 - Smoke detector spacing calculations */
 export function calculateSmokeDetectorPlacement(rooms, ceilingData = {}) {
