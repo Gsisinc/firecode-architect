@@ -151,6 +151,21 @@ export function validateDesign({ project = {}, rooms = [], devices = [], wires =
   if (reqs.elevatorRecallRequired && !devices.some((d) => d.subtype === "elevator_recall")) {
     addIssue(issues, { code: "ELEVATOR_RECALL_MISSING", message: "Elevator recall is required but recall detectors are not placed.", ref: "NFPA 72 §21.3 / IBC §3006", severity: "error", action: "Place elevator lobby, machine room, and shaft detectors." });
   }
+  if (reqs.elevatorRecallRequired && (project.elevator_count || 0) >= 1) {
+    const ec = project.elevator_count || 0;
+    const nf = project.num_floors || 1;
+    const recallPlaced = devices.filter((d) => d.subtype === "elevator_recall").length;
+    const expectedMin = ec * (nf + 2);
+    if (recallPlaced > 0 && recallPlaced < expectedMin) {
+      addIssue(issues, {
+        code: "ELEVATOR_RECALL_INCOMPLETE",
+        message: `Elevator recall devices (${recallPlaced}) are fewer than typical per-elevator coverage (${expectedMin} for ${ec} elevator(s), ${nf} floor(s) — lobby each floor + machine room + shaft).`,
+        ref: "NFPA 72 §21.3 / IBC §3006",
+        severity: "warning",
+        action: "Confirm consolidation with elevator consultant or add missing lobby/MR/shaft points.",
+      });
+    }
+  }
 
   if (["Full (NFPA 13)", "Full (NFPA 13R)", "Partial"].includes(project.sprinkler_status)) {
     if (!hasDevice(devices, "waterflow_switch")) addIssue(issues, { code: "WATERFLOW_MISSING", message: "Sprinkler system declared but no waterflow switch is placed.", ref: "NFPA 72 §17.16", severity: "error", action: "Place waterflow monitoring modules." });

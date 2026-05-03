@@ -80,8 +80,8 @@ export default function DesignerSidebar({
   const allWireSummary = summarizeWireByType({ wires, devices, floorPlans });
 
   const lifeSafetyFlags = useMemo(
-    () => buildLifeSafetyReviewFlags(project, requirements, floorPlans, devices),
-    [project, requirements, floorPlans, devices]
+    () => buildLifeSafetyReviewFlags(project, requirements, floorPlans, devices, rooms),
+    [project, requirements, floorPlans, devices, rooms]
   );
 
   const toggle = (s) => setOpenSection(p => p === s ? null : s);

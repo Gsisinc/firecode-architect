@@ -221,8 +221,8 @@ export default function ComplianceChecklist({ project, devices, analysisResults,
     [project, devices, analysisResults, rooms]
   );
   const lifeSafetyFlags = useMemo(
-    () => buildLifeSafetyReviewFlags(project, analysisResults, floorPlans, devices),
-    [project, analysisResults, floorPlans, devices]
+    () => buildLifeSafetyReviewFlags(project, analysisResults, floorPlans, devices, rooms),
+    [project, analysisResults, floorPlans, devices, rooms]
   );
   const validation = useMemo(
     () => validateDesign({ project, devices, rooms, wires, floorPlans, analysisResults }),
