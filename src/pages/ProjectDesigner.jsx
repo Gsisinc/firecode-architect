@@ -20,6 +20,7 @@ import SubmittalPackage from "@/components/designer/SubmittalPackage";
 import VoltageDropCalculator from "@/components/designer/VoltageDropCalculator";
 import ProjectDashboard from "@/components/designer/ProjectDashboard";
 import RiserDiagram from "@/components/designer/RiserDiagram";
+import FireAlarmSimulation from "@/components/designer/FireAlarmSimulation";
 import MarkupsList from "@/components/designer/MarkupsList";
 import { downloadDXF } from "@/lib/dxfExport";
 import {
@@ -880,6 +881,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
       />
 
       <div className="flex flex-1 overflow-hidden" style={{minHeight: 0}}>
+        {activeTab !== 'simulation' && (
         <DesignerSidebar
           project={project}
           devices={devices}
@@ -908,8 +910,9 @@ Return only zones that are clearly the same kind of object. Do not include the o
           onDeleteWire={handleDeleteWire}
           onDeleteMarkup={handleDeleteMarkup}
         />
+        )}
 
-        <div className="flex-1 relative overflow-hidden">
+        <div className="flex-1 relative overflow-hidden min-w-0">
           {activeTab === 'dashboard' && (
             <div className="w-full h-full overflow-auto">
               <ProjectDashboard
@@ -920,6 +923,11 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 floorPlans={floorPlans}
                 analysisResults={analysisResults}
               />
+            </div>
+          )}
+          {activeTab === 'simulation' && (
+            <div className="w-full h-full overflow-hidden flex flex-col">
+              <FireAlarmSimulation project={project} />
             </div>
           )}
           {activeTab === 'riser' && (
