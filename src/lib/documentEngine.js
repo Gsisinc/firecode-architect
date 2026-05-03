@@ -392,3 +392,41 @@ export async function runBatchJob(job, documents = []) {
     completed_at: now,
   };
 }
+
+/** Safe shape for `document_workspace` from API or local state (camelCase + snake_case). */
+export function normalizeDocumentWorkspace(blob) {
+  if (!blob || typeof blob !== 'object') {
+    return {
+      documents: [],
+      documentSets: [],
+      permissions: defaultPermissions(),
+      collaboration: { sessions: [], comments: [], audit: [] },
+      batchJobs: [],
+    };
+  }
+  const basePerms = defaultPermissions();
+  const rawPerms = blob.permissions && typeof blob.permissions === 'object' ? blob.permissions : {};
+  const permissions = {
+    owner: rawPerms.owner || basePerms.owner,
+    grants: Array.isArray(rawPerms.grants) && rawPerms.grants.length ? rawPerms.grants : basePerms.grants,
+  };
+  return {
+    documents: Array.isArray(blob.documents) ? blob.documents : [],
+    documentSets: Array.isArray(blob.documentSets)
+      ? blob.documentSets
+      : Array.isArray(blob.document_sets)
+        ? blob.document_sets
+        : [],
+    permissions,
+    collaboration: {
+      sessions: blob.collaboration?.sessions || [],
+      comments: blob.collaboration?.comments || [],
+      audit: blob.collaboration?.audit || [],
+    },
+    batchJobs: Array.isArray(blob.batchJobs)
+      ? blob.batchJobs
+      : Array.isArray(blob.batch_jobs)
+        ? blob.batch_jobs
+        : [],
+  };
+}

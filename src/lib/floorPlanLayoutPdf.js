@@ -1,0 +1,58 @@
+import jsPDF from 'jspdf';
+import { loadSubmittalLogoDataUrl } from '@/lib/submittalBranding';
+
+/**
+ * Landscape PDF with live canvas capture (floor plan + devices). Falls back to a note page if no canvas.
+ * @param {{ project?: object, canvasRef?: React.RefObject<HTMLCanvasElement|null> }} opts
+ */
+export async function exportFloorPlanLayoutPdf({ project, canvasRef }) {
+  const pName = project?.name || 'Fire Alarm System';
+  const now = new Date().toLocaleDateString();
+  const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
+
+  const imgData =
+    canvasRef?.current && typeof canvasRef.current.toDataURL === 'function'
+      ? canvasRef.current.toDataURL('image/jpeg', 0.92)
+      : null;
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+
+  doc.setFillColor(255, 255, 255);
+  doc.rect(0, 0, W, H, 'F');
+  doc.setDrawColor(218, 165, 32);
+  doc.setLineWidth(0.4);
+  doc.line(0, 14, W, 14);
+
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, 'PNG', W - 48, 2, 42, 11);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text('FLOOR PLAN — DEVICE LAYOUT', 12, 9);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`${pName} · ${now}`, W - 52, 9, { align: 'right' });
+
+  if (imgData) {
+    doc.addImage(imgData, 'JPEG', 8, 18, W - 16, H - 26);
+  } else {
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    const lines = doc.splitTextToSize(
+      'No floor plan canvas was available from this screen. Open the Floor Plan tab so the drawing loads, then download again — or use the Submittal Package export from the toolbar for a snapshot.',
+      W - 40
+    );
+    doc.text(lines, 20, 40);
+  }
+
+  doc.save(`${pName.replace(/\s+/g, '_')}_Floor_Plan_Layout.pdf`);
+}

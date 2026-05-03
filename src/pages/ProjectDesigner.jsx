@@ -611,9 +611,23 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
   };
 
   const handleUpdateDevice = (deviceId, updates) => {
-    const updated = devices.map((d) => (d.id === deviceId ? { ...d, ...updates } : d));
+    const updated = devices.map((d) => {
+      if (d.id !== deviceId) return d;
+      const merged = { ...d, ...updates };
+      if (updates.simulation && d.simulation) {
+        merged.simulation = { ...d.simulation, ...updates.simulation };
+      }
+      return merged;
+    });
     setLocalDevices(updated);
-    setSelectedDevice((prev) => (prev?.id === deviceId ? { ...prev, ...updates } : prev));
+    setSelectedDevice((prev) => {
+      if (prev?.id !== deviceId) return prev;
+      const merged = { ...prev, ...updates };
+      if (updates.simulation && prev.simulation) {
+        merged.simulation = { ...prev.simulation, ...updates.simulation };
+      }
+      return merged;
+    });
   };
 
   const handleDeleteDevice = (deviceId) => {
@@ -927,7 +941,13 @@ Return only zones that are clearly the same kind of object. Do not include the o
           )}
           {activeTab === 'simulation' && (
             <div className="w-full h-full overflow-hidden flex flex-col">
-              <FireAlarmSimulation project={project} />
+              <FireAlarmSimulation
+                project={project}
+                devices={devices}
+                activeFloor={activeFloor}
+                onFloorChange={setActiveFloor}
+                onUpdateDevice={handleUpdateDevice}
+              />
             </div>
           )}
           {activeTab === 'riser' && (
@@ -956,6 +976,12 @@ Return only zones that are clearly the same kind of object. Do not include the o
                   setLocalDocumentWorkspace(workspace);
                   saveProjectPatch({ document_workspace: workspace });
                 }}
+                devices={devices}
+                wires={wires}
+                floorPlans={floorPlans}
+                analysisResults={analysisResults}
+                canvasRef={canvasRef}
+                rooms={rooms}
               />
             </Suspense>
           )}
