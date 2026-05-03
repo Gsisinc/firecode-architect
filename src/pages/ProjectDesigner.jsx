@@ -658,8 +658,14 @@ Return only zones that are clearly the same kind of object. Do not include the o
     }
     setLocalPlanSheets(nextSheets);
     await saveProjectPatch({ floor_plans: nextFloorPlans, plan_sheets: nextSheets, plan_categories: nextCategories });
-    setActiveTab('plans');
-    toast.success(assignedFloor ? `Assigned page ${sheet.page_number} to floor ${assignedFloor}` : `Tagged page ${sheet.page_number} as ${finalPlanType}`);
+    if (assignedFloor) {
+      setActiveFloor(Number(assignedFloor));
+      setActiveTab('canvas');
+      toast.success(`Page ${sheet.page_number} is now the plan for floor ${assignedFloor}.`);
+    } else {
+      setActiveTab('plans');
+      toast.success(`Tagged page ${sheet.page_number} as ${finalPlanType}. To show it on the drawing canvas, set plan type to Floor Plan, Fire Alarm, or Architectural and pick a floor.`);
+    }
   };
 
   const handleClearSheetAssignment = async (sheet) => {
@@ -712,7 +718,10 @@ Return only zones that are clearly the same kind of object. Do not include the o
     setShowCalculations(true);
   };
 
-  const currentFloorPlan = floorPlans.find((fp) => fp.floor_number === activeFloor);
+  const currentFloorPlan = useMemo(
+    () => pickFloorPlanForCanvas(floorPlans, activeFloor),
+    [floorPlans, activeFloor]
+  );
 
   if (isLoading || !project) {
     return (
@@ -816,6 +825,9 @@ Return only zones that are clearly the same kind of object. Do not include the o
               onCustomPlanTypeChange={setCustomPlanType}
               onAssign={handleAssignSheet}
               onClearAssignment={handleClearSheetAssignment}
+              onContinueToCanvas={() => setActiveTab('canvas')}
+              activeFloor={activeFloor}
+              onFloorFocus={setActiveFloor}
             />
           )}
           {activeTab === 'canvas' && (
@@ -1038,6 +1050,9 @@ function PlansPanel({
   onCustomPlanTypeChange,
   onAssign,
   onClearAssignment,
+  onContinueToCanvas,
+  activeFloor,
+  onFloorFocus,
 }) {
   const [targetFloor, setTargetFloor] = useState(String(floors[0] || 1));
   const [targetType, setTargetType] = useState('Fire Alarm');
@@ -1068,10 +1083,25 @@ function PlansPanel({
   return (
     <div className="h-full grid grid-cols-[320px_minmax(0,1fr)] bg-slate-100">
       <aside className="border-r border-slate-200 bg-white flex flex-col min-h-0">
-        <div className="p-4 border-b border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-900">Floor Plans</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            {sheets.length} sheet{sheets.length === 1 ? '' : 's'} imported · {assignedCount} assigned
+        <div className="p-4 border-b border-slate-200 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Floor Plans</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                {sheets.length} sheet{sheets.length === 1 ? '' : 's'} imported · {assignedCount} assigned
+              </p>
+            </div>
+            <Button type="button" size="sm" className="shrink-0 bg-orange-500 hover:bg-orange-600 text-white text-xs" onClick={() => onContinueToCanvas?.()}>
+              Floor Plan →
+            </Button>
+          </div>
+          <p className="text-[11px] text-slate-600 leading-snug">
+            Assign a page using plan type <span className="font-medium text-slate-800">Floor Plan</span>, <span className="font-medium text-slate-800">Fire Alarm</span>, or <span className="font-medium text-slate-800">Architectural</span> so it attaches to a floor. Then use <span className="font-semibold text-orange-600">Floor Plan →</span> or the <span className="font-medium">Floor Plan</span> tab and pick the same floor in the left sidebar
+            {activeFloor != null ? (
+              <span> (you are viewing <span className="font-mono text-orange-600">Floor {activeFloor}</span>).</span>
+            ) : (
+              '.'
+            )}
           </p>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -1146,8 +1176,6 @@ function PlansPanel({
                 <label className="text-xs font-medium text-slate-600">Floor / Area</label>
                 <select value={targetFloor} onChange={(event) => setTargetFloor(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
                   {floors.map((floor) => <option key={floor} value={floor}>Floor {floor}</option>)}
-                  <option value="B">Basement</option>
-                  <option value="R">Roof</option>
                 </select>
               </div>
               <div className="space-y-2">
@@ -1178,6 +1206,9 @@ function PlansPanel({
                   Clear
                 </Button>
               </div>
+              <Button type="button" variant="secondary" className="w-full text-xs" onClick={() => { onFloorFocus?.(Number(targetFloor)); onContinueToCanvas?.(); }}>
+                Open canvas for Floor {targetFloor}
+              </Button>
               <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
                 Existing uploaded PDFs are still usable here if their pages were previously stored as floor plans; they are converted into selectable sheet rows.
               </div>
@@ -1224,6 +1255,19 @@ function mergePlanSheets(existing = [], incoming = []) {
   const keyFor = (sheet) => `${sheet.file_url || sheet.file_name}-${sheet.page_number}`;
   const seen = new Set(incoming.map(keyFor));
   return [...existing.filter((sheet) => !seen.has(keyFor(sheet))), ...incoming];
+}
+
+/** Sidebar floors are numeric; API may store floor_number as string. Multiple plan types per floor are supported — pick the best one for the canvas. */
+function pickFloorPlanForCanvas(floorPlans, activeFloor) {
+  const n = Number(activeFloor);
+  const onFloor = (floorPlans || []).filter((fp) => Number(fp.floor_number) === n);
+  if (onFloor.length === 0) return undefined;
+  const priority = ['Floor Plan', 'Architectural', 'Fire Alarm', 'floor_plan'];
+  for (const pt of priority) {
+    const hit = onFloor.find((fp) => (fp.plan_type || 'floor_plan') === pt && (fp.image_url || fp.file_url));
+    if (hit) return hit;
+  }
+  return onFloor.find((fp) => fp.image_url || fp.file_url) || onFloor[0];
 }
 
 function upsertFloorPlan(floorPlans = [], plan) {
