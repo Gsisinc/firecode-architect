@@ -108,7 +108,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
 
   if (currentUrl) {
     return (
-      <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-end">
+      <div className="absolute top-4 right-14 z-10 flex flex-col gap-2 items-end">
         <div className="flex items-center gap-2">
           <Button
             size="sm"
