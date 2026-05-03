@@ -152,7 +152,7 @@ export default function ProjectDesigner() {
     });
   };
 
-  const handleFloorPlanUploaded = (upload) => {
+  const handleFloorPlanUploaded = async (upload) => {
     if (upload?.fileType === 'application/pdf') {
       const uploadedSheets = (upload.pages || []).map((page) => ({
         id: `sheet-${Date.now()}-${page.page}-${Math.random().toString(36).slice(2, 6)}`,
@@ -175,10 +175,14 @@ export default function ProjectDesigner() {
       }));
       const nextSheets = mergePlanSheets(planSheets, uploadedSheets);
       setLocalPlanSheets(nextSheets);
-      saveProjectPatch({ plan_sheets: nextSheets });
-      setActiveTab('plans');
       if (uploadedSheets[0]) setSelectedSheetId(uploadedSheets[0].id);
-      toast.success(`Uploaded ${uploadedSheets.length} PDF sheets. Assign floor-plan pages in the Plans tab.`);
+      setActiveTab('plans');
+      try {
+        await saveProjectPatch({ plan_sheets: nextSheets });
+        toast.success(`Uploaded ${uploadedSheets.length} PDF sheets. Assign floor-plan pages in the Plans tab.`);
+      } catch (error) {
+        toast.error(`Sheets imported locally, but autosave failed: ${error?.message || 'Unknown error'}`);
+      }
       return;
     }
 
@@ -194,8 +198,12 @@ export default function ProjectDesigner() {
     };
     const updated = upsertFloorPlan(floorPlans, imagePlan);
     setLocalFloorPlans(updated);
-    saveProjectPatch({ floor_plans: updated });
-    toast.success(`Floor ${activeFloor} plan uploaded`);
+    try {
+      await saveProjectPatch({ floor_plans: updated });
+      toast.success(`Floor ${activeFloor} plan uploaded`);
+    } catch (error) {
+      toast.error(`Plan uploaded locally, but autosave failed: ${error?.message || 'Unknown error'}`);
+    }
   };
 
   const handleAnalyzeFloorPlan = async () => {

@@ -401,6 +401,7 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
 
   const TABS = [
     { id: 'canvas', label: 'Floor Plan', icon: Layout },
+    { id: 'plans', label: 'Plans', icon: Files },
     { id: 'documents', label: 'Documents', icon: Files },
     { id: 'riser', label: 'Riser Diagram', icon: GitBranch },
     { id: 'calculations', label: 'Calculations', icon: Table },
