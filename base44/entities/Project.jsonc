@@ -93,6 +93,10 @@
         "open_web_joist"
       ]
     },
+    "ceiling_height_confirmed": {
+      "type": "boolean",
+      "description": "Designer confirmed default ceiling height/type against CDs (required for new projects; legacy omit = treated as confirmed on load)"
+    },
     "elevator_count": {
       "type": "number"
     },

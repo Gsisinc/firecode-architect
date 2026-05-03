@@ -107,6 +107,27 @@ export function validateDesign({ project = {}, rooms = [], devices = [], wires =
   if (!devices.length) addIssue(issues, { code: "DEVICES_MISSING", message: "No fire alarm devices are placed.", ref: "NFPA 72 §17/18", severity: "error", action: "Use Auto-Place Devices or place devices manually." });
   if (!floorPlans.some((plan) => plan?.px_per_ft)) addIssue(issues, { code: "SCALE_UNCALIBRATED", message: "No calibrated floor-plan scale is stored.", ref: "NFPA 72 §7 documentation", severity: "warning", action: "Run AI room detection or enter calibrated scale before exports." });
 
+  const ch = Number(project.default_ceiling_height);
+  const ceilingInvalid = !Number.isFinite(ch) || ch <= 0;
+  if (reqs.fireAlarmRequired && ceilingInvalid) {
+    addIssue(issues, {
+      code: "CEILING_HEIGHT_MISSING",
+      message: "Fire alarm is in scope but default ceiling height is missing or invalid.",
+      ref: "NFPA 72 §17.6–17.7",
+      severity: "error",
+      action: "Enter default ceiling height (ft) in Project Setup.",
+    });
+  }
+  if (reqs.fireAlarmRequired && project.ceiling_height_confirmed === false) {
+    addIssue(issues, {
+      code: "CEILING_HEIGHT_NOT_CONFIRMED",
+      message: "Default ceiling height/type have not been confirmed by the designer.",
+      ref: "NFPA 72 §17",
+      severity: "warning",
+      action: "Open Project Setup and confirm ceiling fields against drawings.",
+    });
+  }
+
   for (let floor = 1; floor <= (project.num_floors || 1); floor += 1) {
     if (!roomsByFloor[floor]) addIssue(issues, { code: `F${floor}_ROOMS`, message: `Floor ${floor} has no defined rooms.`, ref: "NFPA 72 §17", severity: "warning", action: "Detect or draw rooms for this floor." });
     if (!devicesByFloor[floor]) addIssue(issues, { code: `F${floor}_DEVICES`, message: `Floor ${floor} has no placed devices.`, ref: "NFPA 72 §17/18", severity: "warning", action: "Auto-place or manually add devices on this floor." });

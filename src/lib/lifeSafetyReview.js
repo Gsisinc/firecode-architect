@@ -6,8 +6,34 @@
 export function buildLifeSafetyReviewFlags(project = {}, analysis = {}, floorPlans = []) {
   const flags = [];
   const a = analysis || {};
-  const ceil = Number(project.default_ceiling_height) || 0;
+  const ceil = Number(project.default_ceiling_height);
+  const heightMissing = !Number.isFinite(ceil) || ceil <= 0;
   const pxOk = (floorPlans || []).some((p) => Number(p?.px_per_ft) > 0);
+  const fa = !!a.fireAlarmRequired;
+
+  if (fa && heightMissing) {
+    flags.push({
+      severity: 'error',
+      code: 'CEILING_HEIGHT_MISSING',
+      title: 'Default ceiling height required',
+      detail:
+        'Fire alarm / detection spacing (NFPA 72 §17) depends on listed ceiling height. Enter the building default in Project Setup, or per-room height on each space when it differs.',
+      refs: ['NFPA 72 §17.6–17.7', 'IBC §901 coordination'],
+      action: 'Set “Default ceiling height (ft)” on the project and confirm it applies to the floor plan (or override per room in data).',
+    });
+  }
+
+  if (fa && project.ceiling_height_confirmed === false) {
+    flags.push({
+      severity: 'warning',
+      code: 'CEILING_HEIGHT_NOT_CONFIRMED',
+      title: 'Confirm default ceiling height with designer',
+      detail:
+        'The default ceiling height and type have not been confirmed. Until confirmed, high-bay vs spot spacing and heat/smoke rules may not match the actual building.',
+      refs: ['NFPA 72 §17.6', 'NFPA 72 §17.7'],
+      action: 'In Project Setup, verify default ceiling height/type or check “Confirmed” after validating against drawings.',
+    });
+  }
 
   if (!pxOk) {
     flags.push({
@@ -21,12 +47,13 @@ export function buildLifeSafetyReviewFlags(project = {}, analysis = {}, floorPla
     });
   }
 
-  if (ceil >= 18) {
+  const ceilForBay = Number.isFinite(ceil) && ceil > 0 ? ceil : 0;
+  if (ceilForBay >= 18) {
     flags.push({
       severity: 'warning',
       code: 'HIGH_BAY_SMOKE',
       title: 'High ceiling — spot smoke grid not appropriate',
-      detail: `Default ceiling is ${ceil} ft. NFPA 72 §17.7.5: use listed projected beam, aspiration, or equivalent for high/rack spaces; duct sampling does not replace area coverage.`,
+      detail: `Default ceiling is ${ceilForBay} ft. NFPA 72 §17.7.5: use listed projected beam, aspiration, or equivalent for high/rack spaces; duct sampling does not replace area coverage.`,
       refs: ['NFPA 72 §17.7.5', 'NFPA 101 §9.6'],
       action: 'Confirm beam/aspirating layout with engineer; auto-place now uses one beam-style point per room instead of dense spot grid.',
     });

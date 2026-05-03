@@ -53,6 +53,12 @@ function buildChecklist(project, devices, analysisResults, rooms) {
 
   if (reqs.fireAlarmRequired) {
     designChecks.push({
+      label: "Default ceiling height & type confirmed in Project Setup (designer)",
+      ok: project?.ceiling_height_confirmed !== false && (project?.default_ceiling_height || 0) > 0,
+      ref: "NFPA 72 §17.6–17.7",
+      warn: true,
+    });
+    designChecks.push({
       label: "Manual pull stations placed",
       ok: hasDevice("pull_station"),
       ref: "NFPA 72 §17.14",

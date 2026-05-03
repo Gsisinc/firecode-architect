@@ -37,6 +37,8 @@ export default function ProjectSetup() {
     sprinkler_status: 'None',
     default_ceiling_height: 9,
     default_ceiling_type: 'smooth_flat',
+    /** false until designer confirms (new projects); omitted/true on legacy loads — see useEffect */
+    ceiling_height_confirmed: false,
     elevator_count: 0,
     air_handling_units: '',
     level_of_exit_discharge_floor: 1,
@@ -62,15 +64,25 @@ export default function ProjectSetup() {
 
   useEffect(() => {
     if (existingProject) {
-      setForm(existingProject);
+      setForm({
+        ...existingProject,
+        ceiling_height_confirmed: existingProject.ceiling_height_confirmed ?? true,
+      });
       setAnalysisPreview(existingProject.analysis_results || null);
     }
   }, [existingProject]);
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      const analysis = determineSystemRequirements(data);
-      const payload = { ...data, analysis_results: analysis };
+      const normalized = {
+        ...data,
+        default_ceiling_height:
+          data.default_ceiling_height === '' || data.default_ceiling_height == null
+            ? 0
+            : Number(data.default_ceiling_height),
+      };
+      const analysis = determineSystemRequirements(normalized);
+      const payload = { ...normalized, analysis_results: analysis };
       if (isNew) return base44.entities.Project.create(payload);
       return base44.entities.Project.update(id, payload);
     },
@@ -129,6 +141,12 @@ export default function ProjectSetup() {
   };
 
   const f = form;
+  const liveCodeAnalysis = determineSystemRequirements(f);
+  const chNum = Number(f.default_ceiling_height);
+  const ceilingInvalid = !Number.isFinite(chNum) || chNum <= 0;
+  const ceilingNeedsDesigner =
+    !!liveCodeAnalysis.fireAlarmRequired &&
+    (ceilingInvalid || f.ceiling_height_confirmed === false);
 
   if (!isNew && isLoadingProject) {
     return (
@@ -258,17 +276,67 @@ export default function ProjectSetup() {
                     Used for duct smoke detector placeholders on auto-place (IBC Ch.9 system scope + IMC / NFPA 72 coordination). Leave blank to assume one unit (supply + return pair).
                   </p>
                 </Field>
-                <Field label="Default Ceiling Height (ft)">
-                  <Input type="number" min={7} max={100} value={f.default_ceiling_height} onChange={e => setForm(p => ({ ...p, default_ceiling_height: +e.target.value }))} className="input-dark" />
-                </Field>
-                <Field label="Default Ceiling Type">
-                  <Select value={f.default_ceiling_type} onValueChange={v => setForm(p => ({ ...p, default_ceiling_type: v }))}>
-                    <SelectTrigger className="select-dark"><SelectValue /></SelectTrigger>
-                    <SelectContent className="bg-[hsl(222,47%,11%)] border-white/10 text-white">
-                      {CEILING_TYPES.map(t => <SelectItem key={t} value={t}>{CEILING_TYPE_LABELS[t]}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </Field>
+                <div
+                  className={`col-span-2 rounded-xl border p-4 space-y-3 transition-colors ${
+                    ceilingNeedsDesigner
+                      ? 'border-red-500/70 bg-red-500/10 shadow-[0_0_0_1px_rgba(239,68,68,0.35)]'
+                      : 'border-white/10 bg-white/[0.03]'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${ceilingNeedsDesigner ? 'text-red-400' : 'text-white/25'}`} />
+                    <div>
+                      <p className="text-sm font-medium text-white">Ceiling height &amp; type (NFPA 72 spacing)</p>
+                      <p className="text-[11px] text-white/45 mt-1 leading-snug">
+                        When a fire alarm system applies, enter the real default deck-to-deck or finish ceiling height and confirm below. Plans rarely embed this — it must come from the designer or field verification.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Default Ceiling Height (ft)">
+                      <Input
+                        type="number"
+                        min={7}
+                        max={100}
+                        value={f.default_ceiling_height === '' || f.default_ceiling_height == null ? '' : f.default_ceiling_height}
+                        onChange={(e) =>
+                          setForm((p) => ({
+                            ...p,
+                            default_ceiling_height: e.target.value === '' ? '' : +e.target.value,
+                            ceiling_height_confirmed: true,
+                          }))
+                        }
+                        className={`input-dark ${ceilingInvalid && liveCodeAnalysis.fireAlarmRequired ? 'ring-2 ring-red-500/50' : ''}`}
+                      />
+                    </Field>
+                    <Field label="Default Ceiling Type">
+                      <Select
+                        value={f.default_ceiling_type}
+                        onValueChange={(v) => setForm((p) => ({ ...p, default_ceiling_type: v, ceiling_height_confirmed: true }))}
+                      >
+                        <SelectTrigger className="select-dark"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-[hsl(222,47%,11%)] border-white/10 text-white">
+                          {CEILING_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>
+                              {CEILING_TYPE_LABELS[t]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                  <label className="flex items-start gap-2.5 cursor-pointer text-sm text-white/85">
+                    <input
+                      type="checkbox"
+                      className="mt-1 rounded border-white/20"
+                      checked={!!f.ceiling_height_confirmed}
+                      onChange={(e) => setForm((p) => ({ ...p, ceiling_height_confirmed: e.target.checked }))}
+                    />
+                    <span>
+                      Confirmed — default ceiling height and type match the construction documents (or agreed basis of design).
+                    </span>
+                  </label>
+                </div>
                 <Field label="Communication Pathway">
                   <Select value={f.communication_pathway} onValueChange={v => setForm(p => ({ ...p, communication_pathway: v }))}>
                     <SelectTrigger className="select-dark"><SelectValue /></SelectTrigger>
