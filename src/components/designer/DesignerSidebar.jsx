@@ -40,6 +40,8 @@ export default function DesignerSidebar({
   project,
   devices = [],
   rooms = [],
+  layoutZones = [],
+  markups = [],
   wires = [],
   floorPlans = [],
   currentFloor,
@@ -55,10 +57,20 @@ export default function DesignerSidebar({
   selectedCircuitId = 'SLC-1',
   onCircuitTypeChange,
   onCircuitIdChange,
+  onDeleteRoom,
+  onDeleteDevice,
+  onDeleteLayoutZone,
+  onDeleteWire,
+  onDeleteMarkup,
 }) {
   const [openSection, setOpenSection] = useState('tools');
+  const [openLayerList, setOpenLayerList] = useState('rooms');
 
   const floorDevices = devices.filter(d => d.floor === currentFloor);
+  const floorRooms = rooms.filter(room => room.floor === currentFloor);
+  const floorLayoutZones = layoutZones.filter(zone => zone.floor === currentFloor);
+  const floorWires = wires.filter(wire => wire.floor === currentFloor);
+  const floorMarkups = markups.filter(markup => markup.floor === currentFloor);
   const deviceCounts = floorDevices.reduce((acc, d) => {
     acc[d.type] = (acc[d.type] || 0) + 1;
     return acc;
@@ -169,6 +181,63 @@ export default function DesignerSidebar({
                 {visible ? <Eye className="w-3 h-3 text-orange-400" /> : <EyeOff className="w-3 h-3 text-white/20" />}
               </button>
             ))}
+            <div className="mt-2 space-y-1 border-t border-white/10 pt-2">
+              <LayerItemGroup
+                id="rooms"
+                title={`Rooms (${floorRooms.length})`}
+                open={openLayerList === 'rooms'}
+                onToggle={() => setOpenLayerList(openLayerList === 'rooms' ? null : 'rooms')}
+                items={floorRooms}
+                emptyText="No rooms on this floor"
+                getLabel={(room) => room.name || room.room_type || 'Room'}
+                getMeta={(room) => `${Math.round(room.width || 0)}x${Math.round(room.height || 0)} px`}
+                onDelete={onDeleteRoom}
+              />
+              <LayerItemGroup
+                id="devices"
+                title={`Devices (${floorDevices.length})`}
+                open={openLayerList === 'devices'}
+                onToggle={() => setOpenLayerList(openLayerList === 'devices' ? null : 'devices')}
+                items={floorDevices}
+                emptyText="No devices on this floor"
+                getLabel={(device) => device.label || device.id || device.type}
+                getMeta={(device) => device.type?.replace(/_/g, ' ') || 'Device'}
+                onDelete={onDeleteDevice}
+              />
+              <LayerItemGroup
+                id="layout-zones"
+                title={`Layout Zones (${floorLayoutZones.length})`}
+                open={openLayerList === 'layout-zones'}
+                onToggle={() => setOpenLayerList(openLayerList === 'layout-zones' ? null : 'layout-zones')}
+                items={floorLayoutZones}
+                emptyText="No layout zones on this floor"
+                getLabel={(zone) => zone.name || zone.zone_type || 'Zone'}
+                getMeta={(zone) => zone.zone_type?.replace(/_/g, ' ') || 'Zone'}
+                onDelete={onDeleteLayoutZone}
+              />
+              <LayerItemGroup
+                id="wires"
+                title={`Wires (${floorWires.length})`}
+                open={openLayerList === 'wires'}
+                onToggle={() => setOpenLayerList(openLayerList === 'wires' ? null : 'wires')}
+                items={floorWires}
+                emptyText="No wires on this floor"
+                getLabel={(wire) => wire.circuit || wire.type || 'Wire'}
+                getMeta={(wire) => `${wire.from || '?'} -> ${wire.to || '?'}`}
+                onDelete={onDeleteWire}
+              />
+              <LayerItemGroup
+                id="markups"
+                title={`Markups (${floorMarkups.length})`}
+                open={openLayerList === 'markups'}
+                onToggle={() => setOpenLayerList(openLayerList === 'markups' ? null : 'markups')}
+                items={floorMarkups}
+                emptyText="No markups on this floor"
+                getLabel={(markup) => markup.subject || markup.text || markup.type || 'Markup'}
+                getMeta={(markup) => markup.layer || markup.status || 'Markup'}
+                onDelete={onDeleteMarkup}
+              />
+            </div>
           </div>
         </SidebarSection>
 

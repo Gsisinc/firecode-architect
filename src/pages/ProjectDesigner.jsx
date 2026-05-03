@@ -504,6 +504,22 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     setSelectedDevice(null);
   };
 
+  const handleDeleteRoom = (roomId) => {
+    setLocalRooms(rooms.filter((room) => room.id !== roomId));
+    setLocalDevices(devices.filter((device) => device.room_id !== roomId));
+    toast.success("Room deleted");
+  };
+
+  const handleDeleteLayoutZone = (zoneId) => {
+    setLocalLayoutZones(layoutZones.filter((zone) => zone.id !== zoneId));
+    toast.success("Layout zone deleted");
+  };
+
+  const handleDeleteWire = (wireId) => {
+    setLocalWires(wires.filter((wire) => wire.id !== wireId));
+    toast.success("Wire segment deleted");
+  };
+
   const handleUpdateMarkup = (markupId, updates) => {
     const updatedAt = new Date().toISOString();
     setLocalMarkups(markups.map((markup) => (
@@ -664,8 +680,15 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
           onAutoPlace={handleAutoPlace}
           onExport={() => setShowBOM(true)}
           rooms={rooms}
+          layoutZones={layoutZones}
+          markups={markups}
           wires={wires}
           floorPlans={floorPlans}
+          onDeleteRoom={handleDeleteRoom}
+          onDeleteLayoutZone={handleDeleteLayoutZone}
+          onDeleteDevice={handleDeleteDevice}
+          onDeleteWire={handleDeleteWire}
+          onDeleteMarkup={handleDeleteMarkup}
         />
 
         <div className="flex-1 relative overflow-hidden">
