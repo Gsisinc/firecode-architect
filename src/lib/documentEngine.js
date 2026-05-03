@@ -65,9 +65,15 @@ export async function extractPdfMetadataAndText(fileUrl) {
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1 });
     const content = await page.getTextContent();
     const text = content.items.map((item) => item.str).join(' ').replace(/\s+/g, ' ').trim();
-    pages.push({ page: pageNumber, text });
+    pages.push({
+      page: pageNumber,
+      text,
+      width: Math.round(viewport.width),
+      height: Math.round(viewport.height),
+    });
   }
 
   const extractedText = pages.map((page) => page.text).filter(Boolean).join('\n\n');
@@ -75,6 +81,28 @@ export async function extractPdfMetadataAndText(fileUrl) {
     pageCount: pdf.numPages,
     pages,
     extractedText,
+  };
+}
+
+export async function renderPdfPageToDataUrl(fileUrl, pageNumber = 1, scale = 2) {
+  const source = fileUrl?.startsWith?.('data:')
+    ? { data: Uint8Array.from(atob(fileUrl.split(',')[1]), char => char.charCodeAt(0)) }
+    : fileUrl;
+  const loadingTask = pdfjsLib.getDocument(source);
+  const pdf = await loadingTask.promise;
+  const safePageNumber = Math.min(Math.max(Number(pageNumber) || 1, 1), pdf.numPages);
+  const page = await pdf.getPage(safePageNumber);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  return {
+    dataUrl: canvas.toDataURL('image/png'),
+    width: canvas.width,
+    height: canvas.height,
+    pageCount: pdf.numPages,
+    pageNumber: safePageNumber,
   };
 }
 

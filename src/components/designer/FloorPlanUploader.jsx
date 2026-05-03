@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import { base44 } from "@/api/base44Client";
-import { Upload, ImagePlus, Loader2, Sparkles } from "lucide-react";
+import { FileText, ImagePlus, Loader2, Sparkles, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { extractPdfMetadataAndText } from "@/lib/documentEngine";
 
 export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded, onAnalyze, analyzing }) {
   const fileRef = useRef();
@@ -10,12 +11,39 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
 
   const handleFile = async (file) => {
     if (!file) return;
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     setUploading(true);
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    setUploading(false);
-    onUploaded(file_url);
-    toast.success(`Floor ${floorNumber} plan uploaded`);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      if (isPdf) {
+        const localUrl = URL.createObjectURL(file);
+        const metadata = await extractPdfMetadataAndText(localUrl);
+        URL.revokeObjectURL(localUrl);
+        onUploaded({
+          fileUrl: file_url,
+          fileType: file.type || "application/pdf",
+          fileName: file.name,
+          pageCount: metadata.pageCount,
+          pages: metadata.pages,
+        });
+        toast.success(`Imported ${metadata.pageCount} PDF page${metadata.pageCount === 1 ? "" : "s"} as floor plan sheet${metadata.pageCount === 1 ? "" : "s"}`);
+      } else {
+        onUploaded({
+          fileUrl: file_url,
+          fileType: file.type || "image/*",
+          fileName: file.name,
+          pageCount: 1,
+        });
+        toast.success(`Floor ${floorNumber} plan uploaded`);
+      }
+    } catch (error) {
+      toast.error(`Plan upload failed: ${error?.message || "Unknown error"}`);
+    } finally {
+      setUploading(false);
+    }
   };
+
+  const accept = "application/pdf,image/*";
 
   if (currentUrl) {
     return (
@@ -40,7 +68,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
             {analyzing ? "Analyzing..." : "AI: Detect Rooms"}
           </Button>
         </div>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => e.target.files[0] && handleFile(e.target.files[0])} />
+        <input ref={fileRef} type="file" accept={accept} className="hidden" onChange={e => e.target.files[0] && handleFile(e.target.files[0])} />
       </div>
     );
   }
@@ -57,17 +85,21 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
           {uploading ? (
             <Loader2 className="w-8 h-8 text-orange-400 animate-spin" />
           ) : (
-            <Upload className="w-8 h-8 text-slate-400" />
+            <div className="flex items-center gap-2 text-slate-400">
+              <Upload className="w-8 h-8" />
+              <FileText className="w-8 h-8" />
+            </div>
           )}
           <div>
             <p className="text-sm font-medium text-slate-700">{uploading ? "Uploading..." : "Upload Floor Plan"}</p>
-            <p className="text-xs text-slate-400 mt-0.5">PNG, JPG — drag & drop or click</p>
+            <p className="text-xs text-slate-400 mt-0.5">PDF, PNG, JPG — drag & drop or click</p>
+            <p className="text-[10px] text-slate-400 mt-1">Multi-page PDFs map pages to consecutive floors starting at floor {floorNumber}</p>
           </div>
         </div>
         <p className="text-xs text-slate-400 mt-3 max-w-xs">
           After uploading, use <span className="text-purple-600 font-medium">AI: Detect Rooms</span> to automatically identify rooms and place devices
         </p>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => e.target.files[0] && handleFile(e.target.files[0])} />
+        <input ref={fileRef} type="file" accept={accept} className="hidden" onChange={e => e.target.files[0] && handleFile(e.target.files[0])} />
       </div>
     </div>
   );

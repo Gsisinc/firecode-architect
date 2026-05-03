@@ -28,6 +28,7 @@ import {
 } from "@/lib/floorPlanDetection";
 import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale";
 import { mergeGeneratedDevices } from "@/lib/designValidation";
+import { renderPdfPageToDataUrl } from "@/lib/documentEngine";
 
 import {
   determineSystemRequirements,
@@ -120,23 +121,66 @@ export default function ProjectDesigner() {
     });
   };
 
-  const handleFloorPlanUploaded = (url) => {
+  const handleFloorPlanUploaded = (upload) => {
+    const inferFloorNumber = (page, index) => {
+      const text = page?.text || '';
+      const floorMatch = text.match(/\b(?:floor|level|fl\.?)\s*([0-9]{1,2})\b/i);
+      if (floorMatch) return Number(floorMatch[1]);
+      const sheetMatch = text.match(/\b(?:first|second|third|fourth|fifth)\s+floor\b/i);
+      if (sheetMatch) {
+        const words = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5 };
+        return words[sheetMatch[1].toLowerCase()] || activeFloor + index;
+      }
+      return activeFloor + index;
+    };
+    const uploadedPlans = Array.isArray(upload?.floorPlans)
+      ? upload.floorPlans
+      : upload?.fileType === 'application/pdf'
+        ? Array.from({ length: upload.pageCount || 1 }, (_, index) => ({
+            floor_number: inferFloorNumber(upload.pages?.[index], index),
+            image_url: upload.fileUrl,
+            file_url: upload.fileUrl,
+            file_type: upload.fileType,
+            file_name: upload.fileName,
+            page_number: index + 1,
+            page_count: upload.pageCount || 1,
+            sheet_text: upload.pages?.[index]?.text || '',
+          }))
+        : [{
+            floor_number: activeFloor,
+            image_url: typeof upload === 'string' ? upload : upload?.image_url || upload?.fileUrl || upload?.file_url,
+            file_url: typeof upload === 'string' ? upload : upload?.fileUrl || upload?.file_url,
+            file_type: upload?.fileType || upload?.file_type || 'image/*',
+            file_name: upload?.fileName || upload?.file_name,
+            page_number: 1,
+            page_count: 1,
+          }];
     const updated = [...floorPlans];
-    const idx = updated.findIndex(fp => fp.floor_number === activeFloor);
-    if (idx >= 0) updated[idx] = { ...updated[idx], image_url: url };
-    else updated.push({ floor_number: activeFloor, image_url: url });
+    uploadedPlans.forEach((plan) => {
+      const floorNumber = plan.floor_number || activeFloor;
+      const idx = updated.findIndex(fp => Number(fp.floor_number) === Number(floorNumber));
+      const nextPlan = { ...(idx >= 0 ? updated[idx] : {}), ...plan, floor_number: floorNumber };
+      if (idx >= 0) updated[idx] = nextPlan;
+      else updated.push(nextPlan);
+    });
+    updated.sort((a, b) => Number(a.floor_number || 0) - Number(b.floor_number || 0));
     setLocalFloorPlans(updated);
+    const detectedFloors = Math.max(project?.num_floors || 1, ...updated.map(plan => Number(plan.floor_number) || 1));
     // Auto-save immediately so the floor plan persists on reload
     saveMutation.mutate({
       rooms,
       devices,
       markups,
       floor_plans: updated,
+      num_floors: detectedFloors,
       document_workspace: documentWorkspace,
       wires,
       analysis_results: analysisResults,
       status: devices.length > 0 ? "in_progress" : "draft",
     });
+    if (upload?.fileType === 'application/pdf' && uploadedPlans.length > 1) {
+      toast.success(`Mapped ${uploadedPlans.length} PDF pages to floors`);
+    }
   };
 
   const handleAnalyzeFloorPlan = async () => {
@@ -144,11 +188,23 @@ export default function ProjectDesigner() {
     if (!plan?.image_url) { toast.error("Upload a floor plan first"); return; }
     setAnalyzingFloor(true);
     toast.info("AI is reading blueprint dimensions — step 1 of 2...");
+    let analysisImageUrl = plan.image_url;
+
+    if (plan.file_type === 'application/pdf') {
+      try {
+        const renderedPage = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
+        analysisImageUrl = renderedPage.dataUrl;
+      } catch (error) {
+        toast.error(`Could not render PDF page for analysis: ${error?.message || "Unknown error"}`);
+        setAnalyzingFloor(false);
+        return;
+      }
+    }
 
     // Load image to get natural pixel dimensions
     const imgEl = new window.Image();
     imgEl.crossOrigin = 'anonymous';
-    imgEl.src = plan.image_url;
+    imgEl.src = analysisImageUrl;
     await new Promise(res => { imgEl.onload = res; imgEl.onerror = res; });
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
@@ -193,7 +249,7 @@ YOUR ONLY JOB: Find the dimension annotation lines printed on the drawing and re
    - left_px, top_px, right_px, bottom_px (pixels from image top-left)
 
 If a dimension line cannot be read confidently, return null for that dimension. Be extremely precise about pixel coordinates. Look carefully at where dimension lines START and END.`,
-        file_urls: [plan.image_url],
+        file_urls: [analysisImageUrl],
         response_json_schema: {
           type: "object",
           properties: {
@@ -250,7 +306,7 @@ YOUR JOB: For every labeled enclosed room/space inside the building walls, repor
 IMPORTANT: Width and height should be the REAL-WORLD feet dimensions readable from the drawing.
 If a room has a dimension callout like "9'-0\"" that is its actual size — use that, don't guess.
 For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale. Only include enclosed rooms/spaces, not title blocks, notes, legends, or exterior annotations.`,
-        file_urls: [plan.image_url],
+        file_urls: [analysisImageUrl],
         response_json_schema: {
           type: "object",
           properties: {
@@ -556,6 +612,9 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
             <>
               <FloorPlanCanvas
                 floorPlanUrl={currentFloorPlan?.image_url}
+                floorPlanFileType={currentFloorPlan?.file_type}
+                floorPlanPreviewUrl={currentFloorPlan?.rendered_image_url}
+                floorPlanPageNumber={currentFloorPlan?.page_number || 1}
                 rooms={rooms}
                 devices={devices}
                 layers={layers}

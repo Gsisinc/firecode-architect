@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { routeCircuits, drawCircuitRoutes } from '@/lib/circuitRouter';
 import { createMarkupFromTool, formatMarkupMeasurement, getMarkupBounds, getMarkupLayerKey, getMarkupTool, isMarkupTool } from '@/lib/bluebeamMarkupTools';
+import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
 import { CIRCUIT_TYPES, DEVICE_PALETTE } from '@/components/designer/DesignerSidebar';
 import { Copy, Edit3, MoreVertical, Trash2, Unplug, Wrench, X } from 'lucide-react';
 
@@ -308,6 +309,8 @@ function drawMarkup(ctx, markup, pxPerFt) {
 
 export default function FloorPlanCanvas({
   floorPlanUrl,
+  floorPlanFileType,
+  floorPlanPageNumber = 1,
   devices = [],
   rooms = [],
   layers = {},
@@ -403,13 +406,44 @@ export default function FloorPlanCanvas({
   }, [currentFloor, devices, onCircuitIdChange, onCircuitTypeChange, onDeviceSelect, onDevicesChange, snapGrid]);
 
   useEffect(() => {
+    let cancelled = false;
     if (!floorPlanUrl) {
       setFloorImg(null);
-      return;
+      return undefined;
     }
+
+    if (floorPlanFileType === 'application/pdf' || /\.pdf($|\?)/i.test(floorPlanUrl)) {
+      (async () => {
+        try {
+          const renderedPage = await renderPdfPageToDataUrl(floorPlanUrl, floorPlanPageNumber, 2);
+          const img = new Image();
+          img.onload = () => {
+            if (cancelled) return;
+            setFloorImg(img);
+            const container = containerRef.current;
+            if (!container) return;
+            const padding = 40;
+            const fitScale = Math.min((container.clientWidth - padding * 2) / img.width, (container.clientHeight - padding * 2) / img.height, 1);
+            setScale(fitScale);
+            setOffset({
+              x: (container.clientWidth - img.width * fitScale) / 2,
+              y: (container.clientHeight - img.height * fitScale) / 2,
+            });
+          };
+          img.src = renderedPage.dataUrl;
+        } catch (_error) {
+          if (!cancelled) setFloorImg(null);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      if (cancelled) return;
       setFloorImg(img);
       const container = containerRef.current;
       if (!container) return;
@@ -422,7 +456,10 @@ export default function FloorPlanCanvas({
       });
     };
     img.src = floorPlanUrl;
-  }, [floorPlanUrl]);
+    return () => {
+      cancelled = true;
+    };
+  }, [floorPlanFileType, floorPlanPageNumber, floorPlanUrl]);
 
   useEffect(() => {
     const element = containerRef.current;
