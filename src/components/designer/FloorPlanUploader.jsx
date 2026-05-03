@@ -4,7 +4,7 @@ import { FileText, ImagePlus, Loader2, Sparkles, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { extractPdfPageInfo } from "@/lib/documentEngine";
+import { getPdfPageCount } from "@/lib/documentEngine";
 
 const UPLOAD_STEPS = {
   idle: { label: "", ceiling: 0 },
@@ -49,25 +49,29 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
       if (isPdf) {
         setUploadState("processing");
         const localUrl = URL.createObjectURL(file);
-        let metadata;
+        let pageCount;
         try {
-          metadata = await extractPdfPageInfo(localUrl);
+          pageCount = await getPdfPageCount(localUrl);
           setUploadProgress(90);
         } finally {
           URL.revokeObjectURL(localUrl);
         }
+        const pages = Array.from({ length: pageCount }, (_, index) => ({
+          page: index + 1,
+          text: '',
+        }));
         setUploadState("saving");
         setUploadProgress(96);
         await Promise.resolve(onUploaded({
           fileUrl: file_url,
           fileType: file.type || "application/pdf",
           fileName: file.name,
-          pageCount: metadata.pageCount,
-          pages: metadata.pages,
+          pageCount,
+          pages,
           localPdfUrl: localUrl,
         }));
         setUploadProgress(100);
-        toast.success(`Imported ${metadata.pageCount} PDF sheet${metadata.pageCount === 1 ? "" : "s"} for assignment`);
+        toast.success(`Imported ${pageCount} PDF sheet${pageCount === 1 ? "" : "s"} for assignment`);
       } else {
         setUploadState("saving");
         setUploadProgress(94);

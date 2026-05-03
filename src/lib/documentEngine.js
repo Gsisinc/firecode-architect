@@ -91,26 +91,22 @@ export async function extractPdfMetadataAndText(fileUrl) {
 }
 
 export async function extractPdfPageInfo(fileUrl) {
+  const pageCount = await getPdfPageCount(fileUrl);
+
+  return {
+    pageCount,
+    pages: Array.from({ length: pageCount }, (_, index) => ({
+      page: index + 1,
+      text: '',
+    })),
+  };
+}
+
+export async function getPdfPageCount(fileUrl) {
   const pdfjsLib = await loadPdfjs();
   const loadingTask = pdfjsLib.getDocument(fileUrl);
   const pdf = await loadingTask.promise;
-  const pages = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 1 });
-    pages.push({
-      page: pageNumber,
-      width: Math.round(viewport.width),
-      height: Math.round(viewport.height),
-      text: '',
-    });
-  }
-
-  return {
-    pageCount: pdf.numPages,
-    pages,
-  };
+  return pdf.numPages;
 }
 
 export async function renderPdfPagesToDataUrls(fileUrl, scale = 2) {
