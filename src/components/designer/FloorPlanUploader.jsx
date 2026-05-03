@@ -68,7 +68,6 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
           fileName: file.name,
           pageCount,
           pages,
-          localPdfUrl: localUrl,
         }));
         setUploadProgress(100);
         toast.success(`Imported ${pageCount} PDF sheet${pageCount === 1 ? "" : "s"} for assignment`);

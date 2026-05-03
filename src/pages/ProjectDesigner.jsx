@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2 } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
