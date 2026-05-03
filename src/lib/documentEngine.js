@@ -1,8 +1,10 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { createWorker } from 'tesseract.js';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url
+).toString();
 
 export const DOCUMENT_PERMISSIONS = {
   owner: ['view', 'markup', 'measure', 'ocr', 'batch', 'manage_sets', 'manage_permissions', 'collaborate'],
