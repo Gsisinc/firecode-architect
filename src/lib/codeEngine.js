@@ -434,6 +434,54 @@ export function calculateHeatDetectorPlacement(rooms, ceilingData = {}) {
   return devices;
 }
 
+/**
+ * Duct smoke detectors — IBC Ch.9 establishes when fire alarm / detection systems are required;
+ * duct-mounted smoke is implemented per adopted mechanical and fire alarm criteria (see IMC
+ * for smoke detection in air distribution, and NFPA 72 §17.7.5 for listing and application of
+ * duct smoke detectors). Count and exact locations are developed with the mechanical engineer;
+ * this routine places a schematic set: two per air handler (typical supply + return sampling
+ * locations) based on `project.air_handling_units` (default 1 when unset).
+ */
+export function calculateDuctDetectorPlacement(project = {}, floorRooms = [], floor = 1, analysis = {}) {
+  const needsAlarm = analysis.fireAlarmRequired || analysis.fire_alarm_required;
+  if (!needsAlarm) return [];
+
+  const raw = Number(project.air_handling_units);
+  const nAhu = Number.isFinite(raw) && raw >= 1 ? Math.min(30, Math.floor(raw)) : 1;
+  const bounds = unionBoundsFromRooms(floorRooms);
+  const baseX = bounds.minX + 28;
+  let yCursor = bounds.minY + 36;
+  const vStep = 34;
+  const devices = [];
+  let seq = 1;
+
+  for (let a = 0; a < nAhu; a++) {
+    const xOff = (a % 3) * 22;
+    for (const role of ['duct_supply', 'duct_return']) {
+      devices.push({
+        id: `DD-F${floor}-${a + 1}-${role === 'duct_supply' ? 'S' : 'R'}-${seq}`,
+        type: 'duct_detector',
+        subtype: role,
+        symbol: 'D',
+        x: Math.round(baseX + xOff),
+        y: Math.round(yCursor),
+        address: `1-${String(220 + seq).padStart(3, '0')}`,
+        label: `DD-${String(seq).padStart(3, '0')}`,
+        floor,
+        mounting_height: role === 'duct_supply' ? 'Duct — supply (AHU/RTU)' : 'Duct — return (AHU/RTU)',
+        zone: `F${floor}-HVAC`,
+        circuit: 'SLC-1',
+        codeRef: 'IBC Ch.9 + IMC / NFPA 72 §17.7.5 (duct smoke — coordinate with ME)',
+        note: 'Schematic only; confirm detector quantity and sampling points with mechanical + AHJ.',
+      });
+      seq += 1;
+      yCursor += vStep;
+    }
+  }
+
+  return devices;
+}
+
 /** NFPA 72 Table 17.6.3.5.1 - Heat detector spacing by ceiling height */
 function getHeatDetectorSpacing(ceilingHeight, type = 'ror') {
   // type: 'fixed' or 'ror' (rate-of-rise)

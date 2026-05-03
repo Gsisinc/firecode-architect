@@ -41,6 +41,7 @@ import {
   calculateElevatorRecallDetectors,
   calculateSprinklerMonitoring,
   assignSprinklerMonitoringPositions,
+  calculateDuctDetectorPlacement,
   generateDeviceSchedule,
   generateSequenceOfOperations,
 } from "@/lib/codeEngine";
@@ -445,6 +446,7 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
         (r) => r.floor === activeFloor && r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
       );
       allDevices.push(...calculateSmokeDetectorPlacement(smokeRooms, project.default_ceiling_height));
+      allDevices.push(...calculateDuctDetectorPlacement(project, floorRooms, activeFloor, analysis));
     }
 
     // Heat detectors
@@ -480,7 +482,7 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
     // Assign addresses
     allDevices = allDevices.map((d, i) => ({
       ...d,
-      address: d.address || `${d.type === "smoke_detector" ? "SD" : d.type === "heat_detector" ? "HD" : d.type === "pull_station" ? "PS" : d.type === "horn_strobe" ? "HS" : d.type === "strobe" ? "STR" : d.type === "waterflow_switch" ? "WF" : d.type === "valve_tamper" ? "VS" : "DEV"}-${String(i + 1).padStart(3, "0")}`,
+      address: d.address || `${d.type === "smoke_detector" ? "SD" : d.type === "heat_detector" ? "HD" : d.type === "pull_station" ? "PS" : d.type === "horn_strobe" ? "HS" : d.type === "strobe" ? "STR" : d.type === "waterflow_switch" ? "WF" : d.type === "valve_tamper" ? "VS" : d.type === "duct_detector" ? "DD" : "DEV"}-${String(i + 1).padStart(3, "0")}`,
       zone: d.zone || `Floor ${d.floor || 1}`,
       generated_by: "auto_place",
     }));

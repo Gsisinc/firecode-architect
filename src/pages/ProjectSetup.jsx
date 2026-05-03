@@ -38,6 +38,7 @@ export default function ProjectSetup() {
     default_ceiling_height: 9,
     default_ceiling_type: 'smooth_flat',
     elevator_count: 0,
+    air_handling_units: '',
     ahj_contact: '',
     adopted_code_edition: '2021 IBC / 2022 NFPA 72',
     communication_pathway: 'IP/GSM',
@@ -228,6 +229,22 @@ export default function ProjectSetup() {
                 </Field>
                 <Field label="Elevator Count">
                   <Input type="number" min={0} value={f.elevator_count} onChange={e => setForm(p => ({ ...p, elevator_count: +e.target.value }))} className="input-dark" />
+                </Field>
+                <Field label="Air handlers (RTU/AHU)">
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 3"
+                    value={f.air_handling_units === '' || f.air_handling_units == null ? '' : f.air_handling_units}
+                    onChange={e => setForm(p => ({
+                      ...p,
+                      air_handling_units: e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value, 10) || 1),
+                    }))}
+                    className="input-dark"
+                  />
+                  <p className="text-[11px] text-white/35 mt-1.5 leading-snug">
+                    Used for duct smoke detector placeholders on auto-place (IBC Ch.9 system scope + IMC / NFPA 72 coordination). Leave blank to assume one unit (supply + return pair).
+                  </p>
                 </Field>
                 <Field label="Default Ceiling Height (ft)">
                   <Input type="number" min={7} max={100} value={f.default_ceiling_height} onChange={e => setForm(p => ({ ...p, default_ceiling_height: +e.target.value }))} className="input-dark" />
