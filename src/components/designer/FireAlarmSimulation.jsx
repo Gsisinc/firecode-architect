@@ -426,7 +426,7 @@ export default function FireAlarmSimulation({
         <section className="flex-1 min-w-0 flex flex-col gap-3">
           <div className="flex items-center gap-2 text-[10px] text-slate-500">
             <Radio className="w-3.5 h-3.5 text-cyan-400" />
-            Riser view — SLC/NAC tee from vertical riser; red dashed trace = initiating signal to FACP when tripped; annunciator lists every zone on this floor.
+            Wiring-style riser: vertical trunk with SLC and NAC taps — every device is on the drawn circuit. Red trace follows the real path to the FACP; zones are on the diagram at right.
           </div>
           <div className="rounded-xl border border-white/10 bg-[#12151c] overflow-hidden">
             <SimulationRiserDiagram
@@ -441,25 +441,17 @@ export default function FireAlarmSimulation({
               troubleDeviceId={troubleDeviceId}
               onToggleTrouble={toggleRiserTrouble}
               hasPlacedAnnunciator={placedAnnunciators.length > 0}
+              zoneStatuses={zoneStatuses}
             />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <ZoneAnnunciatorPanel
-              floor={activeFloor}
-              zoneRows={zoneStatuses}
-              placedAnnunciators={placedAnnunciators}
-              phase={phase}
-              source={source}
-            />
-            <SignalIoMatrix
-              phase={phase}
-              stage={stage}
-              source={source}
-              troubleDeviceId={troubleDeviceId}
-              nacCount={nacList.length}
-            />
-          </div>
+          <SignalIoMatrix
+            phase={phase}
+            stage={stage}
+            source={source}
+            troubleDeviceId={troubleDeviceId}
+            nacCount={nacList.length}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div
@@ -615,76 +607,6 @@ export default function FireAlarmSimulation({
   );
 }
 
-function ZoneAnnunciatorPanel({ floor, zoneRows, placedAnnunciators, phase, source }) {
-  const bezel = 'rounded-lg border-4 border-[#1a1a1a] bg-[#0a0c10] shadow-[inset_0_0_24px_rgba(0,0,0,0.85)]';
-  return (
-    <div className={`${bezel} p-3 flex flex-col min-h-[200px] max-h-[320px]`}>
-      <div className="flex items-center justify-between gap-2 mb-2 border-b border-white/10 pb-2">
-        <div>
-          <p className="text-[9px] uppercase tracking-[0.2em] text-red-400/90 font-bold">Remote annunciator</p>
-          <p className="text-[10px] text-slate-500 font-mono">Floor {floor} · zone LED / LCD preview</p>
-        </div>
-        {placedAnnunciators.length > 0 ? (
-          <span className="text-[9px] font-mono text-emerald-400/90 shrink-0">
-            {placedAnnunciators.length} ANN on plan
-          </span>
-        ) : (
-          <span className="text-[9px] font-mono text-slate-600 shrink-0">No ANN symbol — panel still shows zones</span>
-        )}
-      </div>
-      <div className="overflow-y-auto flex-1 pr-1 space-y-1 font-mono text-[10px]">
-        {zoneRows.length === 0 ? (
-          <p className="text-slate-600 italic p-2">Add devices with zone labels on the floor plan to populate this list.</p>
-        ) : (
-          zoneRows.map(({ zone, status }) => {
-            const activeAlarm = status === 'alarm' && (phase === 'alarming' || phase === 'silenced');
-            const activeSup = status === 'supervisory' && phase !== 'standby';
-            const trb = status === 'trouble';
-            const label =
-              status === 'alarm'
-                ? 'FIRE ALARM'
-                : status === 'supervisory'
-                  ? 'SUPERVISORY'
-                  : status === 'trouble'
-                    ? 'TROUBLE'
-                    : 'NORMAL';
-            return (
-              <div
-                key={zone}
-                className={`flex items-center justify-between gap-2 rounded border px-2 py-1.5 ${
-                  activeAlarm
-                    ? 'border-red-500/60 bg-red-950/40 fa-panel-alarm-led'
-                    : activeSup
-                      ? 'border-amber-500/50 bg-amber-950/25 fa-panel-alarm-led'
-                      : trb
-                        ? 'border-yellow-500/50 bg-yellow-950/20'
-                        : 'border-white/10 bg-black/30'
-                }`}
-              >
-                <span className={`font-bold truncate ${activeAlarm ? 'text-red-300' : activeSup ? 'text-amber-200' : trb ? 'text-yellow-200' : 'text-slate-400'}`}>
-                  {zone}
-                </span>
-                <span
-                  className={`shrink-0 uppercase text-[9px] tracking-wide ${
-                    activeAlarm ? 'text-red-400' : activeSup ? 'text-amber-300' : trb ? 'text-yellow-300' : 'text-emerald-600/90'
-                  }`}
-                >
-                  {label}
-                </span>
-              </div>
-            );
-          })
-        )}
-      </div>
-      {(phase === 'alarming' || phase === 'silenced') && source && (
-        <p className="text-[9px] text-slate-600 mt-2 border-t border-white/5 pt-2 truncate" title={source.label}>
-          Active event: {source.label} · {source.zone}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function SignalIoMatrix({ phase, stage, source, troubleDeviceId, nacCount }) {
   const live = phase !== 'standby';
   const inputLabel =
@@ -696,8 +618,8 @@ function SignalIoMatrix({ phase, stage, source, troubleDeviceId, nacCount }) {
   const facpState =
     !live ? 'Idle' : stage.supervisory ? 'Supervisory' : stage.panelLed ? 'Alarm / active' : 'Processing…';
   return (
-    <div className="rounded-lg border border-white/10 bg-[#1a1e28] p-3 flex flex-col min-h-[200px] max-h-[320px]">
-      <p className="text-[9px] uppercase tracking-wider text-cyan-400/90 font-bold mb-1">Signal path · I/O</p>
+    <div className="rounded-xl border border-white/10 bg-[#1a1e28] p-4 flex flex-col min-h-0">
+      <p className="text-[9px] uppercase tracking-wider text-cyan-400/90 font-bold mb-1">Signal path · I/O (reactions)</p>
       <p className="text-[10px] text-slate-500 mb-3">What triggers what: initiating → panel → outputs (mirrors simulation delays).</p>
       <div className="space-y-2 text-[10px] font-mono flex-1">
         <div className="flex justify-between gap-2 border-b border-white/10 pb-2">
@@ -746,16 +668,33 @@ function SimulationRiserDiagram({
   troubleDeviceId,
   onToggleTrouble,
   hasPlacedAnnunciator = false,
+  zoneStatuses = [],
 }) {
-  const DEV_GAP = 52;
-  const RISER_X = 72;
-  const maxDev = Math.max(slcDevices.length, nacDevices.length, 1);
-  const SVG_W = Math.min(Math.max(760, 140 + maxDev * DEV_GAP + 100), 1400);
-  const slcY = 52;
-  const branchY = 118;
-  const nacY = 182;
-  const PANEL_TOP = 238;
-  const SVG_H = 304;
+  const DEV_GAP = 54;
+  const TRUNK_X = 102;
+  const SLC_BUS_Y = 62;
+  const NAC_BUS_Y = 128;
+  const FACP_TOP = 258;
+  const STUB = 22;
+  const SYM_OFF = 36;
+  const ZONE_STRIP_W = 132;
+  const EOL_W = 28;
+  const maxShow = 28;
+
+  const slcShow = slcDevices.slice(0, maxShow);
+  const nacShow = nacDevices.slice(0, maxShow);
+  const slcCount = Math.max(slcShow.length, 1);
+  const nacCount = Math.max(nacShow.length, 1);
+  const busSpan = Math.max(slcCount, nacCount) * DEV_GAP + 80;
+  const slcFirstX = TRUNK_X + 48;
+  const nacFirstX = TRUNK_X + 48;
+  const slcLastX = slcFirstX + Math.max(0, slcShow.length - 1) * DEV_GAP;
+  const nacLastX = nacFirstX + Math.max(0, nacShow.length - 1) * DEV_GAP;
+  const busEndX = Math.max(slcLastX, nacLastX, slcFirstX + 40) + EOL_W + 24;
+  const wiringW = Math.max(busSpan + slcFirstX, busEndX);
+  const SVG_W = Math.min(1680, Math.max(820, wiringW + ZONE_STRIP_W + 28));
+  const zoneColX = SVG_W - ZONE_STRIP_W + 8;
+  const SVG_H = 318;
 
   const deviceLeds = (d) => {
     const isNac = NAC_TYPES.has(d.type);
@@ -814,9 +753,12 @@ function SimulationRiserDiagram({
     );
   };
 
-  const DeviceNode = ({ device, x, y }) => {
+  /** Device hangs below horizontal bus (SLC and NAC use same convention). */
+  const DeviceOnBus = ({ device, x, busY }) => {
     const { alarmLed, supLed, trbLed } = deviceLeds(device);
-    const shortLabel = (device.label || device.type || '?').replace(/_/g, ' ').slice(0, 14);
+    const shortLabel = (device.label || device.type || '?').replace(/_/g, ' ').slice(0, 13);
+    const zoneStr = (device.zone || '').trim().slice(0, 12) || '—';
+    const cy = busY + STUB + SYM_OFF / 2;
     return (
       <g
         role="button"
@@ -825,11 +767,16 @@ function SimulationRiserDiagram({
         onClick={() => onToggleTrouble(device.id)}
         onKeyDown={(e) => e.key === 'Enter' && onToggleTrouble(device.id)}
       >
-        <RiserGlyph device={device} x={x} y={y} r={11} />
-        <text x={x} y={y + 26} textAnchor="middle" fontSize={7} fill="#94a3b8" fontFamily="system-ui, sans-serif">
+        <line x1={x} y1={busY} x2={x} y2={busY + STUB} stroke="#57534e" strokeWidth="2.2" strokeLinecap="square" />
+        <RiserGlyph device={device} x={x} y={cy} r={11} />
+        <rect x={x - 22} y={cy + 16} width={44} height={11} rx="2" fill="#0f172a" stroke="#334155" strokeWidth="0.75" />
+        <text x={x} y={cy + 24} textAnchor="middle" fontSize={6} fill="#94a3b8" fontFamily="monospace">
+          {zoneStr}
+        </text>
+        <text x={x} y={cy + 38} textAnchor="middle" fontSize={6.5} fill="#64748b" fontFamily="system-ui, sans-serif">
           {shortLabel}
         </text>
-        <g transform={`translate(${x - 18}, ${y + 30})`}>
+        <g transform={`translate(${x - 18}, ${cy + 42})`}>
           <circle cx={6} cy={6} r={4} fill={alarmLed ? '#ef4444' : '#1e293b'} stroke="#475569" strokeWidth="0.75" />
           <text x={6} y={8.5} textAnchor="middle" fontSize={5} fill={alarmLed ? '#fecaca' : '#64748b'} fontFamily="monospace">
             A
@@ -847,21 +794,35 @@ function SimulationRiserDiagram({
     );
   };
 
-  const maxShow = 24;
-  const slcShow = slcDevices.slice(0, maxShow);
-  const nacShow = nacDevices.slice(0, maxShow);
-  const branchX = RISER_X + 56;
-
   const demoSource = source?.id?.startsWith('demo-');
   const srcIdx = !demoSource && source?.id ? slcShow.findIndex((d) => d.id === source.id) : -1;
   const showInputFlow = (phase === 'alarming' || phase === 'silenced') && (srcIdx >= 0 || demoSource);
-  const sx = srcIdx >= 0 ? branchX + 20 + srcIdx * DEV_GAP : branchX + 20;
+  const sx = srcIdx >= 0 ? slcFirstX + srcIdx * DEV_GAP : slcFirstX;
   const nacHot = stage.nac && phase === 'alarming';
+
+  const slcBusEnd = slcShow.length ? slcLastX + EOL_W : slcFirstX + EOL_W;
+  const nacBusEnd = nacShow.length ? nacLastX + EOL_W : nacFirstX + EOL_W;
+
+  const inputFlowPoints = showInputFlow
+    ? `${sx},${SLC_BUS_Y} ${TRUNK_X},${SLC_BUS_Y} ${TRUNK_X},${FACP_TOP}`
+    : '';
+  const nacFlowPoints =
+    nacHot && nacShow.length
+      ? `${TRUNK_X},${FACP_TOP} ${TRUNK_X},${NAC_BUS_Y} ${nacLastX},${NAC_BUS_Y}`
+      : nacHot
+        ? `${TRUNK_X},${FACP_TOP} ${TRUNK_X},${NAC_BUS_Y}`
+        : '';
+
+  const zoneRows = Math.min(zoneStatuses.length, 18);
+  const zoneStripH = Math.max(120, 48 + zoneRows * 14);
 
   return (
     <div className="w-full overflow-x-auto">
-      <svg width="100%" height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="min-w-[720px] select-none">
+      <svg width="100%" height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="min-w-[760px] select-none">
         <defs>
+          <pattern id="fa-riser-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+            <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#1e293b" strokeWidth="0.5" opacity="0.35" />
+          </pattern>
           <filter id="fa-flow-glow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="1.2" result="b" />
             <feMerge>
@@ -870,167 +831,176 @@ function SimulationRiserDiagram({
             </feMerge>
           </filter>
         </defs>
-        <rect width={SVG_W} height={SVG_H} fill="#0f1218" />
-        <text x={SVG_W / 2} y={20} textAnchor="middle" fontSize={12} fill="#e2e8f0" fontWeight="bold" fontFamily="system-ui, sans-serif">
-          SIMULATION RISER — Floor {activeFloor} · {projectName}
+        <rect width={SVG_W} height={SVG_H} fill="#0c1018" />
+        <rect width={zoneColX - 10} height={SVG_H} fill="url(#fa-riser-grid)" opacity="0.9" />
+
+        <text x={(zoneColX - 10) / 2} y={19} textAnchor="middle" fontSize={12} fill="#e2e8f0" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          FIRE ALARM RISER (WIRING) — Floor {activeFloor}
         </text>
-        <text x={SVG_W / 2} y={34} textAnchor="middle" fontSize={8} fill="#64748b" fontFamily="system-ui, sans-serif">
-          SLC dashed · NAC solid · Red trace = initiating → FACP · Click device for TRB
+        <text x={(zoneColX - 10) / 2} y={33} textAnchor="middle" fontSize={8} fill="#64748b" fontFamily="system-ui, sans-serif">
+          {projectName} · one trunk · SLC &amp; NAC taps · devices on circuit · click symbol = trouble
           {hasPlacedAnnunciator ? ' · ANN on SLC' : ''}
         </text>
 
-        <text x={RISER_X} y={38} textAnchor="middle" fontSize={7} fill="#64748b" fontFamily="system-ui, sans-serif">
-          trunk
-        </text>
+        {/* Vertical riser: shared conduit from FACP through both taps */}
+        <line x1={TRUNK_X} y1={SLC_BUS_Y} x2={TRUNK_X} y2={FACP_TOP} stroke="#64748b" strokeWidth="5.5" strokeLinecap="round" />
+        <line x1={TRUNK_X} y1={SLC_BUS_Y} x2={TRUNK_X} y2={FACP_TOP} stroke="#475569" strokeWidth="2" strokeLinecap="round" opacity="0.5" />
 
-        <line x1={RISER_X} y1={42} x2={RISER_X} y2={PANEL_TOP} stroke="#475569" strokeWidth="4" strokeLinecap="round" />
-
-        <line x1={RISER_X} y1={branchY} x2={branchX} y2={branchY} stroke="#64748b" strokeWidth="2.5" />
-
-        <line
-          x1={branchX}
-          y1={branchY}
-          x2={branchX}
-          y2={slcY}
-          stroke="#38bdf8"
-          strokeWidth="2"
-          strokeDasharray="6 4"
-        />
-        <text x={branchX + 6} y={slcY - 10} fontSize={9} fill="#38bdf8" fontWeight="bold" fontFamily="system-ui, sans-serif">
-          SLC · initiating / modules
-        </text>
-        {slcShow.length > 0 && (
+        {/* SLC bus — continuous */}
+        {slcShow.length > 0 ? (
           <line
-            x1={branchX}
-            y1={slcY}
-            x2={branchX + 20 - 14}
-            y2={slcY}
-            stroke="#38bdf8"
-            strokeWidth="1.25"
-            strokeDasharray="4 3"
-            opacity={0.9}
+            x1={TRUNK_X}
+            y1={SLC_BUS_Y}
+            x2={slcBusEnd}
+            y2={SLC_BUS_Y}
+            stroke="#22d3ee"
+            strokeWidth="3"
+            strokeLinecap="square"
+            strokeDasharray="10 6"
           />
+        ) : (
+          <line x1={TRUNK_X} y1={SLC_BUS_Y} x2={slcFirstX + 60} y2={SLC_BUS_Y} stroke="#334155" strokeWidth="2" strokeDasharray="4 4" />
         )}
-        {showInputFlow && (
+
+        {/* NAC bus */}
+        {nacShow.length > 0 ? (
+          <line
+            x1={TRUNK_X}
+            y1={NAC_BUS_Y}
+            x2={nacBusEnd}
+            y2={NAC_BUS_Y}
+            stroke={nacHot ? '#fdba74' : '#ea580c'}
+            strokeWidth={nacHot ? 3.5 : 3}
+            strokeLinecap="square"
+          />
+        ) : (
+          <line x1={TRUNK_X} y1={NAC_BUS_Y} x2={nacFirstX + 60} y2={NAC_BUS_Y} stroke="#334155" strokeWidth="2" strokeDasharray="4 4" />
+        )}
+
+        {/* Tap markers on trunk */}
+        <circle cx={TRUNK_X} cy={SLC_BUS_Y} r={5} fill="#0c1018" stroke="#22d3ee" strokeWidth="2" />
+        <circle cx={TRUNK_X} cy={NAC_BUS_Y} r={5} fill="#0c1018" stroke="#ea580c" strokeWidth="2" />
+
+        <text x={TRUNK_X + 10} y={SLC_BUS_Y - 8} fontSize={8} fill="#22d3ee" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          SLC — Class B · initiating / modules
+        </text>
+        <text x={TRUNK_X + 10} y={NAC_BUS_Y - 8} fontSize={8} fill="#fb923c" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          NAC — notification appliances
+        </text>
+
+        {slcShow.map((d, i) => (
+          <DeviceOnBus key={d.id} device={d} x={slcFirstX + i * DEV_GAP} busY={SLC_BUS_Y} />
+        ))}
+        {slcDevices.length > maxShow && (
+          <text x={slcFirstX + maxShow * DEV_GAP} y={SLC_BUS_Y + 4} fontSize={8} fill="#64748b" fontFamily="system-ui, sans-serif">
+            +{slcDevices.length - maxShow} more…
+          </text>
+        )}
+
+        {nacShow.map((d, i) => (
+          <DeviceOnBus key={d.id} device={d} x={nacFirstX + i * DEV_GAP} busY={NAC_BUS_Y} />
+        ))}
+        {nacDevices.length > maxShow && (
+          <text x={nacFirstX + maxShow * DEV_GAP} y={NAC_BUS_Y + 4} fontSize={8} fill="#64748b" fontFamily="system-ui, sans-serif">
+            +{nacDevices.length - maxShow} more…
+          </text>
+        )}
+
+        {/* EOL */}
+        {slcShow.length > 0 && (
+          <g>
+            <rect x={slcBusEnd - 22} y={SLC_BUS_Y - 7} width={22} height={14} rx="2" fill="#1e293b" stroke="#22d3ee" strokeWidth="0.8" />
+            <text x={slcBusEnd - 11} y={SLC_BUS_Y + 3} textAnchor="middle" fontSize={5.5} fill="#67e8f9" fontFamily="monospace">
+              EOL
+            </text>
+          </g>
+        )}
+        {nacShow.length > 0 && (
+          <g>
+            <rect x={nacBusEnd - 22} y={NAC_BUS_Y - 7} width={22} height={14} rx="2" fill="#1e293b" stroke="#fb923c" strokeWidth="0.8" />
+            <text x={nacBusEnd - 11} y={NAC_BUS_Y + 3} textAnchor="middle" fontSize={5.5} fill="#fdba74" fontFamily="monospace">
+              EOL
+            </text>
+          </g>
+        )}
+
+        {showInputFlow && inputFlowPoints && (
           <polyline
-            points={`${sx},${slcY} ${branchX},${slcY} ${branchX},${branchY} ${RISER_X},${branchY} ${RISER_X},${PANEL_TOP}`}
+            points={inputFlowPoints}
             fill="none"
             stroke="#ef4444"
-            strokeWidth="2.75"
+            strokeWidth="2.85"
             strokeLinecap="round"
             strokeLinejoin="round"
-            opacity="0.92"
+            opacity="0.95"
             filter="url(#fa-flow-glow)"
             className="fa-flow-path"
           />
         )}
-        {slcShow.map((d, i) => {
-          const dx = branchX + 20 + i * DEV_GAP;
-          return (
-            <g key={d.id}>
-              <line
-                x1={dx}
-                y1={slcY}
-                x2={dx}
-                y2={slcY + 22}
-                stroke="#38bdf8"
-                strokeWidth="0.9"
-                strokeDasharray="2 2"
-                opacity={0.45}
-              />
-              {i > 0 && (
-                <line x1={dx - DEV_GAP + 14} y1={slcY} x2={dx - 14} y2={slcY} stroke="#38bdf8" strokeWidth="1.25" strokeDasharray="4 3" opacity={0.85} />
-              )}
-              <DeviceNode device={d} x={dx} y={slcY} />
-            </g>
-          );
-        })}
-        {slcDevices.length > maxShow && (
-          <text x={branchX + 20 + maxShow * DEV_GAP} y={slcY + 4} fontSize={9} fill="#64748b" fontFamily="system-ui, sans-serif">
-            +{slcDevices.length - maxShow}
-          </text>
-        )}
-
-        <line
-          x1={branchX}
-          y1={branchY}
-          x2={branchX}
-          y2={nacY}
-          stroke={nacHot ? '#fdba74' : '#fb923c'}
-          strokeWidth={nacHot ? 3.25 : 2}
-          strokeDasharray="6 4"
-          opacity={nacHot ? 1 : 0.95}
-        />
-        <text x={branchX + 6} y={nacY + 36} fontSize={9} fill="#fb923c" fontWeight="bold" fontFamily="system-ui, sans-serif">
-          NAC · notification
-        </text>
-        {nacShow.length > 0 && (
-          <line
-            x1={branchX}
-            y1={nacY}
-            x2={branchX + 20 - 14}
-            y2={nacY}
-            stroke={nacHot ? '#fdba74' : '#fb923c'}
-            strokeWidth="1.25"
-            strokeDasharray="4 3"
-            opacity={0.9}
-          />
-        )}
-        {nacHot && (
+        {nacFlowPoints && (
           <polyline
-            points={`${RISER_X},${branchY} ${branchX},${branchY} ${branchX},${nacY} ${branchX + 20 + Math.max(0, nacShow.length - 1) * DEV_GAP},${nacY}`}
+            points={nacFlowPoints}
             fill="none"
             stroke="#fb923c"
-            strokeWidth="2"
+            strokeWidth="2.2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            opacity="0.55"
-            strokeDasharray="6 4"
+            opacity="0.65"
+            strokeDasharray="7 5"
+            className="fa-flow-path"
           />
-        )}
-        {nacShow.map((d, i) => {
-          const dx = branchX + 20 + i * DEV_GAP;
-          return (
-            <g key={d.id}>
-              <line
-                x1={dx}
-                y1={nacY}
-                x2={dx}
-                y2={nacY + 22}
-                stroke="#fb923c"
-                strokeWidth="0.9"
-                strokeDasharray="2 2"
-                opacity={0.45}
-              />
-              {i > 0 && (
-                <line x1={dx - DEV_GAP + 14} y1={nacY} x2={dx - 14} y2={nacY} stroke="#fb923c" strokeWidth="1.25" strokeDasharray="4 3" opacity={0.85} />
-              )}
-              <DeviceNode device={d} x={dx} y={nacY} />
-            </g>
-          );
-        })}
-        {nacDevices.length > maxShow && (
-          <text x={branchX + 20 + maxShow * DEV_GAP} y={nacY + 4} fontSize={9} fill="#64748b" fontFamily="system-ui, sans-serif">
-            +{nacDevices.length - maxShow}
-          </text>
         )}
 
         {slcDevices.length === 0 && nacDevices.length === 0 && (
-          <text x={branchX + 8} y={branchY + 6} fontSize={11} fill="#64748b" fontFamily="system-ui, sans-serif" fontStyle="italic">
-            No devices on Floor {activeFloor} — place devices on the floor plan.
+          <text x={slcFirstX} y={(SLC_BUS_Y + NAC_BUS_Y) / 2} fontSize={11} fill="#64748b" fontFamily="system-ui, sans-serif" fontStyle="italic">
+            No devices — add to floor plan; riser trunk &amp; FACP remain.
           </text>
         )}
 
-        <line x1={RISER_X} y1={PANEL_TOP} x2={RISER_X} y2={PANEL_TOP + 6} stroke="#94a3b8" strokeWidth="3" />
-        <rect x={RISER_X - 44} y={PANEL_TOP + 6} width={88} height={36} rx={6} fill="#991b1b" stroke="#7f1d1d" strokeWidth="1.5" />
-        <text x={RISER_X} y={PANEL_TOP + 28} textAnchor="middle" fontSize={11} fill="white" fontWeight="bold" fontFamily="system-ui, sans-serif">
-          {facpDevice ? (facpDevice.label || 'FACP').slice(0, 12) : 'FACP'}
+        <line x1={TRUNK_X} y1={FACP_TOP} x2={TRUNK_X} y2={FACP_TOP + 5} stroke="#94a3b8" strokeWidth="3" />
+        <rect x={TRUNK_X - 52} y={FACP_TOP + 5} width={104} height={44} rx={8} fill="#7f1d1d" stroke="#450a0a" strokeWidth="2" />
+        <rect x={TRUNK_X - 46} y={FACP_TOP + 10} width={92} height={32} rx={4} fill="#991b1b" opacity="0.85" />
+        <text x={TRUNK_X} y={FACP_TOP + 30} textAnchor="middle" fontSize={11} fill="white" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          {facpDevice ? (facpDevice.label || 'FACP').slice(0, 14) : 'FACP'}
         </text>
-        <text x={RISER_X} y={PANEL_TOP + 48} textAnchor="middle" fontSize={7} fill="#64748b" fontFamily="system-ui, sans-serif">
-          Class B SLC / NAC · preview
+        <text x={TRUNK_X} y={FACP_TOP + 56} textAnchor="middle" fontSize={6} fill="#64748b" fontFamily="monospace">
+          SLC · NAC · AUX
         </text>
-        <text x={SVG_W - 8} y={SVG_H - 8} textAnchor="end" fontSize={7} fill="#475569" fontFamily="system-ui, sans-serif">
-          INPUT ↑ trunk · tee → SLC / NAC · FACP
+
+        {/* Zone annunciator strip (part of riser sheet) */}
+        <rect x={zoneColX - 4} y={44} width={ZONE_STRIP_W} height={Math.min(zoneStripH, SVG_H - 56)} rx={4} fill="#050608" stroke="#27272a" strokeWidth="1.5" />
+        <text x={zoneColX + ZONE_STRIP_W / 2 - 6} y={58} textAnchor="middle" fontSize={8} fill="#f87171" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          ZONES / ANNUNCIATOR
+        </text>
+        <line x1={zoneColX} y1={64} x2={zoneColX + ZONE_STRIP_W - 16} y2={64} stroke="#27272a" strokeWidth="1" />
+        {zoneStatuses.length === 0 ? (
+          <text x={zoneColX + 6} y={88} fontSize={7} fill="#52525b" fontFamily="system-ui, sans-serif">
+            Assign zones on devices.
+          </text>
+        ) : (
+          zoneStatuses.slice(0, 18).map((row, i) => {
+            const y = 76 + i * 14;
+            const alarm = row.status === 'alarm' && (phase === 'alarming' || phase === 'silenced');
+            const sup = row.status === 'supervisory' && phase !== 'standby';
+            const trb = row.status === 'trouble';
+            const fill = alarm ? '#ef4444' : sup ? '#f59e0b' : trb ? '#eab308' : '#14532d';
+            const txt = alarm ? 'ALM' : sup ? 'SUP' : trb ? 'TRB' : 'OK';
+            return (
+              <g key={row.zone}>
+                <circle cx={zoneColX + 10} cy={y} r={4} fill={fill} opacity={alarm || sup ? 1 : 0.85} />
+                <text x={zoneColX + 22} y={y + 3} fontSize={8} fill="#a1a1aa" fontFamily="monospace">
+                  {String(row.zone).slice(0, 14)}
+                </text>
+                <text x={zoneColX + ZONE_STRIP_W - 22} y={y + 3} textAnchor="end" fontSize={7} fill="#d4d4d8" fontFamily="monospace">
+                  {txt}
+                </text>
+              </g>
+            );
+          })
+        )}
+
+        <text x={zoneColX + 4} y={SVG_H - 10} fontSize={6} fill="#3f3f46" fontFamily="system-ui, sans-serif">
+          Same states as panel LEDs
         </text>
       </svg>
     </div>
