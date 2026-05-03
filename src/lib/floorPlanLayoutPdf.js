@@ -1,19 +1,28 @@
 import jsPDF from 'jspdf';
-import { loadSubmittalLogoDataUrl } from '@/lib/submittalBranding';
+import {
+  loadSubmittalLogoWithMetrics,
+  addGsisLogoTopRight,
+  dataUrlImageFormat,
+  GSIS_LOGO_ASPECT,
+} from '@/lib/submittalBranding';
 
 /**
  * Landscape PDF with live canvas capture (floor plan + devices). Falls back to a note page if no canvas.
- * @param {{ project?: object, canvasRef?: React.RefObject<HTMLCanvasElement|null> }} opts
+ * @param {{ project?: object, canvasRef?: React.RefObject<HTMLCanvasElement|null>, captureRef?: React.RefObject<{ getLayoutDataURL?: (o?: object) => string|null }|null> }} opts
  */
-export async function exportFloorPlanLayoutPdf({ project, canvasRef }) {
+export async function exportFloorPlanLayoutPdf({ project, canvasRef, captureRef }) {
   const pName = project?.name || 'Fire Alarm System';
   const now = new Date().toLocaleDateString();
-  const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
+  const { dataUrl: logoDataUrl, aspect: logoAspectRaw } = await loadSubmittalLogoWithMetrics();
+  const logoAspect = logoAspectRaw > 0 ? logoAspectRaw : GSIS_LOGO_ASPECT;
 
   const imgData =
-    canvasRef?.current && typeof canvasRef.current.toDataURL === 'function'
-      ? canvasRef.current.toDataURL('image/jpeg', 0.92)
-      : null;
+    (captureRef?.current &&
+      typeof captureRef.current.getLayoutDataURL === 'function' &&
+      captureRef.current.getLayoutDataURL({ mimeType: 'image/png' })) ||
+    (canvasRef?.current && typeof canvasRef.current.toDataURL === 'function'
+      ? canvasRef.current.toDataURL('image/png')
+      : null);
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -25,13 +34,13 @@ export async function exportFloorPlanLayoutPdf({ project, canvasRef }) {
   doc.setLineWidth(0.4);
   doc.line(0, 14, W, 14);
 
-  if (logoDataUrl) {
-    try {
-      doc.addImage(logoDataUrl, 'PNG', W - 48, 2, 42, 11);
-    } catch {
-      /* ignore */
-    }
-  }
+  addGsisLogoTopRight(doc, logoDataUrl, W, {
+    maxWidthMm: 44,
+    maxHeightMm: 11,
+    rightMarginMm: 6,
+    topMm: 2,
+    aspectRatio: logoAspect,
+  });
 
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(10);
@@ -43,7 +52,7 @@ export async function exportFloorPlanLayoutPdf({ project, canvasRef }) {
   doc.text(`${pName} · ${now}`, W - 52, 9, { align: 'right' });
 
   if (imgData) {
-    doc.addImage(imgData, 'JPEG', 8, 18, W - 16, H - 26);
+    doc.addImage(imgData, dataUrlImageFormat(imgData), 8, 18, W - 16, H - 26);
   } else {
     doc.setFontSize(9);
     doc.setTextColor(71, 85, 105);

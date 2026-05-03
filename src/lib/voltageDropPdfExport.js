@@ -1,6 +1,12 @@
 import jsPDF from 'jspdf';
 import { feetBetween, getFloorScale } from '@/lib/designScale';
-import { loadSubmittalLogoDataUrl, drawGsisLetterheadHeader, GSIS_HEADER_BAR_MM } from '@/lib/submittalBranding';
+import {
+  loadSubmittalLogoWithMetrics,
+  drawGsisLetterheadHeader,
+  GSIS_HEADER_BAR_MM,
+  addGsisLogoTopRight,
+  GSIS_LOGO_ASPECT,
+} from '@/lib/submittalBranding';
 
 const WIRE_RESISTANCE = { 14: 2.525, 16: 4.016, 18: 6.385, 20: 10.15, 22: 16.14 };
 const DEVICE_CURRENT_mA = {
@@ -73,7 +79,8 @@ export async function exportVoltageDropPdf({
   supplyVoltage = 24,
 }) {
   const circuits = buildCircuits(devices);
-  const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
+  const { dataUrl: logoDataUrl, aspect: logoAspectRaw } = await loadSubmittalLogoWithMetrics();
+  const logoAspect = logoAspectRaw > 0 ? logoAspectRaw : GSIS_LOGO_ASPECT;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pName = project?.name || 'Fire Alarm System';
   const now = new Date().toLocaleDateString();
@@ -83,13 +90,13 @@ export async function exportVoltageDropPdf({
   doc.setDrawColor(218, 165, 32);
   doc.setLineWidth(0.45);
   doc.line(0, 38, 210, 38);
-  if (logoDataUrl) {
-    try {
-      doc.addImage(logoDataUrl, 'PNG', 146, 6, 54, 14);
-    } catch {
-      /* ignore */
-    }
-  }
+  addGsisLogoTopRight(doc, logoDataUrl, 210, {
+    maxWidthMm: 58,
+    maxHeightMm: 15,
+    rightMarginMm: 8,
+    topMm: 6,
+    aspectRatio: logoAspect,
+  });
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
@@ -119,7 +126,7 @@ export async function exportVoltageDropPdf({
 
     if (y > 230 && idx > 0) {
       doc.addPage();
-      drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+      drawGsisLetterheadHeader(doc, 210, logoDataUrl, logoAspect);
       doc.setFillColor(248, 250, 252);
       doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, 'F');
       y = 18 + GSIS_HEADER_BAR_MM;

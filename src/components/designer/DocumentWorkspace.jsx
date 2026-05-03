@@ -61,6 +61,7 @@ export default function DocumentWorkspace({
   floorPlans = [],
   analysisResults,
   canvasRef,
+  captureRef,
   rooms = [],
 }) {
   const { documents, documentSets, permissions, collaboration, batchJobs } = useMemo(
@@ -266,7 +267,7 @@ export default function DocumentWorkspace({
             busy={pdfBusy === 'plan'}
             onClick={() =>
               runPdf('plan', () =>
-                exportFloorPlanLayoutPdf({ project, canvasRef })
+                exportFloorPlanLayoutPdf({ project, canvasRef, captureRef })
               )
             }
           />
@@ -285,6 +286,7 @@ export default function DocumentWorkspace({
                   floorPlans,
                   analysisResults,
                   canvasRef,
+                  captureRef,
                   sections: DEFAULT_SUBMITTAL_SECTIONS,
                   ahjCover: true,
                   submittalMeta: project?.submittal_meta || {},

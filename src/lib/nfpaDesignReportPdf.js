@@ -1,6 +1,13 @@
 import { generateSequenceOfOperations, generateDeviceSchedule, calculateBatterySizing, determineWiringType, calculateVoltageDrop } from '@/lib/codeEngine';
 import jsPDF from 'jspdf';
-import { loadSubmittalLogoDataUrl, GSIS_HEADER_BAR_MM } from '@/lib/submittalBranding';
+import {
+  loadSubmittalLogoWithMetrics,
+  GSIS_HEADER_BAR_MM,
+  addGsisLogoTopRight,
+  dataUrlImageFormat,
+  fitLogoSizeMm,
+  GSIS_LOGO_ASPECT,
+} from '@/lib/submittalBranding';
 
 /**
  * Multi-page NFPA 72 design narrative PDF (same output as toolbar export).
@@ -13,7 +20,8 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     analysis_results: opts.analysisResults ?? rawProject?.analysis_results,
   };
 
-  const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
+  const { dataUrl: logoDataUrl, aspect: logoAspectRaw } = await loadSubmittalLogoWithMetrics();
+  const logoAspect = logoAspectRaw > 0 ? logoAspectRaw : GSIS_LOGO_ASPECT;
     const HB = GSIS_HEADER_BAR_MM;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pName = project?.name || 'Fire Alarm System';
@@ -26,13 +34,13 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
       doc.setDrawColor(218, 165, 32);
       doc.setLineWidth(0.35);
       doc.line(0, HB, 210, HB);
-      if (logoDataUrl) {
-        try {
-          doc.addImage(logoDataUrl, 'PNG', 210 - 44, 2, 38, 10);
-        } catch {
-          /* ignore */
-        }
-      }
+      addGsisLogoTopRight(doc, logoDataUrl, 210, {
+        maxWidthMm: 40,
+        maxHeightMm: 10,
+        rightMarginMm: 6,
+        topMm: 2,
+        aspectRatio: logoAspect,
+      });
       doc.setTextColor(184, 134, 11);
       doc.setFontSize(7);
       doc.setFont('helvetica', 'bold');
@@ -54,7 +62,8 @@ export async function downloadNfpaDesignReportPdf(rawProject, opts = {}) {
     doc.line(0, 62, 210, 62);
     if (logoDataUrl) {
       try {
-        doc.addImage(logoDataUrl, 'PNG', 55, 18, 100, 27);
+        const { w: lw, h: lh } = fitLogoSizeMm(100, 27, logoAspect);
+        doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 55, 18, lw, lh);
       } catch {
         /* ignore */
       }

@@ -7,6 +7,81 @@ import gsisSvgUrl from '@/assets/branding/gsis-logo.svg?url';
 
 const PUBLIC_PNG = '/branding/gsis-logo.png';
 
+/** Matches bundled `gsis-logo.svg` viewBox (280×140) — wide lockup. Custom PNGs may differ. */
+export const GSIS_LOGO_ASPECT = 280 / 140;
+
+/**
+ * @param {string} dataUrl
+ * @returns {Promise<{ width: number, height: number }>}
+ */
+function naturalSizeFromDataUrl(dataUrl) {
+  return new Promise((resolve) => {
+    if (!dataUrl || typeof dataUrl !== 'string') {
+      resolve({ width: 280, height: 140 });
+      return;
+    }
+    const img = new Image();
+    img.onload = () =>
+      resolve({
+        width: Math.max(1, img.naturalWidth || 280),
+        height: Math.max(1, img.naturalHeight || 140),
+      });
+    img.onerror = () => resolve({ width: 280, height: 140 });
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Logo box in mm preserving aspect (critical for portrait vs landscape brand art).
+ * @param {number} maxWidthMm
+ * @param {number} maxHeightMm
+ * @param {number} [aspectRatio] width/height; default bundled SVG ratio
+ * @returns {{ w: number, h: number }}
+ */
+export function fitLogoSizeMm(maxWidthMm, maxHeightMm, aspectRatio = GSIS_LOGO_ASPECT) {
+  const a = aspectRatio > 0 ? aspectRatio : GSIS_LOGO_ASPECT;
+  let w = maxWidthMm;
+  let h = w / a;
+  if (h > maxHeightMm) {
+    h = maxHeightMm;
+    w = h * a;
+  }
+  return { w, h };
+}
+
+/** @param {string|null|undefined} dataUrl */
+export function dataUrlImageFormat(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string') return 'PNG';
+  if (dataUrl.startsWith('data:image/jpeg')) return 'JPEG';
+  if (dataUrl.startsWith('data:image/jpg')) return 'JPEG';
+  if (dataUrl.startsWith('data:image/webp')) return 'WEBP';
+  return 'PNG';
+}
+
+/**
+ * Top-right logo placement for letterhead strips.
+ * @param {import('jspdf').jsPDF} doc
+ * @param {string|null} logoDataUrl
+ * @param {number} pageWidthMm
+ * @param {{ maxWidthMm?: number, maxHeightMm?: number, rightMarginMm?: number, topMm?: number }} [opts]
+ */
+export function addGsisLogoTopRight(doc, logoDataUrl, pageWidthMm, opts = {}) {
+  if (!logoDataUrl) return;
+  const maxW = opts.maxWidthMm ?? 42;
+  const maxH = opts.maxHeightMm ?? 11;
+  const right = opts.rightMarginMm ?? 6;
+  const top = opts.topMm ?? 2;
+  const aspect = opts.aspectRatio ?? GSIS_LOGO_ASPECT;
+  const { w, h } = fitLogoSizeMm(maxW, maxH, aspect);
+  const x = pageWidthMm - right - w;
+  const fmt = dataUrlImageFormat(logoDataUrl);
+  try {
+    doc.addImage(logoDataUrl, fmt, x, top, w, h);
+  } catch {
+    /* ignore bad raster */
+  }
+}
+
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -22,8 +97,8 @@ function blobToDataUrl(blob) {
  * @returns {Promise<string|null>}
  */
 export async function loadSubmittalLogoDataUrl(opts = {}) {
-  const w = opts.width ?? 560;
-  const h = opts.height ?? 280;
+  const w = opts.width ?? 1120;
+  const h = opts.height ?? 560;
 
   try {
     const pngRes = await fetch(PUBLIC_PNG, { method: 'GET' });
@@ -78,20 +153,26 @@ export const GSIS_HEADER_BAR_MM = 14;
  * @param {number} pageWidthMm
  * @param {string|null} logoDataUrl
  */
-export function drawGsisLetterheadHeader(doc, pageWidthMm, logoDataUrl) {
+/**
+ * @param {import('jspdf').jsPDF} doc
+ * @param {number} pageWidthMm
+ * @param {string|null} logoDataUrl
+ * @param {number} [logoAspect]
+ */
+export function drawGsisLetterheadHeader(doc, pageWidthMm, logoDataUrl, logoAspect) {
   const H = GSIS_HEADER_BAR_MM;
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageWidthMm, H, 'F');
   doc.setDrawColor(218, 165, 32);
   doc.setLineWidth(0.35);
   doc.line(0, H, pageWidthMm, H);
-  if (logoDataUrl) {
-    try {
-      doc.addImage(logoDataUrl, 'PNG', pageWidthMm - 44, 2, 38, 10);
-    } catch {
-      /* ignore */
-    }
-  }
+  addGsisLogoTopRight(doc, logoDataUrl, pageWidthMm, {
+    maxWidthMm: 40,
+    maxHeightMm: 10,
+    rightMarginMm: 6,
+    topMm: 2,
+    aspectRatio: logoAspect,
+  });
   doc.setTextColor(184, 134, 11);
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');

@@ -1,5 +1,10 @@
 import jsPDF from "jspdf";
-import { drawAhjCoverPage, SHEET_36_24_LANDSCAPE_MM } from "@/lib/ahjSubmittalPdf";
+import {
+  drawAhjCoverPage,
+  drawAhjFloorPlanSheet,
+  loadDataUrlImageSize,
+  SHEET_36_24_LANDSCAPE_MM,
+} from "@/lib/ahjSubmittalPdf";
 import {
   calculateBatterySizing,
   calculateNacLoading,
@@ -9,7 +14,13 @@ import {
   generateSequenceOfOperations,
 } from "@/lib/codeEngine";
 import { calculateWireLengthSummary } from "@/lib/designValidation";
-import { loadSubmittalLogoDataUrl } from "@/lib/submittalBranding";
+import {
+  loadSubmittalLogoWithMetrics,
+  addGsisLogoTopRight,
+  dataUrlImageFormat,
+  fitLogoSizeMm,
+  GSIS_LOGO_ASPECT,
+} from "@/lib/submittalBranding";
 
 const DEVICE_TYPE_LABELS = {
   smoke_detector: "Smoke Detector",
@@ -67,14 +78,20 @@ export async function runSubmittalPackagePdf({
   floorPlans = [],
   analysisResults,
   canvasRef,
+  captureRef,
   sections = DEFAULT_SUBMITTAL_SECTIONS,
   ahjCover = true,
   submittalMeta = {},
 }) {
   void _rooms;
   const captureCanvas = () => {
-    if (!canvasRef?.current) return null;
-    return canvasRef.current.toDataURL("image/jpeg", 0.85);
+    const hi =
+      captureRef?.current &&
+      typeof captureRef.current.getLayoutDataURL === "function" &&
+      captureRef.current.getLayoutDataURL({ mimeType: "image/png" });
+    if (hi) return hi;
+    if (!canvasRef?.current || typeof canvasRef.current.toDataURL !== "function") return null;
+    return canvasRef.current.toDataURL("image/png");
   };
 
 
@@ -87,13 +104,37 @@ export async function runSubmittalPackagePdf({
     const now = new Date().toLocaleDateString();
     const reqs = analysisResults || {};
     const wireSummary = calculateWireLengthSummary({ devices, wires, floorPlans });
-    const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
+    const { dataUrl: logoDataUrl, aspect: logoAspectRaw } = await loadSubmittalLogoWithMetrics();
+    const logoAspect = logoAspectRaw > 0 ? logoAspectRaw : GSIS_LOGO_ASPECT;
+
+    let floorImgData = null;
+    let floorImgDims = { width: 4, height: 3 };
+    if (sections.floorPlanSnapshot) {
+      floorImgData = captureCanvas();
+      if (floorImgData) {
+        floorImgDims = await loadDataUrlImageSize(floorImgData);
+      }
+    }
 
     if (ahjCover) {
       doc = new jsPDF({ orientation: "landscape", unit: "mm", format: SHEET_36_24_LANDSCAPE_MM });
-      drawAhjCoverPage(doc, project, devices, analysisResults, equipmentSpecs, meta, logoDataUrl);
+      drawAhjCoverPage(doc, project, devices, analysisResults, equipmentSpecs, meta, logoDataUrl, logoAspect);
+      if (sections.floorPlanSnapshot) {
+        doc.addPage(SHEET_36_24_LANDSCAPE_MM, "landscape");
+        drawAhjFloorPlanSheet(doc, {
+          project,
+          imgData: floorImgData,
+          logoDataUrl,
+          logoAspect,
+          pName,
+          now,
+          imgWidth: floorImgDims.width,
+          imgHeight: floorImgDims.height,
+          submittalMeta: meta,
+        });
+      }
       doc.addPage("a4", "portrait");
-      pageNum = 2;
+      pageNum = doc.getNumberOfPages();
     } else {
       doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     }
@@ -112,13 +153,13 @@ export async function runSubmittalPackagePdf({
       doc.setDrawColor(218, 165, 32);
       doc.setLineWidth(0.35);
       doc.line(0, headerBarH, W, headerBarH);
-      if (logoDataUrl) {
-        try {
-          doc.addImage(logoDataUrl, "PNG", W - 44, 2, 38, 10);
-        } catch {
-          /* ignore */
-        }
-      }
+      addGsisLogoTopRight(doc, logoDataUrl, W, {
+        maxWidthMm: 40,
+        maxHeightMm: 10,
+        rightMarginMm: 6,
+        topMm: 2,
+        aspectRatio: logoAspect,
+      });
       doc.setTextColor(184, 134, 11);
       doc.setFontSize(7);
       doc.setFont("helvetica", "bold");
@@ -140,7 +181,8 @@ export async function runSubmittalPackagePdf({
       doc.line(0, 62, 210, 62);
       if (logoDataUrl) {
         try {
-          doc.addImage(logoDataUrl, "PNG", 55, 18, 100, 27);
+          const { w: lw, h: lh } = fitLogoSizeMm(100, 27, logoAspect);
+          doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 55, 18, lw, lh);
         } catch {
           /* ignore */
         }
@@ -446,25 +488,64 @@ export async function runSubmittalPackagePdf({
       });
     }
 
-    // ── FLOOR PLAN SNAPSHOT ──────────────────────────────
-    if (sections.floorPlanSnapshot) {
-      const imgData = captureCanvas();
+    // ── FLOOR PLAN: on FA-1 (36×24) when AHJ cover is on; otherwise A4 landscape appendix ──
+    if (sections.floorPlanSnapshot && !ahjCover) {
+      const imgData = floorImgData || captureCanvas();
+      const dims = imgData ? await loadDataUrlImageSize(imgData) : { width: 4, height: 3 };
+      doc.addPage("landscape");
+      const fpW = doc.internal.pageSize.getWidth();
+      const fpH = doc.internal.pageSize.getHeight();
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, 0, fpW, fpH, "F");
+      doc.setDrawColor(218, 165, 32);
+      doc.setLineWidth(0.35);
+      doc.line(0, 13, fpW, 13);
+      addGsisLogoTopRight(doc, logoDataUrl, fpW, {
+        maxWidthMm: 42,
+        maxHeightMm: 10,
+        rightMarginMm: 6,
+        topMm: 2,
+        aspectRatio: logoAspect,
+      });
+      doc.setTextColor(30, 41, 59);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text("FLOOR PLAN WITH DEVICE LAYOUT", 10, 9);
+      doc.setTextColor(100, 116, 139);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(6);
+      doc.text(`${pName}  ·  ${now}  ·  Page ${pageNum}`, fpW - 8, 9, { align: "right" });
+      const imgTop = 16;
+      const boxH = fpH - imgTop - 8;
+      const boxW = fpW - 16;
       if (imgData) {
-        doc.addPage("landscape");
-        doc.setFillColor(255, 255, 255); doc.rect(0, 0, 297, 210, "F");
-        doc.setDrawColor(218, 165, 32); doc.setLineWidth(0.35); doc.line(0, 13, 297, 13);
-        if (logoDataUrl) {
-          try {
-            doc.addImage(logoDataUrl, "PNG", 297 - 46, 2, 40, 10);
-          } catch {
-            /* ignore */
+        const iw = Math.max(1, dims.width);
+        const ih = Math.max(1, dims.height);
+        const scale = Math.min(boxW / iw, boxH / ih);
+        const dw = iw * scale;
+        const dh = ih * scale;
+        const dx = 8 + (boxW - dw) / 2;
+        const dy = imgTop + (boxH - dh) / 2;
+        doc.addImage(imgData, dataUrlImageFormat(imgData), dx, dy, dw, dh);
+      } else {
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105);
+        const msg = [
+          "No live floor plan capture was available.",
+          "",
+          "Open the Floor Plan tab so the drawing is on screen, then generate the submittal again.",
+          "",
+          `Project: ${pName} · Devices on record: ${devices.length}`,
+        ];
+        let ly = imgTop + 14;
+        msg.forEach((line) => {
+          if (!line) {
+            ly += 4;
+            return;
           }
-        }
-        doc.setTextColor(30, 41, 59); doc.setFontSize(8); doc.setFont("helvetica", "bold");
-        doc.text("9. FLOOR PLAN WITH DEVICE LAYOUT", 10, 9);
-        doc.setTextColor(100, 116, 139); doc.setFont("helvetica", "normal"); doc.setFontSize(6);
-        doc.text(`${pName}  ·  Active Circuit Labeling  ·  ${now}  ·  Page ${pageNum}`, 254, 9, { align: "right" });
-        doc.addImage(imgData, "JPEG", 8, 16, 281, 188);
+          doc.text(line, 16, ly);
+          ly += 6;
+        });
       }
     }
 

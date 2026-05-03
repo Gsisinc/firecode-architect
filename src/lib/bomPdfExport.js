@@ -1,6 +1,12 @@
 import jsPDF from 'jspdf';
 import { calculateWireLengthSummary } from '@/lib/designValidation';
-import { loadSubmittalLogoDataUrl, drawGsisLetterheadHeader, GSIS_HEADER_BAR_MM } from '@/lib/submittalBranding';
+import {
+  loadSubmittalLogoWithMetrics,
+  drawGsisLetterheadHeader,
+  GSIS_HEADER_BAR_MM,
+  addGsisLogoTopRight,
+  GSIS_LOGO_ASPECT,
+} from '@/lib/submittalBranding';
 
 const DEVICE_TYPE_LABELS = {
   smoke_detector: 'Smoke Detector',
@@ -61,7 +67,8 @@ export async function exportBillOfMaterialsPdf({ project, devices = [], floorPla
   const bom = buildBOM(devices);
   const wireSummary = calculateWireLengthSummary({ devices, wires, floorPlans });
   const totalDevices = devices.length;
-  const logoDataUrl = await loadSubmittalLogoDataUrl({ width: 560, height: 280 });
+  const { dataUrl: logoDataUrl, aspect: logoAspectRaw } = await loadSubmittalLogoWithMetrics();
+  const logoAspect = logoAspectRaw > 0 ? logoAspectRaw : GSIS_LOGO_ASPECT;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pName = project?.name || 'Fire Alarm System';
   const now = new Date().toLocaleDateString();
@@ -71,13 +78,13 @@ export async function exportBillOfMaterialsPdf({ project, devices = [], floorPla
   doc.setDrawColor(218, 165, 32);
   doc.setLineWidth(0.45);
   doc.line(0, 42, 210, 42);
-  if (logoDataUrl) {
-    try {
-      doc.addImage(logoDataUrl, 'PNG', 146, 8, 54, 15);
-    } catch {
-      /* ignore */
-    }
-  }
+  addGsisLogoTopRight(doc, logoDataUrl, 210, {
+    maxWidthMm: 58,
+    maxHeightMm: 16,
+    rightMarginMm: 8,
+    topMm: 8,
+    aspectRatio: logoAspect,
+  });
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
@@ -112,7 +119,7 @@ export async function exportBillOfMaterialsPdf({ project, devices = [], floorPla
   bom.forEach((item, i) => {
     if (y > 270) {
       doc.addPage();
-      drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+      drawGsisLetterheadHeader(doc, 210, logoDataUrl, logoAspect);
       doc.setFillColor(248, 250, 252);
       doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, 'F');
       y = 20 + GSIS_HEADER_BAR_MM;
@@ -138,7 +145,7 @@ export async function exportBillOfMaterialsPdf({ project, devices = [], floorPla
   });
 
   doc.addPage();
-  drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+  drawGsisLetterheadHeader(doc, 210, logoDataUrl, logoAspect);
   doc.setFillColor(248, 250, 252);
   doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, 'F');
   y = 20 + GSIS_HEADER_BAR_MM;
@@ -162,7 +169,7 @@ export async function exportBillOfMaterialsPdf({ project, devices = [], floorPla
   devices.forEach((d, i) => {
     if (y > 278) {
       doc.addPage();
-      drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+      drawGsisLetterheadHeader(doc, 210, logoDataUrl, logoAspect);
       doc.setFillColor(248, 250, 252);
       doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, 'F');
       y = 15 + GSIS_HEADER_BAR_MM;
@@ -192,7 +199,7 @@ export async function exportBillOfMaterialsPdf({ project, devices = [], floorPla
 
   if (wireSummary.byCircuit.length) {
     doc.addPage();
-    drawGsisLetterheadHeader(doc, 210, logoDataUrl);
+    drawGsisLetterheadHeader(doc, 210, logoDataUrl, logoAspect);
     doc.setFillColor(248, 250, 252);
     doc.rect(0, GSIS_HEADER_BAR_MM, 210, 297 - GSIS_HEADER_BAR_MM, 'F');
     y = 20 + GSIS_HEADER_BAR_MM;

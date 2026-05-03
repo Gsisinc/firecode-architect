@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RotateCcw, VolumeX, AlertTriangle, Settings2 } from 'lucide-react';
+import { RotateCcw, VolumeX, AlertTriangle, Settings2, Radio } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,9 +13,63 @@ const INITIATING_TYPES = new Set([
   'valve_tamper',
   'duct_detector',
   'co_detector',
+  'elevator_recall',
 ]);
 
 const NAC_TYPES = new Set(['horn_strobe', 'strobe', 'horn', 'speaker']);
+
+/** Devices drawn on the SLC / initiating side of the simulation riser */
+const SLC_RISER_TYPES = new Set([
+  'smoke_detector',
+  'heat_detector',
+  'pull_station',
+  'duct_detector',
+  'waterflow_switch',
+  'valve_tamper',
+  'co_detector',
+  'elevator_recall',
+  'monitor_module',
+  'control_module',
+  'door_holder',
+  'facp',
+]);
+
+const RISER_DEVICE_COLORS = {
+  monitor_module: '#2dd4bf',
+  control_module: '#94a3b8',
+  door_holder: '#f87171',
+  smoke_detector: '#60a5fa',
+  heat_detector: '#fb923c',
+  pull_station: '#f87171',
+  horn_strobe: '#fb923c',
+  strobe: '#c084fc',
+  speaker: '#22d3ee',
+  duct_detector: '#818cf8',
+  waterflow_switch: '#34d399',
+  valve_tamper: '#2dd4bf',
+  co_detector: '#a3e635',
+  facp: '#f87171',
+  elevator_recall: '#c084fc',
+};
+
+const RISER_SYMBOL = {
+  monitor_module: 'MM',
+  control_module: 'CM',
+  door_holder: 'DH',
+  smoke_detector: 'S',
+  heat_detector: 'H',
+  pull_station: 'PS',
+  horn_strobe: 'H/S',
+  strobe: 'ST',
+  horn: 'H',
+  speaker: 'SP',
+  duct_detector: 'D',
+  waterflow_switch: 'WF',
+  valve_tamper: 'VS',
+  co_detector: 'CO',
+  facp: 'FACP',
+  elevator_recall: 'ER',
+};
 
 const DEMO_INITIATORS = [
   { id: 'demo-pull', label: 'Manual station', simType: 'pull', zone: 'Z1', isDemo: true },
@@ -32,11 +86,31 @@ function mapDeviceToSimType(device) {
   if (t === 'valve_tamper') return 'tamper';
   if (t === 'duct_detector') return 'duct';
   if (t === 'co_detector') return 'co';
+  if (t === 'elevator_recall') return 'elevator';
   if (t === 'smoke_detector') {
     if (st === 'photoelectric_beam') return 'beam';
     return 'smoke';
   }
   return 'smoke';
+}
+
+/** NFPA-style preview: tamper & elevator recall lobby detectors are commonly supervisory-only at the FACP */
+function isSupervisoryInitiator(device) {
+  if (!device) return false;
+  if (device.type === 'valve_tamper') return true;
+  if (device.type === 'elevator_recall') return true;
+  return false;
+}
+
+function riserGlyph(device) {
+  if (device?.symbol) return String(device.symbol).slice(0, 4);
+  if (device?.type === 'smoke_detector' && device?.subtype === 'photoelectric_beam') return 'B';
+  return RISER_SYMBOL[device?.type] || '?';
+}
+
+function riserColor(device) {
+  if (device?.type === 'smoke_detector' && device?.subtype === 'photoelectric_beam') return '#d97706';
+  return RISER_DEVICE_COLORS[device?.type] || '#64748b';
 }
 
 function defaultDelays(sim = {}) {
@@ -66,8 +140,10 @@ export default function FireAlarmSimulation({
 }) {
   const [phase, setPhase] = useState('standby');
   const [source, setSource] = useState(null);
+  const [troubleDeviceId, setTroubleDeviceId] = useState(null);
   const [stage, setStage] = useState({
     panelLed: false,
+    supervisory: false,
     nac: false,
     elevator: false,
     fan: false,
@@ -99,6 +175,21 @@ export default function FireAlarmSimulation({
     );
   }, [devices, activeFloor]);
 
+  const floorDevicesAll = useMemo(() => {
+    return (devices || []).filter((d) => Number(d.floor) === Number(activeFloor));
+  }, [devices, activeFloor]);
+
+  const slcRiserDevices = useMemo(() => {
+    return floorDevicesAll
+      .filter((d) => SLC_RISER_TYPES.has(d.type) && d.type !== 'facp')
+      .sort((a, b) => (a.label || a.type || '').localeCompare(b.label || b.type || ''));
+  }, [floorDevicesAll]);
+
+  const facpOnFloor = useMemo(
+    () => floorDevicesAll.find((d) => d.type === 'facp') || null,
+    [floorDevicesAll]
+  );
+
   const displayInitiators = useMemo(() => {
     if (initiatingList.length > 0) {
       return initiatingList.map((d) => ({
@@ -122,8 +213,10 @@ export default function FireAlarmSimulation({
     clearTimers();
     setPhase('standby');
     setSource(null);
+    setTroubleDeviceId(null);
     setStage({
       panelLed: false,
+      supervisory: false,
       nac: false,
       elevator: false,
       fan: false,
@@ -136,10 +229,12 @@ export default function FireAlarmSimulation({
       clearTimers();
       const dev = init.device;
       const delays = dev ? defaultDelays(dev.simulation) : defaultDelays({});
+      const supInit = dev && isSupervisoryInitiator(dev);
       setSource(init);
       setPhase('alarming');
       setStage({
         panelLed: false,
+        supervisory: false,
         nac: false,
         elevator: false,
         fan: false,
@@ -150,8 +245,12 @@ export default function FireAlarmSimulation({
         timersRef.current.push(setTimeout(fn, delay));
       };
 
-      push(delays.panel, () => setStage((s) => ({ ...s, panelLed: true })));
-      push(delays.nac, () => setStage((s) => ({ ...s, nac: true })));
+      push(delays.panel, () =>
+        setStage((s) => ({ ...s, panelLed: true, supervisory: !!supInit }))
+      );
+      if (!supInit) {
+        push(delays.nac, () => setStage((s) => ({ ...s, nac: true })));
+      }
       push(delays.elevator, () => setStage((s) => ({ ...s, elevator: true })));
       push(delays.fan, () => setStage((s) => ({ ...s, fan: true })));
       push(delays.pump, () => setStage((s) => ({ ...s, pump: true })));
@@ -165,6 +264,10 @@ export default function FireAlarmSimulation({
     if (phase !== 'alarming') return;
     setPhase('silenced');
     setStage((s) => ({ ...s, nac: false }));
+  };
+
+  const toggleRiserTrouble = (deviceId) => {
+    setTroubleDeviceId((prev) => (prev === deviceId ? null : deviceId));
   };
 
   const patchDevice = (id, patch) => {
@@ -222,7 +325,7 @@ export default function FireAlarmSimulation({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button
             type="button"
             variant="outline"
@@ -269,40 +372,72 @@ export default function FireAlarmSimulation({
           </div>
         </section>
 
-        <section className="flex-1 min-w-0 flex flex-col items-center gap-4">
-          <div className="relative w-full max-w-md">
-            <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-40" viewBox="0 0 400 320" preserveAspectRatio="none">
-              <path
-                d="M 40 80 Q 120 40 200 100 T 360 120"
-                fill="none"
-                stroke={stage.panelLed ? '#f87171' : '#475569'}
-                strokeWidth="2"
-                strokeDasharray="6 4"
-              />
-            </svg>
+        <section className="flex-1 min-w-0 flex flex-col gap-3">
+          <div className="flex items-center gap-2 text-[10px] text-slate-500">
+            <Radio className="w-3.5 h-3.5 text-cyan-400" />
+            Riser view — each symbol is a placed device. Red ALM = alarm, amber SUP = supervisory, yellow TRB = trouble (click a device to toggle trouble).
+          </div>
+          <div className="rounded-xl border border-white/10 bg-[#12151c] overflow-hidden">
+            <SimulationRiserDiagram
+              activeFloor={activeFloor}
+              projectName={name}
+              slcDevices={slcRiserDevices}
+              nacDevices={nacList}
+              facpDevice={facpOnFloor}
+              phase={phase}
+              stage={stage}
+              source={source}
+              troubleDeviceId={troubleDeviceId}
+              onToggleTrouble={toggleRiserTrouble}
+            />
+          </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div
-              className={`relative rounded-lg border-4 border-[#7f1d1d] bg-gradient-to-br from-[#b91c1c] via-[#991b1b] to-[#7f1d1d] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ${
+              className={`rounded-lg border-4 border-[#7f1d1d] bg-gradient-to-br from-[#b91c1c] via-[#991b1b] to-[#7f1d1d] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ${
                 stage.panelLed ? 'ring-2 ring-red-400/60' : ''
               }`}
             >
-              <div className="flex items-start justify-between gap-2 mb-3">
+              <div className="flex items-start justify-between gap-2 mb-2">
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-red-200/80">Fire alarm control</p>
-                  <p className="text-sm font-bold text-white leading-tight">Addressable panel</p>
+                  <p className="text-[9px] uppercase tracking-widest text-red-200/80">FACP</p>
+                  <p className="text-xs font-bold text-white leading-tight">Addressable panel</p>
                 </div>
-                <div className="flex gap-1">
-                  <Led label="AC" on={phase !== 'standby'} color="green" />
-                  <Led label="DC" on={phase !== 'standby'} color="green" />
-                  <Led label="ALARM" on={stage.panelLed} color="red" pulse={stage.panelLed} />
-                  <Led label="TROUBLE" on={false} color="amber" />
+                <div className="flex gap-0.5 flex-wrap justify-end max-w-[200px]">
+                  <Led label="AC" on={phase !== 'standby'} color="green" small />
+                  <Led label="DC" on={phase !== 'standby'} color="green" small />
+                  <Led
+                    label="ALM"
+                    on={stage.panelLed && phase !== 'standby' && !stage.supervisory}
+                    color="red"
+                    small
+                    pulse={stage.panelLed && !stage.supervisory && phase === 'alarming'}
+                  />
+                  <Led
+                    label="SUP"
+                    on={stage.supervisory && phase !== 'standby'}
+                    color="amber"
+                    small
+                    pulse={stage.supervisory && phase === 'alarming'}
+                  />
+                  <Led label="TRB" on={!!troubleDeviceId} color="amber" small pulse={!!troubleDeviceId} />
                 </div>
               </div>
-              <div className="rounded bg-black/35 border border-black/40 p-2 mb-3">
-                <div className="h-10 rounded bg-[#0c0e12] border border-slate-700 flex items-center justify-center px-1">
-                  <span className="text-[10px] sm:text-[11px] font-mono text-emerald-400/90 text-center truncate max-w-full">
-                    {phase === 'standby' && 'SYSTEM NORMAL — ALL ZONES SECURE'}
-                    {phase === 'alarming' && (
+              <div className="rounded bg-black/35 border border-black/40 p-2">
+                <div className="h-9 rounded bg-[#0c0e12] border border-slate-700 flex items-center justify-center px-1">
+                  <span className="text-[9px] sm:text-[10px] font-mono text-center truncate max-w-full">
+                    {phase === 'standby' &&
+                      (troubleDeviceId ? (
+                        <span className="text-yellow-400">TROUBLE — CHECK DEVICE ON RISER</span>
+                      ) : (
+                        <span className="text-emerald-400/90">SYSTEM NORMAL — ALL ZONES SECURE</span>
+                      ))}
+                    {phase === 'alarming' && stage.supervisory && (
+                      <span className="text-amber-300 fa-panel-alarm-led inline-block">
+                        SUPERVISORY — {source?.label?.toUpperCase()} — {source?.zone}
+                      </span>
+                    )}
+                    {phase === 'alarming' && !stage.supervisory && (
                       <span className="text-red-400 fa-panel-alarm-led inline-block">
                         ALARM — {source?.label?.toUpperCase()} — {source?.zone}
                       </span>
@@ -313,28 +448,23 @@ export default function FireAlarmSimulation({
                   </span>
                 </div>
               </div>
-              <div className="flex gap-2 justify-center">
-                <kbd className="px-2 py-1 rounded bg-black/30 text-[9px] text-slate-400 border border-white/10">Ack</kbd>
-                <kbd className="px-2 py-1 rounded bg-black/30 text-[9px] text-slate-400 border border-white/10">Silence</kbd>
-                <kbd className="px-2 py-1 rounded bg-black/30 text-[9px] text-slate-400 border border-white/10">Reset</kbd>
-              </div>
             </div>
-          </div>
 
-          <div className="w-full max-w-xs rounded-lg border-2 border-[#991b1b] bg-gradient-to-b from-[#7f1d1d] to-[#450a0a] p-3 shadow-lg">
-            <p className="text-[10px] uppercase font-bold text-red-200/90 mb-2">24 VDC · NAC / module power</p>
-            <div className="flex items-center justify-between">
-              <div className="flex gap-2">
-                <Led label="PWR" on={phase !== 'standby'} color="green" small />
-                <Led
-                  label="NAC"
-                  on={stage.nac && phase === 'alarming'}
-                  color="orange"
-                  small
-                  pulse={stage.nac && phase === 'alarming'}
-                />
+            <div className="rounded-lg border-2 border-[#991b1b] bg-gradient-to-b from-[#7f1d1d] to-[#450a0a] p-3 shadow-lg flex flex-col justify-center">
+              <p className="text-[9px] uppercase font-bold text-red-200/90 mb-2">24 VDC · NAC / module power</p>
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2">
+                  <Led label="PWR" on={phase !== 'standby'} color="green" small />
+                  <Led
+                    label="NAC"
+                    on={stage.nac && phase === 'alarming'}
+                    color="orange"
+                    small
+                    pulse={stage.nac && phase === 'alarming'}
+                  />
+                </div>
+                <span className="text-[9px] text-slate-400 font-mono">{nacList.length} NAC</span>
               </div>
-              <span className="text-[10px] text-slate-400 font-mono">{nacList.length} NAC dev.</span>
             </div>
           </div>
         </section>
@@ -412,6 +542,197 @@ export default function FireAlarmSimulation({
       <footer className="shrink-0 border-t border-white/10 px-4 py-2 text-[10px] text-slate-500 bg-[#14171d]">
         Delays use each device&apos;s Simulation timing when set; otherwise defaults (panel 120ms → NAC 420ms → …). Updates save with the project.
       </footer>
+    </div>
+  );
+}
+
+function SimulationRiserDiagram({
+  activeFloor,
+  projectName,
+  slcDevices,
+  nacDevices,
+  facpDevice,
+  phase,
+  stage,
+  source,
+  troubleDeviceId,
+  onToggleTrouble,
+}) {
+  const DEV_GAP = 52;
+  const RISER_X = 72;
+  const maxDev = Math.max(slcDevices.length, nacDevices.length, 1);
+  const SVG_W = Math.min(Math.max(760, 140 + maxDev * DEV_GAP + 100), 1400);
+  const slcY = 52;
+  const branchY = 118;
+  const nacY = 182;
+  const PANEL_TOP = 238;
+  const SVG_H = 288;
+
+  const deviceLeds = (d) => {
+    const isNac = NAC_TYPES.has(d.type);
+    const isSrc = source?.id === d.id && (phase === 'alarming' || phase === 'silenced');
+    const supTrip = isSupervisoryInitiator(d);
+    const alarmLed = (isSrc && !supTrip) || (isNac && stage.nac && phase === 'alarming');
+    const supLed =
+      (isSrc && supTrip) ||
+      (d.type === 'control_module' && stage.elevator && phase !== 'standby') ||
+      (d.type === 'monitor_module' && stage.pump && phase !== 'standby');
+    const trbLed = troubleDeviceId === d.id;
+    return { alarmLed, supLed, trbLed };
+  };
+
+  const RiserGlyph = ({ device, x, y, r = 12 }) => {
+    const t = device?.type;
+    const color = riserColor(device);
+    const label = riserGlyph(device);
+    const isSquare = ['pull_station', 'horn_strobe', 'strobe', 'facp', 'speaker', 'horn'].includes(t);
+    const isDiamond = ['waterflow_switch', 'valve_tamper'].includes(t);
+    const fill = `${color}33`;
+    if (isDiamond) {
+      return (
+        <g>
+          <polygon
+            points={`${x},${y - r} ${x + r},${y} ${x},${y + r} ${x - r},${y}`}
+            fill={fill}
+            stroke={color}
+            strokeWidth="1.5"
+          />
+          <text x={x} y={y + 4} textAnchor="middle" fontSize={label.length > 2 ? 7 : 9} fill={color} fontWeight="bold" fontFamily="system-ui, sans-serif">
+            {label}
+          </text>
+        </g>
+      );
+    }
+    if (isSquare) {
+      return (
+        <g>
+          <rect x={x - r} y={y - r} width={r * 2} height={r * 2} rx="3" fill={fill} stroke={color} strokeWidth="1.5" />
+          <text x={x} y={y + 4} textAnchor="middle" fontSize={label.length > 3 ? 6 : 8} fill={color} fontWeight="bold" fontFamily="system-ui, sans-serif">
+            {label}
+          </text>
+        </g>
+      );
+    }
+    return (
+      <g>
+        <circle cx={x} cy={y} r={r} fill={fill} stroke={color} strokeWidth="1.5" />
+        <text x={x} y={y + 4} textAnchor="middle" fontSize={label.length > 2 ? 7 : 9} fill={color} fontWeight="bold" fontFamily="system-ui, sans-serif">
+          {label}
+        </text>
+      </g>
+    );
+  };
+
+  const DeviceNode = ({ device, x, y }) => {
+    const { alarmLed, supLed, trbLed } = deviceLeds(device);
+    const shortLabel = (device.label || device.type || '?').replace(/_/g, ' ').slice(0, 14);
+    return (
+      <g
+        role="button"
+        tabIndex={0}
+        className="cursor-pointer"
+        onClick={() => onToggleTrouble(device.id)}
+        onKeyDown={(e) => e.key === 'Enter' && onToggleTrouble(device.id)}
+      >
+        <RiserGlyph device={device} x={x} y={y} r={11} />
+        <text x={x} y={y + 26} textAnchor="middle" fontSize={7} fill="#94a3b8" fontFamily="system-ui, sans-serif">
+          {shortLabel}
+        </text>
+        <g transform={`translate(${x - 18}, ${y + 30})`}>
+          <circle cx={6} cy={6} r={4} fill={alarmLed ? '#ef4444' : '#1e293b'} stroke="#475569" strokeWidth="0.75" />
+          <text x={6} y={8.5} textAnchor="middle" fontSize={5} fill={alarmLed ? '#fecaca' : '#64748b'} fontFamily="monospace">
+            A
+          </text>
+          <circle cx={18} cy={6} r={4} fill={supLed ? '#f59e0b' : '#1e293b'} stroke="#475569" strokeWidth="0.75" />
+          <text x={18} y={8.5} textAnchor="middle" fontSize={5} fill={supLed ? '#fde68a' : '#64748b'} fontFamily="monospace">
+            S
+          </text>
+          <circle cx={30} cy={6} r={4} fill={trbLed ? '#eab308' : '#1e293b'} stroke="#475569" strokeWidth="0.75" />
+          <text x={30} y={8.5} textAnchor="middle" fontSize={5} fill={trbLed ? '#fef08a' : '#64748b'} fontFamily="monospace">
+            T
+          </text>
+        </g>
+      </g>
+    );
+  };
+
+  const maxShow = 24;
+  const slcShow = slcDevices.slice(0, maxShow);
+  const nacShow = nacDevices.slice(0, maxShow);
+  const branchX = RISER_X + 56;
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg width="100%" height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="min-w-[720px] select-none">
+        <rect width={SVG_W} height={SVG_H} fill="#0f1218" />
+        <text x={SVG_W / 2} y={20} textAnchor="middle" fontSize={12} fill="#e2e8f0" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          SIMULATION RISER — Floor {activeFloor} · {projectName}
+        </text>
+        <text x={SVG_W / 2} y={34} textAnchor="middle" fontSize={8} fill="#64748b" fontFamily="system-ui, sans-serif">
+          SLC dashed · NAC solid · Click device to toggle trouble (TRB)
+        </text>
+
+        <line x1={RISER_X} y1={42} x2={RISER_X} y2={PANEL_TOP} stroke="#475569" strokeWidth="4" strokeLinecap="round" />
+
+        <line x1={RISER_X} y1={branchY} x2={branchX} y2={branchY} stroke="#64748b" strokeWidth="2.5" />
+
+        <line x1={branchX} y1={branchY} x2={branchX} y2={slcY} stroke="#38bdf8" strokeWidth="2" strokeDasharray="6 4" />
+        <text x={branchX + 6} y={slcY - 10} fontSize={9} fill="#38bdf8" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          SLC · initiating / modules
+        </text>
+        {slcShow.map((d, i) => {
+          const dx = branchX + 20 + i * DEV_GAP;
+          return (
+            <g key={d.id}>
+              {i > 0 && (
+                <line x1={dx - DEV_GAP + 14} y1={slcY} x2={dx - 14} y2={slcY} stroke="#38bdf8" strokeWidth="1.25" strokeDasharray="4 3" opacity={0.85} />
+              )}
+              <DeviceNode device={d} x={dx} y={slcY} />
+            </g>
+          );
+        })}
+        {slcDevices.length > maxShow && (
+          <text x={branchX + 20 + maxShow * DEV_GAP} y={slcY + 4} fontSize={9} fill="#64748b" fontFamily="system-ui, sans-serif">
+            +{slcDevices.length - maxShow}
+          </text>
+        )}
+
+        <line x1={branchX} y1={branchY} x2={branchX} y2={nacY} stroke="#fb923c" strokeWidth="2" strokeDasharray="6 4" />
+        <text x={branchX + 6} y={nacY + 36} fontSize={9} fill="#fb923c" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          NAC · notification
+        </text>
+        {nacShow.map((d, i) => {
+          const dx = branchX + 20 + i * DEV_GAP;
+          return (
+            <g key={d.id}>
+              {i > 0 && (
+                <line x1={dx - DEV_GAP + 14} y1={nacY} x2={dx - 14} y2={nacY} stroke="#fb923c" strokeWidth="1.25" strokeDasharray="4 3" opacity={0.85} />
+              )}
+              <DeviceNode device={d} x={dx} y={nacY} />
+            </g>
+          );
+        })}
+        {nacDevices.length > maxShow && (
+          <text x={branchX + 20 + maxShow * DEV_GAP} y={nacY + 4} fontSize={9} fill="#64748b" fontFamily="system-ui, sans-serif">
+            +{nacDevices.length - maxShow}
+          </text>
+        )}
+
+        {slcDevices.length === 0 && nacDevices.length === 0 && (
+          <text x={branchX + 8} y={branchY + 6} fontSize={11} fill="#64748b" fontFamily="system-ui, sans-serif" fontStyle="italic">
+            No devices on Floor {activeFloor} — place devices on the floor plan.
+          </text>
+        )}
+
+        <line x1={RISER_X} y1={PANEL_TOP} x2={RISER_X} y2={PANEL_TOP + 6} stroke="#94a3b8" strokeWidth="3" />
+        <rect x={RISER_X - 44} y={PANEL_TOP + 6} width={88} height={36} rx={6} fill="#991b1b" stroke="#7f1d1d" strokeWidth="1.5" />
+        <text x={RISER_X} y={PANEL_TOP + 28} textAnchor="middle" fontSize={11} fill="white" fontWeight="bold" fontFamily="system-ui, sans-serif">
+          {facpDevice ? (facpDevice.label || 'FACP').slice(0, 12) : 'FACP'}
+        </text>
+        <text x={RISER_X} y={PANEL_TOP + 48} textAnchor="middle" fontSize={7} fill="#64748b" fontFamily="system-ui, sans-serif">
+          Class B SLC / NAC · preview
+        </text>
+      </svg>
     </div>
   );
 }
@@ -628,6 +949,13 @@ function InitiatorGraphic({ type, active }) {
     return (
       <div className={`h-16 w-[72px] rounded-full bg-gradient-to-br from-lime-100 to-lime-300 border-4 border-lime-600 flex items-center justify-center ${ring}`}>
         <span className="text-[10px] font-bold text-lime-900">CO</span>
+      </div>
+    );
+  }
+  if (type === 'elevator') {
+    return (
+      <div className={`h-16 w-[72px] rounded-md bg-gradient-to-br from-violet-600 to-violet-950 border-2 border-violet-400 flex items-center justify-center ${ring}`}>
+        <span className="text-[9px] font-bold text-white text-center leading-tight">EL<br />REC</span>
       </div>
     );
   }

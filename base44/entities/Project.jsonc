@@ -103,7 +103,7 @@
     },
     "submittal_meta": {
       "type": "object",
-      "description": "Scope of work, contractor license, and other AHJ submittal cover fields"
+      "description": "AHJ submittal fields: scope_of_work, contractor_license, monitoring_notes, drawn_by, checked_by, project_number (optional keys; used on FA-0 title block and monitoring strip)"
     },
     "elevator_count": {
       "type": "number"

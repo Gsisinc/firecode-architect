@@ -85,6 +85,7 @@ export default function ProjectDesigner() {
   const [pendingRoom, setPendingRoom] = useState(null); // { x, y, width, height }
   const [pendingRoomName, setPendingRoomName] = useState('');
   const canvasRef = useRef(null);
+  const floorPlanCaptureRef = useRef(null);
   const [analysisResults, setAnalysisResults] = useState(null);
   const [localRooms, setLocalRooms] = useState(null);
   const [localDevices, setLocalDevices] = useState(null);
@@ -981,6 +982,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 floorPlans={floorPlans}
                 analysisResults={analysisResults}
                 canvasRef={canvasRef}
+                captureRef={floorPlanCaptureRef}
                 rooms={rooms}
               />
             </Suspense>
@@ -1024,6 +1026,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 selectedDevice={selectedDevice}
                 currentFloor={activeFloor}
                 canvasRef={canvasRef}
+                captureRef={floorPlanCaptureRef}
                 onRoomNameRequest={handleRoomNameRequest}
                 wires={wires}
                 onWiresChange={setLocalWires}
@@ -1175,6 +1178,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
           floorPlans={floorPlans}
           analysisResults={analysisResults}
           canvasRef={canvasRef}
+          captureRef={floorPlanCaptureRef}
           onClose={() => setShowSubmittal(false)}
           onSaveSubmittalMeta={(meta) => saveProjectPatch({ submittal_meta: { ...project?.submittal_meta, ...meta } })}
         />

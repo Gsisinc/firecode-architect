@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { runSubmittalPackagePdf } from "@/lib/submittalPackagePdf";
 
-export default function SubmittalPackage({ project, devices, rooms, wires = [], floorPlans = [], analysisResults, canvasRef, onClose, onSaveSubmittalMeta }) {
+export default function SubmittalPackage({ project, devices, rooms, wires = [], floorPlans = [], analysisResults, canvasRef, captureRef, onClose, onSaveSubmittalMeta }) {
   const [generating, setGenerating] = useState(false);
   const [ahjCover, setAhjCover] = useState(true);
   const [submittalMeta, setSubmittalMeta] = useState({
@@ -52,6 +52,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
         floorPlans,
         analysisResults,
         canvasRef,
+        captureRef,
         sections,
         ahjCover,
         submittalMeta,
@@ -96,7 +97,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
             <div className="flex items-center gap-2">
               <Checkbox id="ahj" checked={ahjCover} onCheckedChange={(c) => setAhjCover(!!c)} />
               <Label htmlFor="ahj" className="text-xs cursor-pointer leading-snug">
-                Include professional cover: scope, drawing index, legend with CSFM placeholders (replace with uploaded cut sheets), sequence matrix, battery/NAC summary, Temporal Code-3 note.
+                Sheet FA-0 (36″×24″): project/site block, scope, legend, sequence matrix, schematic system riser, battery &amp; NAC, Code-3 note. With “Floor plan” checked, Sheet FA-1 is the same size and holds the device layout (scaled to fit, not stretched).
               </Label>
             </div>
             <div className="space-y-1.5">
@@ -118,6 +119,9 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
               />
             </div>
             <p className="text-[10px] text-slate-500">
+              For sharpest brand mark on PDFs, add <span className="font-mono">public/branding/gsis-logo.png</span> (any aspect ratio; portrait lockup recommended). Otherwise the app rasterizes the bundled SVG.
+            </p>
+            <p className="text-[10px] text-slate-500">
               Upload manufacturer PDFs in Documents; map models to <span className="font-mono">project.equipment_specs</span> in a future release — legend uses placeholders until then.
             </p>
           </div>
@@ -134,7 +138,7 @@ export default function SubmittalPackage({ project, devices, rooms, wires = [], 
                   <Label htmlFor={key} className="text-xs cursor-pointer">{label}</Label>
                   {key === "floorPlanSnapshot" && (
                     <Badge variant="outline" className="text-[9px] ml-auto text-purple-600 border-purple-200">
-                      <Camera className="w-2.5 h-2.5 mr-1" />canvas capture
+                      <Camera className="w-2.5 h-2.5 mr-1" />2–4× raster
                     </Badge>
                   )}
                 </div>

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle } from 'react';
 import { routeCircuits, drawCircuitRoutes } from '@/lib/circuitRouter';
 import { createMarkupFromTool, formatMarkupMeasurement, getMarkupBounds, getMarkupLayerKey, getMarkupTool, isMarkupTool } from '@/lib/bluebeamMarkupTools';
 import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
@@ -355,6 +355,246 @@ function getLayoutZoneCanvasStyle(type) {
   };
 }
 
+/** Full floor-plan scene (shared by on-screen canvas and high-res PDF export). */
+function drawFloorPlanScene(ctx, scene) {
+  const {
+    canvasSize,
+    offset,
+    scale,
+    floorImg,
+    layers,
+    rooms,
+    currentFloor,
+    layoutZones,
+    devices,
+    wires,
+    wireStart,
+    mouseWorld,
+    selectedDevice,
+    hoveredDeviceId,
+    drawingRoom,
+    drawingLayoutZone,
+    drawingMarkup,
+    dropPreview,
+    markups,
+    pxPerFt,
+    selectedCircuitType,
+  } = scene;
+
+  ctx.clearRect(0, 0, canvasSize.w, canvasSize.h);
+  ctx.save();
+  ctx.translate(offset.x, offset.y);
+  ctx.scale(scale, scale);
+
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillRect(-offset.x / scale, -offset.y / scale, canvasSize.w / scale, canvasSize.h / scale);
+
+  ctx.fillStyle = 'rgba(148,163,184,0.25)';
+  const dotSpacing = 30;
+  const startX = Math.floor(-offset.x / scale / dotSpacing) * dotSpacing;
+  const startY = Math.floor(-offset.y / scale / dotSpacing) * dotSpacing;
+  for (let gx = startX; gx < startX + canvasSize.w / scale + dotSpacing; gx += dotSpacing) {
+    for (let gy = startY; gy < startY + canvasSize.h / scale + dotSpacing; gy += dotSpacing) {
+      ctx.beginPath();
+      ctx.arc(gx, gy, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  if (floorImg) ctx.drawImage(floorImg, 0, 0, floorImg.width, floorImg.height);
+
+  if (layers.grid) {
+    ctx.strokeStyle = 'rgba(59,130,246,0.2)';
+    ctx.lineWidth = 0.5;
+    for (let gx = 0; gx < 4000; gx += GRID_SIZE) {
+      ctx.beginPath();
+      ctx.moveTo(gx, 0);
+      ctx.lineTo(gx, 3000);
+      ctx.stroke();
+    }
+    for (let gy = 0; gy < 3000; gy += GRID_SIZE) {
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      ctx.lineTo(4000, gy);
+      ctx.stroke();
+    }
+  }
+
+  if (layers.rooms !== false) {
+    rooms.filter((room) => sameFloor(room.floor, currentFloor)).forEach((room) => {
+      ctx.strokeStyle = 'rgba(249,115,22,0.7)';
+      ctx.fillStyle = 'rgba(249,115,22,0.05)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 3]);
+      ctx.beginPath();
+      ctx.rect(room.x, room.y, room.width, room.height);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (layers.labels !== false) {
+        ctx.fillStyle = 'rgba(234,88,12,0.9)';
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(room.name || 'Room', room.x + 6, room.y + 6);
+        if (room.sqft) {
+          ctx.font = '9px Inter, sans-serif';
+          ctx.fillStyle = 'rgba(234,88,12,0.6)';
+          ctx.fillText(`${room.sqft} sf`, room.x + 6, room.y + 20);
+        }
+      }
+    });
+  }
+
+  if (drawingRoom) {
+    const { x, y, ex, ey } = drawingRoom;
+    const w = Math.abs(ex - x);
+    const h = Math.abs(ey - y);
+    ctx.strokeStyle = '#f97316';
+    ctx.fillStyle = 'rgba(249,115,22,0.08)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    ctx.rect(Math.min(x, ex), Math.min(y, ey), w, h);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (w > 20 && h > 20) {
+      drawLabel(ctx, `${Math.round(w)}x${Math.round(h)}px`, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, '#f97316');
+    }
+  }
+
+  if (layers.layout_zones !== false) {
+    layoutZones.filter((zone) => sameFloor(zone.floor, currentFloor)).forEach((zone) => drawLayoutZone(ctx, zone));
+  }
+
+  if (drawingLayoutZone) {
+    const { x, y, ex, ey, zoneType } = drawingLayoutZone;
+    const meta = getLayoutZoneMeta(zoneType);
+    const w = Math.abs(ex - x);
+    const h = Math.abs(ey - y);
+    ctx.save();
+    ctx.strokeStyle = meta.color;
+    ctx.fillStyle = `${meta.color}18`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.rect(Math.min(x, ex), Math.min(y, ey), w, h);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    if (w > 20 && h > 20) {
+      drawLabel(ctx, meta.label, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, meta.color);
+    }
+  }
+
+  if (layers.circuits) {
+    try {
+      drawCircuitRoutes(ctx, routeCircuits(devices, rooms, currentFloor), layers.labels !== false);
+    } catch (_error) {
+      /* optional */
+    }
+  }
+
+  wires.filter((wire) => sameFloor(wire.floor, currentFloor)).forEach((wire) => {
+    const a = devices.find((device) => device.id === wire.from);
+    const b = devices.find((device) => device.id === wire.to);
+    if (!a || !b || a.x == null || b.x == null) return;
+    const meta = getCircuitMeta(wire.type || wire.circuit_type);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = meta.color;
+    ctx.lineWidth = 2.4;
+    ctx.setLineDash(wire.type === 'AUX' ? [2, 3] : [7, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const ft = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / Math.max(pxPerFt || 10, 1));
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const label = `${wire.circuit || wire.type} ~${ft}ft`;
+    ctx.font = '8px Inter';
+    const labelWidth = ctx.measureText(label).width + 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillRect(mx - labelWidth / 2, my - 9, labelWidth, 13);
+    ctx.fillStyle = meta.color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, mx, my - 2);
+  });
+
+  if (wireStart && mouseWorld) {
+    const source = devices.find((device) => device.id === wireStart);
+    if (source?.x != null) {
+      const meta = getCircuitMeta(selectedCircuitType);
+      ctx.beginPath();
+      ctx.moveTo(source.x, source.y);
+      ctx.lineTo(mouseWorld.x, mouseWorld.y);
+      ctx.strokeStyle = `${meta.color}aa`;
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([5, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  if (dropPreview) {
+    const palette = getPaletteDevice(dropPreview.type);
+    const sym = getSymbol(dropPreview.type);
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    sym.draw(ctx, dropPreview.x, dropPreview.y, DEVICE_RADIUS, true);
+    drawLabel(ctx, palette?.label || 'Device', dropPreview.x, dropPreview.y - 26, sym.color);
+    ctx.restore();
+  }
+
+  devices.filter((device) => sameFloor(device.floor, currentFloor)).forEach((device) => {
+    if (device.x == null || device.y == null) return;
+    const isSelected = selectedDevice?.id === device.id;
+    const isHovered = hoveredDeviceId === device.id;
+    const sym = getSymbol(device.type, device.subtype);
+    ctx.save();
+    if (isSelected || isHovered) {
+      ctx.shadowColor = sym.color;
+      ctx.shadowBlur = isSelected ? 12 : 8;
+    }
+    sym.draw(ctx, device.x, device.y, DEVICE_RADIUS, isSelected || isHovered);
+    ctx.shadowBlur = 0;
+    if (layers.labels !== false) {
+      const labelText = device.label || device.id || '';
+      ctx.font = '8px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const labelWidth = ctx.measureText(labelText).width + 6;
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillRect(device.x - labelWidth / 2, device.y + DEVICE_RADIUS + 2, labelWidth, 11);
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(device.x - labelWidth / 2, device.y + DEVICE_RADIUS + 2, labelWidth, 11);
+      ctx.fillStyle = '#1e293b';
+      ctx.fillText(labelText, device.x, device.y + DEVICE_RADIUS + 4);
+    }
+    ctx.restore();
+  });
+
+  if (layers.markups !== false) {
+    markups
+      .filter((markup) => sameFloor(markup.floor, currentFloor) && layers[getMarkupLayerKey(markup.layer)] !== false)
+      .forEach((markup) => drawMarkup(ctx, markup, pxPerFt));
+  }
+
+  if (drawingMarkup) {
+    drawMarkup(ctx, {
+      ...drawingMarkup,
+      text: drawingMarkup.type === 'count' ? '1' : drawingMarkup.subject,
+      status: 'Open',
+    }, pxPerFt);
+  }
+
+  ctx.restore();
+}
+
 export default function FloorPlanCanvas({
   floorPlanUrl,
   floorPlanFileType,
@@ -373,6 +613,7 @@ export default function FloorPlanCanvas({
   selectedDevice,
   currentFloor,
   canvasRef: externalCanvasRef,
+  captureRef = null,
   onRoomNameRequest,
   wires = [],
   onWiresChange,
@@ -526,224 +767,6 @@ export default function FloorPlanCanvas({
     ro.observe(element);
     return () => ro.disconnect();
   }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.save();
-    ctx.translate(offset.x, offset.y);
-    ctx.scale(scale, scale);
-
-    ctx.fillStyle = '#f1f5f9';
-    ctx.fillRect(-offset.x / scale, -offset.y / scale, canvasSize.w / scale, canvasSize.h / scale);
-
-    ctx.fillStyle = 'rgba(148,163,184,0.25)';
-    const dotSpacing = 30;
-    const startX = Math.floor(-offset.x / scale / dotSpacing) * dotSpacing;
-    const startY = Math.floor(-offset.y / scale / dotSpacing) * dotSpacing;
-    for (let gx = startX; gx < startX + canvasSize.w / scale + dotSpacing; gx += dotSpacing) {
-      for (let gy = startY; gy < startY + canvasSize.h / scale + dotSpacing; gy += dotSpacing) {
-        ctx.beginPath();
-        ctx.arc(gx, gy, 0.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    if (floorImg) ctx.drawImage(floorImg, 0, 0, floorImg.width, floorImg.height);
-
-    if (layers.grid) {
-      ctx.strokeStyle = 'rgba(59,130,246,0.2)';
-      ctx.lineWidth = 0.5;
-      for (let gx = 0; gx < 4000; gx += GRID_SIZE) {
-        ctx.beginPath();
-        ctx.moveTo(gx, 0);
-        ctx.lineTo(gx, 3000);
-        ctx.stroke();
-      }
-      for (let gy = 0; gy < 3000; gy += GRID_SIZE) {
-        ctx.beginPath();
-        ctx.moveTo(0, gy);
-        ctx.lineTo(4000, gy);
-        ctx.stroke();
-      }
-    }
-
-    if (layers.rooms !== false) {
-      rooms.filter((room) => sameFloor(room.floor, currentFloor)).forEach((room) => {
-        ctx.strokeStyle = 'rgba(249,115,22,0.7)';
-        ctx.fillStyle = 'rgba(249,115,22,0.05)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 3]);
-        ctx.beginPath();
-        ctx.rect(room.x, room.y, room.width, room.height);
-        ctx.fill();
-        ctx.stroke();
-        ctx.setLineDash([]);
-        if (layers.labels !== false) {
-          ctx.fillStyle = 'rgba(234,88,12,0.9)';
-          ctx.font = 'bold 11px Inter, sans-serif';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'top';
-          ctx.fillText(room.name || 'Room', room.x + 6, room.y + 6);
-          if (room.sqft) {
-            ctx.font = '9px Inter, sans-serif';
-            ctx.fillStyle = 'rgba(234,88,12,0.6)';
-            ctx.fillText(`${room.sqft} sf`, room.x + 6, room.y + 20);
-          }
-        }
-      });
-    }
-
-    if (drawingRoom) {
-      const { x, y, ex, ey } = drawingRoom;
-      const w = Math.abs(ex - x);
-      const h = Math.abs(ey - y);
-      ctx.strokeStyle = '#f97316';
-      ctx.fillStyle = 'rgba(249,115,22,0.08)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 3]);
-      ctx.beginPath();
-      ctx.rect(Math.min(x, ex), Math.min(y, ey), w, h);
-      ctx.fill();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      if (w > 20 && h > 20) {
-        drawLabel(ctx, `${Math.round(w)}x${Math.round(h)}px`, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, '#f97316');
-      }
-    }
-
-    if (layers.layout_zones !== false) {
-      layoutZones.filter((zone) => sameFloor(zone.floor, currentFloor)).forEach((zone) => drawLayoutZone(ctx, zone));
-    }
-
-    if (drawingLayoutZone) {
-      const { x, y, ex, ey, zoneType } = drawingLayoutZone;
-      const meta = getLayoutZoneMeta(zoneType);
-      const w = Math.abs(ex - x);
-      const h = Math.abs(ey - y);
-      ctx.save();
-      ctx.strokeStyle = meta.color;
-      ctx.fillStyle = `${meta.color}18`;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.rect(Math.min(x, ex), Math.min(y, ey), w, h);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-      if (w > 20 && h > 20) {
-        drawLabel(ctx, meta.label, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, meta.color);
-      }
-    }
-
-    if (layers.circuits) {
-      try {
-        drawCircuitRoutes(ctx, routeCircuits(devices, rooms, currentFloor), layers.labels !== false);
-      } catch (_error) {
-        // Circuit routing is supplemental; manual wire segments still render below.
-      }
-    }
-
-    wires.filter((wire) => sameFloor(wire.floor, currentFloor)).forEach((wire) => {
-      const a = devices.find((device) => device.id === wire.from);
-      const b = devices.find((device) => device.id === wire.to);
-      if (!a || !b || a.x == null || b.x == null) return;
-      const meta = getCircuitMeta(wire.type || wire.circuit_type);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = meta.color;
-      ctx.lineWidth = 2.4;
-      ctx.setLineDash(wire.type === 'AUX' ? [2, 3] : [7, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      const ft = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / Math.max(pxPerFt || 10, 1));
-      const mx = (a.x + b.x) / 2;
-      const my = (a.y + b.y) / 2;
-      const label = `${wire.circuit || wire.type} ~${ft}ft`;
-      ctx.font = '8px Inter';
-      const labelWidth = ctx.measureText(label).width + 8;
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.fillRect(mx - labelWidth / 2, my - 9, labelWidth, 13);
-      ctx.fillStyle = meta.color;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, mx, my - 2);
-    });
-
-    if (wireStart && mouseWorld) {
-      const source = devices.find((device) => device.id === wireStart);
-      if (source?.x != null) {
-        const meta = getCircuitMeta(selectedCircuitType);
-        ctx.beginPath();
-        ctx.moveTo(source.x, source.y);
-        ctx.lineTo(mouseWorld.x, mouseWorld.y);
-        ctx.strokeStyle = `${meta.color}aa`;
-        ctx.lineWidth = 1.8;
-        ctx.setLineDash([5, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
-
-    if (dropPreview) {
-      const palette = getPaletteDevice(dropPreview.type);
-      const sym = getSymbol(dropPreview.type);
-      ctx.save();
-      ctx.globalAlpha = 0.72;
-      sym.draw(ctx, dropPreview.x, dropPreview.y, DEVICE_RADIUS, true);
-      drawLabel(ctx, palette?.label || 'Device', dropPreview.x, dropPreview.y - 26, sym.color);
-      ctx.restore();
-    }
-
-    devices.filter((device) => sameFloor(device.floor, currentFloor)).forEach((device) => {
-      if (device.x == null || device.y == null) return;
-      const isSelected = selectedDevice?.id === device.id;
-      const isHovered = hoveredDeviceId === device.id;
-      const sym = getSymbol(device.type, device.subtype);
-      ctx.save();
-      if (isSelected || isHovered) {
-        ctx.shadowColor = sym.color;
-        ctx.shadowBlur = isSelected ? 12 : 8;
-      }
-      sym.draw(ctx, device.x, device.y, DEVICE_RADIUS, isSelected || isHovered);
-      ctx.shadowBlur = 0;
-      if (layers.labels !== false) {
-        const labelText = device.label || device.id || '';
-        ctx.font = '8px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        const labelWidth = ctx.measureText(labelText).width + 6;
-        ctx.fillStyle = 'rgba(255,255,255,0.92)';
-        ctx.fillRect(device.x - labelWidth / 2, device.y + DEVICE_RADIUS + 2, labelWidth, 11);
-        ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(device.x - labelWidth / 2, device.y + DEVICE_RADIUS + 2, labelWidth, 11);
-        ctx.fillStyle = '#1e293b';
-        ctx.fillText(labelText, device.x, device.y + DEVICE_RADIUS + 4);
-      }
-      ctx.restore();
-    });
-
-    if (layers.markups !== false) {
-      markups
-        .filter((markup) => sameFloor(markup.floor, currentFloor) && layers[getMarkupLayerKey(markup.layer)] !== false)
-        .forEach((markup) => drawMarkup(ctx, markup, pxPerFt));
-    }
-
-    if (drawingMarkup) {
-      drawMarkup(ctx, {
-        ...drawingMarkup,
-        text: drawingMarkup.type === 'count' ? '1' : drawingMarkup.subject,
-        status: 'Open',
-      }, pxPerFt);
-    }
-
-    ctx.restore();
-  }, [canvasRef, currentFloor, devices, drawingLayoutZone, drawingMarkup, drawingRoom, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
 
   const fitToCanvas = useCallback(() => {
     if (floorImg) {
@@ -1023,6 +1046,100 @@ export default function FloorPlanCanvas({
     addDeviceAt(device.type, toWorld(event));
     setDropPreview(null);
   }, [addDeviceAt, toWorld]);
+
+  const sceneProps = {
+    canvasSize,
+    offset,
+    scale,
+    floorImg,
+    layers,
+    rooms,
+    currentFloor,
+    layoutZones,
+    devices,
+    wires,
+    wireStart,
+    mouseWorld,
+    selectedDevice,
+    hoveredDeviceId,
+    drawingRoom,
+    drawingLayoutZone,
+    drawingMarkup,
+    dropPreview,
+    markups,
+    pxPerFt,
+    selectedCircuitType,
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    drawFloorPlanScene(ctx, sceneProps);
+  }, [canvasRef, currentFloor, devices, drawingLayoutZone, drawingMarkup, drawingRoom, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
+
+  useImperativeHandle(
+    captureRef,
+    () => ({
+      getLayoutDataURL(options = {}) {
+        const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+        const pixelRatio =
+          options.pixelRatio ?? Math.min(4, Math.max(2.5, dpr * 2));
+        const canvasEl = document.createElement('canvas');
+        const bw = Math.max(1, Math.round(canvasSize.w * pixelRatio));
+        const bh = Math.max(1, Math.round(canvasSize.h * pixelRatio));
+        canvasEl.width = bw;
+        canvasEl.height = bh;
+        const ctx = canvasEl.getContext('2d');
+        if (!ctx) return null;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.scale(pixelRatio, pixelRatio);
+        drawFloorPlanScene(ctx, {
+          canvasSize,
+          offset,
+          scale,
+          floorImg,
+          layers,
+          rooms,
+          currentFloor,
+          layoutZones,
+          devices,
+          wires,
+          wireStart: null,
+          mouseWorld: null,
+          selectedDevice: null,
+          hoveredDeviceId: null,
+          drawingRoom: null,
+          drawingLayoutZone: null,
+          drawingMarkup: null,
+          dropPreview: null,
+          markups,
+          pxPerFt,
+          selectedCircuitType,
+        });
+        const mime = options.mimeType || 'image/png';
+        if (mime === 'image/jpeg') return canvasEl.toDataURL('image/jpeg', options.quality ?? 0.95);
+        return canvasEl.toDataURL('image/png');
+      },
+    }),
+    [
+      canvasSize,
+      offset,
+      scale,
+      floorImg,
+      layers,
+      rooms,
+      currentFloor,
+      layoutZones,
+      devices,
+      wires,
+      markups,
+      pxPerFt,
+      selectedCircuitType,
+    ]
+  );
 
   const getCursor = () => {
     if (selectedTool === 'pan' || dragging?.type === 'pan') return dragging ? 'grabbing' : 'grab';
