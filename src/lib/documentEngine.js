@@ -86,6 +86,28 @@ export async function extractPdfMetadataAndText(fileUrl) {
   };
 }
 
+export async function extractPdfPageInfo(fileUrl) {
+  const loadingTask = pdfjsLib.getDocument(fileUrl);
+  const pdf = await loadingTask.promise;
+  const pages = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1 });
+    pages.push({
+      page: pageNumber,
+      width: Math.round(viewport.width),
+      height: Math.round(viewport.height),
+      text: '',
+    });
+  }
+
+  return {
+    pageCount: pdf.numPages,
+    pages,
+  };
+}
+
 export async function renderPdfPageToDataUrl(fileUrl, pageNumber = 1, scale = 2) {
   const source = fileUrl?.startsWith?.('data:')
     ? { data: Uint8Array.from(atob(fileUrl.split(',')[1]), char => char.charCodeAt(0)) }
