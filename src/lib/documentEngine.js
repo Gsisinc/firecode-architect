@@ -1,8 +1,5 @@
-import * as pdfjsLib from 'pdfjs-dist';
-import PdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?worker&inline';
+import * as pdfjsLib from 'pdfjs-dist/webpack.mjs';
 import { createWorker } from 'tesseract.js';
-
-pdfjsLib.GlobalWorkerOptions.workerPort ||= new PdfWorker();
 
 export const DOCUMENT_PERMISSIONS = {
   owner: ['view', 'markup', 'measure', 'ocr', 'batch', 'manage_sets', 'manage_permissions', 'collaborate'],
