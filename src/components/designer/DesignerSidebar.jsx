@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MARKUP_TOOLS } from '@/lib/bluebeamMarkupTools';
+import { feetBetween, getFloorScale } from '@/lib/designScale';
 
 // NFPA 170-aligned fire alarm device palette. Lettering follows common NFPA 170 plan-symbol
 // conventions; device engineering requirements still come from NFPA 72/NEC checks elsewhere.
@@ -39,6 +40,8 @@ export default function DesignerSidebar({
   project,
   devices = [],
   rooms = [],
+  wires = [],
+  floorPlans = [],
   currentFloor,
   onFloorChange,
   layers,
@@ -60,6 +63,8 @@ export default function DesignerSidebar({
     acc[d.type] = (acc[d.type] || 0) + 1;
     return acc;
   }, {});
+  const floorWireSummary = summarizeWireByType({ wires, devices, floorPlans, floor: currentFloor });
+  const allWireSummary = summarizeWireByType({ wires, devices, floorPlans });
 
   const toggle = (s) => setOpenSection(p => p === s ? null : s);
 
@@ -248,6 +253,25 @@ export default function DesignerSidebar({
                 <span className="text-orange-400 font-mono">{devices.length}</span>
               </div>
             </div>
+            <div className="mt-2 pt-2 border-t border-white/10 space-y-1">
+              <div className="flex justify-between text-[10px] font-semibold uppercase tracking-wider px-2">
+                <span className="text-white/35">Wire Feet - Floor {currentFloor}</span>
+                <span className="text-white/35">{floorWireSummary.totalFeet} ft</span>
+              </div>
+              {floorWireSummary.byType.length > 0 ? (
+                floorWireSummary.byType.map((wire) => (
+                  <WireTypeRow key={wire.type} wire={wire} />
+                ))
+              ) : (
+                <p className="text-[10px] text-white/25 px-2">No saved wire segments on this floor</p>
+              )}
+              {allWireSummary.totalFeet !== floorWireSummary.totalFeet && (
+                <div className="flex justify-between text-[10px] px-2 pt-1">
+                  <span className="text-white/35">All Floors Wire</span>
+                  <span className="text-white/60 font-mono">{allWireSummary.totalFeet} ft</span>
+                </div>
+              )}
+            </div>
           </div>
         </SidebarSection>
 
@@ -321,6 +345,54 @@ function ReqItem({ label, value }) {
     <div className="flex items-center justify-between text-xs px-1">
       <span className="text-white/50">{label}</span>
       {value ? <CheckCircle2 className="w-3 h-3 text-green-400" /> : <span className="text-white/20">—</span>}
+    </div>
+  );
+}
+
+function summarizeWireByType({ wires = [], devices = [], floorPlans = [], floor }) {
+  const summary = {};
+  let totalFeet = 0;
+
+  (wires || []).forEach((wire) => {
+    const from = devices.find((device) => device.id === wire.from);
+    const to = devices.find((device) => device.id === wire.to);
+    if (!from || !to) return;
+
+    const wireFloor = wire.floor || from.floor || to.floor || 1;
+    if (floor && Number(wireFloor) !== Number(floor)) return;
+
+    const type = wire.type || wire.circuit_type || 'FIELD';
+    const scale = getFloorScale(floorPlans, wireFloor);
+    const feet = Math.round(feetBetween(from, to, scale));
+    if (!summary[type]) {
+      const circuitMeta = CIRCUIT_TYPES.find((circuit) => circuit.value === type);
+      summary[type] = {
+        type,
+        feet: 0,
+        segments: 0,
+        color: circuitMeta?.color || '#94a3b8',
+      };
+    }
+    summary[type].feet += feet;
+    summary[type].segments += 1;
+    totalFeet += feet;
+  });
+
+  return {
+    totalFeet,
+    byType: Object.values(summary).sort((a, b) => a.type.localeCompare(b.type)),
+  };
+}
+
+function WireTypeRow({ wire }) {
+  return (
+    <div className="flex items-center justify-between text-xs px-2 py-0.5">
+      <span className="text-white/50 truncate flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: wire.color }} />
+        {wire.type}
+        <span className="text-white/25 text-[10px]">({wire.segments})</span>
+      </span>
+      <span className="text-white font-mono ml-2">{wire.feet} ft</span>
     </div>
   );
 }

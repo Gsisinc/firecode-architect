@@ -499,6 +499,8 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
           onAutoPlace={handleAutoPlace}
           onExport={() => setShowBOM(true)}
           rooms={rooms}
+          wires={wires}
+          floorPlans={floorPlans}
         />
 
         <div className="flex-1 relative overflow-hidden">
