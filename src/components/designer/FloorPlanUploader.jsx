@@ -4,7 +4,7 @@ import { FileText, ImagePlus, Loader2, Sparkles, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { extractPdfPageInfo } from "@/lib/documentEngine";
+import { extractPdfPageInfo, renderPdfPageToDataUrl } from "@/lib/documentEngine";
 
 const UPLOAD_STEPS = {
   idle: { label: "", progress: 0 },
@@ -37,6 +37,15 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
         let metadata;
         try {
           metadata = await extractPdfPageInfo(localUrl);
+          metadata.pages = await Promise.all(metadata.pages.map(async (page) => {
+            const preview = await renderPdfPageToDataUrl(localUrl, page.page, 2);
+            return {
+              ...page,
+              previewUrl: preview.dataUrl,
+              previewWidth: preview.width,
+              previewHeight: preview.height,
+            };
+          }));
         } finally {
           URL.revokeObjectURL(localUrl);
         }
@@ -47,6 +56,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
           fileName: file.name,
           pageCount: metadata.pageCount,
           pages: metadata.pages,
+          localPdfUrl: localUrl,
         }));
         toast.success(`Imported ${metadata.pageCount} PDF page${metadata.pageCount === 1 ? "" : "s"} as floor plan sheet${metadata.pageCount === 1 ? "" : "s"}`);
       } else {

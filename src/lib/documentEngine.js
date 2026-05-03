@@ -113,6 +113,26 @@ export async function extractPdfPageInfo(fileUrl) {
   };
 }
 
+export async function renderPdfPagesToDataUrls(fileUrl, scale = 2) {
+  const pdfjsLib = await loadPdfjs();
+  const source = fileUrl?.startsWith?.('data:')
+    ? { data: Uint8Array.from(atob(fileUrl.split(',')[1]), char => char.charCodeAt(0)) }
+    : fileUrl;
+  const loadingTask = pdfjsLib.getDocument(source);
+  const pdf = await loadingTask.promise;
+  const pages = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const rendered = await renderPdfPageToDataUrl(fileUrl, pageNumber, scale);
+    pages.push(rendered);
+  }
+
+  return {
+    pageCount: pdf.numPages,
+    pages,
+  };
+}
+
 export async function renderPdfPageToDataUrl(fileUrl, pageNumber = 1, scale = 2) {
   const pdfjsLib = await loadPdfjs();
   const source = fileUrl?.startsWith?.('data:')

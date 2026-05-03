@@ -102,6 +102,21 @@ export default function DesignerSidebar({
           </div>
         </SidebarSection>
 
+        {/* Open-area intelligence zones */}
+        <SidebarSection title="Layout Zones" icon={Square} open={openSection === 'zones'} onToggle={() => toggle('zones')}>
+          <div className="space-y-2">
+            <p className="text-[10px] text-white/35 px-1 leading-snug">
+              Draw rack, aisle, obstruction, and no-device zones inside large sales floors so auto-place can avoid blocked areas.
+            </p>
+            <div className="grid grid-cols-2 gap-1">
+              <ToolBtn active={selectedTool === 'layout_zone_aisle'} onClick={() => onToolSelect('layout_zone_aisle')} icon={<Square className="w-3 h-3 text-emerald-300" />} label="Aisle" />
+              <ToolBtn active={selectedTool === 'layout_zone_rack'} onClick={() => onToolSelect('layout_zone_rack')} icon={<Square className="w-3 h-3 text-amber-300" />} label="Rack" />
+              <ToolBtn active={selectedTool === 'layout_zone_obstruction'} onClick={() => onToolSelect('layout_zone_obstruction')} icon={<Square className="w-3 h-3 text-red-300" />} label="Obstacle" />
+              <ToolBtn active={selectedTool === 'layout_zone_no_device'} onClick={() => onToolSelect('layout_zone_no_device')} icon={<Square className="w-3 h-3 text-slate-300" />} label="No Device" />
+            </div>
+          </div>
+        </SidebarSection>
+
         {/* Circuit selection */}
         <SidebarSection title="Circuits" icon={Network} open={openSection === 'circuits'} onToggle={() => toggle('circuits')}>
           <div className="space-y-2">

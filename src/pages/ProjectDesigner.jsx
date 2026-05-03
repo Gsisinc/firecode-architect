@@ -29,6 +29,7 @@ import {
 import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale";
 import { mergeGeneratedDevices } from "@/lib/designValidation";
 import { renderPdfPageToDataUrl } from "@/lib/documentEngine";
+import { nudgeDevicesOutOfBlockedZones, normalizeDetectedLayoutZones } from "@/lib/layoutZones";
 
 import {
   determineSystemRequirements,
@@ -68,6 +69,7 @@ export default function ProjectDesigner() {
     markup_Takeoff: true,
     markup_Fire_Alarm: true,
     markup_Coordination: true,
+    layout_zones: true,
   });
   const [rightPanel, setRightPanel] = useState(null);
   const [showSubmittal, setShowSubmittal] = useState(false);
@@ -80,6 +82,7 @@ export default function ProjectDesigner() {
   const [localDevices, setLocalDevices] = useState(null);
   const [localFloorPlans, setLocalFloorPlans] = useState(null);
   const [localMarkups, setLocalMarkups] = useState(null);
+  const [localLayoutZones, setLocalLayoutZones] = useState(null);
   const [localDocumentWorkspace, setLocalDocumentWorkspace] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
   const [localWires, setLocalWires] = useState(null);
@@ -97,6 +100,7 @@ export default function ProjectDesigner() {
   const devices = localDevices ?? project?.devices ?? [];
   const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
   const markups = localMarkups ?? project?.markups ?? [];
+  const layoutZones = localLayoutZones ?? project?.layout_zones ?? [];
   const documentWorkspace = localDocumentWorkspace ?? project?.document_workspace ?? null;
   const wires = localWires ?? project?.wires ?? [];
 
@@ -113,6 +117,7 @@ export default function ProjectDesigner() {
       rooms,
       devices,
       markups,
+      layout_zones: layoutZones,
       floor_plans: floorPlans,
       document_workspace: documentWorkspace,
       wires,
@@ -145,6 +150,7 @@ export default function ProjectDesigner() {
             page_number: index + 1,
             page_count: upload.pageCount || 1,
             sheet_text: upload.pages?.[index]?.text || '',
+            rendered_image_url: upload.pages?.[index]?.previewUrl,
           }))
         : [{
             floor_number: activeFloor,
@@ -171,6 +177,7 @@ export default function ProjectDesigner() {
       rooms,
       devices,
       markups,
+      layout_zones: layoutZones,
       floor_plans: updated,
       num_floors: detectedFloors,
       document_workspace: documentWorkspace,
@@ -209,15 +216,18 @@ export default function ProjectDesigner() {
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
 
-    const applyDetectedRooms = (detectedRooms, geometry, successMessage) => {
+    const applyDetectedRooms = (detectedRooms, detectedLayoutZones, geometry, successMessage) => {
       const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
+      const newLayoutZones = [...layoutZones.filter(z => z.floor !== activeFloor), ...detectedLayoutZones];
       const updatedFloorPlans = updateFloorPlanScale(floorPlans, activeFloor, geometry);
       setLocalRooms(newRooms);
+      setLocalLayoutZones(newLayoutZones);
       setLocalFloorPlans(updatedFloorPlans);
       saveMutation.mutate({
         rooms: newRooms,
         devices,
         markups,
+        layout_zones: newLayoutZones,
         floor_plans: updatedFloorPlans,
         wires,
         document_workspace: documentWorkspace,
@@ -302,10 +312,20 @@ YOUR JOB: For every labeled enclosed room/space inside the building walls, repor
 3. The pixel bounding box of the room: x1_px, y1_px, x2_px, y2_px measured from image top-left
 4. The room's WIDTH in feet — read from dimension callouts inside or adjacent to the room, OR estimate from the scale
 5. The room's HEIGHT (depth) in feet — same
+6. Also report major mercantile/open-plan layout zones inside rooms:
+   - aisles (clear customer/service circulation)
+   - racks/shelving/fixture blocks
+   - checkout lanes
+   - high-piled storage or stock/storage fixture zones
+   - columns/structural obstructions
+   - no-device/exclusion zones where devices should not be placed
+
+For each layout zone, return zone_type (aisle|rack|checkout|storage|column|obstruction|no_device|ceiling_zone|other), label/name, x1_px, y1_px, x2_px, y2_px, confidence 0-1, and a short reason.
 
 IMPORTANT: Width and height should be the REAL-WORLD feet dimensions readable from the drawing.
 If a room has a dimension callout like "9'-0\"" that is its actual size — use that, don't guess.
-For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale. Only include enclosed rooms/spaces, not title blocks, notes, legends, or exterior annotations.`,
+For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale. Only include enclosed rooms/spaces, not title blocks, notes, legends, or exterior annotations.
+For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR room boundary and separate rack/aisle/checkout/obstruction layout zones inside it.`,
         file_urls: [analysisImageUrl],
         response_json_schema: {
           type: "object",
@@ -323,6 +343,22 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                   y2_px: { type: "number" },
                   width_ft: { type: "number" },
                   height_ft: { type: "number" }
+                }
+              }
+            },
+            layout_zones: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  zone_type: { type: "string" },
+                  name: { type: "string" },
+                  x1_px: { type: "number" },
+                  y1_px: { type: "number" },
+                  x2_px: { type: "number" },
+                  y2_px: { type: "number" },
+                  confidence: { type: "number" },
+                  reason: { type: "string" }
                 }
               }
             }
@@ -345,14 +381,16 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
       imgW,
       imgH,
     });
+    const detectedLayoutZones = normalizeDetectedLayoutZones(pass2?.layout_zones || [], activeFloor);
 
     if (detectedRooms.length === 0) {
       toast.error("AI did not return any real rooms. No room overlays were saved.");
     } else {
       applyDetectedRooms(
         detectedRooms,
+        detectedLayoutZones,
         geometry,
-        `Detected ${detectedRooms.length} rooms at ${pxPerFt.toFixed(1)}px/ft scale (${scaleSource}).`
+        `Detected ${detectedRooms.length} rooms and ${detectedLayoutZones.length} layout zones at ${pxPerFt.toFixed(1)}px/ft scale (${scaleSource}).`
       );
     }
     setAnalyzingFloor(false);
@@ -410,6 +448,9 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
     const sprinklerDevices = calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor);
     allDevices.push(...sprinklerDevices);
 
+    const activeFloorZones = layoutZones.filter((zone) => zone.floor === activeFloor);
+    allDevices = nudgeDevicesOutOfBlockedZones(allDevices, floorRooms, activeFloorZones);
+
     // Assign addresses
     allDevices = allDevices.map((d, i) => ({
       ...d,
@@ -421,7 +462,7 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
     const mergedDevices = mergeGeneratedDevices(devices, allDevices, activeFloor);
     setLocalDevices(mergedDevices);
     toast.success(`Auto-placed ${allDevices.length} generated devices on floor ${activeFloor}; manual devices were preserved`);
-  }, [project, rooms, devices, activeFloor, analysisResults]);
+  }, [project, rooms, devices, activeFloor, analysisResults, layoutZones]);
 
   const handleAddRoom = (roomData) => {
     const newRoom = {
@@ -599,7 +640,10 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                   saveMutation.mutate({
                     rooms,
                     devices,
+                    markups,
+                    layout_zones: layoutZones,
                     floor_plans: floorPlans,
+                    wires,
                     document_workspace: workspace,
                     analysis_results: analysisResults,
                     status: devices.length > 0 ? "in_progress" : "draft",
@@ -616,12 +660,14 @@ For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale.
                 floorPlanPreviewUrl={currentFloorPlan?.rendered_image_url}
                 floorPlanPageNumber={currentFloorPlan?.page_number || 1}
                 rooms={rooms}
+                layoutZones={layoutZones}
                 devices={devices}
                 layers={layers}
                 selectedTool={selectedTool}
                 snapGrid={snapGrid}
                 onDevicesChange={setLocalDevices}
                 onRoomsChange={setLocalRooms}
+                onLayoutZonesChange={setLocalLayoutZones}
                 onDeviceSelect={setSelectedDevice}
                 selectedDevice={selectedDevice}
                 currentFloor={activeFloor}

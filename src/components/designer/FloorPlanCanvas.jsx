@@ -3,6 +3,7 @@ import { routeCircuits, drawCircuitRoutes } from '@/lib/circuitRouter';
 import { createMarkupFromTool, formatMarkupMeasurement, getMarkupBounds, getMarkupLayerKey, getMarkupTool, isMarkupTool } from '@/lib/bluebeamMarkupTools';
 import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
 import { CIRCUIT_TYPES, DEVICE_PALETTE } from '@/components/designer/DesignerSidebar';
+import { getLayoutZoneMeta, isLayoutZoneTool } from '@/lib/layoutZones';
 import { Copy, Edit3, MoreVertical, Trash2, Unplug, Wrench, X } from 'lucide-react';
 
 const DEVICE_RADIUS = 14;
@@ -307,17 +308,40 @@ function drawMarkup(ctx, markup, pxPerFt) {
   ctx.restore();
 }
 
+function drawLayoutZone(ctx, zone, selected = false) {
+  const meta = getLayoutZoneMeta(zone.zone_type || zone.type);
+  ctx.save();
+  ctx.strokeStyle = meta.color;
+  ctx.fillStyle = `${meta.color}${selected ? '24' : '16'}`;
+  ctx.lineWidth = selected ? 2.5 : 1.6;
+  ctx.setLineDash(meta.dashed ? [8, 4] : []);
+  ctx.beginPath();
+  ctx.rect(zone.x, zone.y, zone.width, zone.height);
+  ctx.fill();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = 'bold 9px Inter, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = meta.color;
+  ctx.fillText(zone.name || meta.label, zone.x + 6, zone.y + 6);
+  ctx.restore();
+}
+
 export default function FloorPlanCanvas({
   floorPlanUrl,
   floorPlanFileType,
+  floorPlanPreviewUrl,
   floorPlanPageNumber = 1,
   devices = [],
   rooms = [],
+  layoutZones = [],
   layers = {},
   selectedTool = 'select',
   snapGrid = false,
   onDevicesChange,
   onRoomsChange,
+  onLayoutZonesChange,
   onDeviceSelect,
   selectedDevice,
   currentFloor,
@@ -341,6 +365,7 @@ export default function FloorPlanCanvas({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(null);
   const [drawingRoom, setDrawingRoom] = useState(null);
+  const [drawingLayoutZone, setDrawingLayoutZone] = useState(null);
   const [drawingMarkup, setDrawingMarkup] = useState(null);
   const [wireStart, setWireStart] = useState(null);
   const [mouseWorld, setMouseWorld] = useState(null);
@@ -407,15 +432,16 @@ export default function FloorPlanCanvas({
 
   useEffect(() => {
     let cancelled = false;
-    if (!floorPlanUrl) {
+    const sourceUrl = floorPlanPreviewUrl || floorPlanUrl;
+    if (!sourceUrl) {
       setFloorImg(null);
       return undefined;
     }
 
-    if (floorPlanFileType === 'application/pdf' || /\.pdf($|\?)/i.test(floorPlanUrl)) {
+    if (!floorPlanPreviewUrl && (floorPlanFileType === 'application/pdf' || /\.pdf($|\?)/i.test(sourceUrl))) {
       (async () => {
         try {
-          const renderedPage = await renderPdfPageToDataUrl(floorPlanUrl, floorPlanPageNumber, 2);
+          const renderedPage = await renderPdfPageToDataUrl(sourceUrl, floorPlanPageNumber, 2);
           const img = new Image();
           img.onload = () => {
             if (cancelled) return;
@@ -455,11 +481,11 @@ export default function FloorPlanCanvas({
         y: (container.clientHeight - img.height * fitScale) / 2,
       });
     };
-    img.src = floorPlanUrl;
+    img.src = sourceUrl;
     return () => {
       cancelled = true;
     };
-  }, [floorPlanFileType, floorPlanPageNumber, floorPlanUrl]);
+  }, [floorPlanFileType, floorPlanPageNumber, floorPlanPreviewUrl, floorPlanUrl]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -556,6 +582,54 @@ export default function FloorPlanCanvas({
       ctx.setLineDash([]);
       if (w > 20 && h > 20) {
         drawLabel(ctx, `${Math.round(w)}x${Math.round(h)}px`, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, '#f97316');
+      }
+    }
+
+    if (layers.layout_zones !== false) {
+      layoutZones.filter((zone) => zone.floor === currentFloor).forEach((zone) => {
+        const style = getLayoutZoneStyle(zone.zone_type);
+        ctx.save();
+        ctx.strokeStyle = style.color;
+        ctx.fillStyle = style.fill;
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash(style.dash);
+        ctx.beginPath();
+        ctx.rect(zone.x, zone.y, zone.width, zone.height);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (layers.labels !== false) {
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          const label = zone.name || style.label;
+          ctx.font = 'bold 9px Inter, sans-serif';
+          const labelWidth = ctx.measureText(label).width + 8;
+          ctx.fillRect(zone.x + 4, zone.y + 4, labelWidth, 15);
+          ctx.fillStyle = style.color;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(label, zone.x + 8, zone.y + 7);
+        }
+        ctx.restore();
+      });
+    }
+
+    if (drawingLayoutZone) {
+      const { x, y, ex, ey, zoneType } = drawingLayoutZone;
+      const style = getLayoutZoneStyle(zoneType);
+      const w = Math.abs(ex - x);
+      const h = Math.abs(ey - y);
+      ctx.save();
+      ctx.strokeStyle = style.color;
+      ctx.fillStyle = style.fill;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.rect(Math.min(x, ex), Math.min(y, ey), w, h);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      if (w > 20 && h > 20) {
+        drawLabel(ctx, style.label, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, style.color);
       }
     }
 
@@ -664,7 +738,7 @@ export default function FloorPlanCanvas({
     }
 
     ctx.restore();
-  }, [canvasRef, currentFloor, devices, drawingMarkup, drawingRoom, dropPreview, floorImg, hoveredDeviceId, layers, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
+  }, [canvasRef, currentFloor, devices, drawingLayoutZone, drawingMarkup, drawingRoom, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
 
   const fitToCanvas = useCallback(() => {
     if (floorImg) {
@@ -722,6 +796,17 @@ export default function FloorPlanCanvas({
 
     if (selectedTool === 'room') {
       setDrawingRoom({ x: world.x, y: world.y, ex: world.x, ey: world.y });
+      return;
+    }
+
+    if (isLayoutZoneTool(selectedTool)) {
+      setDrawingLayoutZone({
+        zoneType: selectedTool.replace('layout_zone_', ''),
+        x: world.x,
+        y: world.y,
+        ex: world.x,
+        ey: world.y,
+      });
       return;
     }
 
@@ -816,6 +901,10 @@ export default function FloorPlanCanvas({
       setDrawingRoom((room) => room ? { ...room, ex: world.x, ey: world.y } : null);
       return;
     }
+    if (drawingLayoutZone && !dragging) {
+      setDrawingLayoutZone((zone) => zone ? { ...zone, ex: world.x, ey: world.y } : null);
+      return;
+    }
     if (drawingMarkup && !dragging) {
       setDrawingMarkup((markup) => markup ? { ...markup, x2: snapToGrid(world.x, snapGrid), y2: snapToGrid(world.y, snapGrid) } : null);
       return;
@@ -859,6 +948,28 @@ export default function FloorPlanCanvas({
       }
       setDrawingRoom(null);
     }
+    if (isLayoutZoneTool(selectedTool) && drawingLayoutZone) {
+      const { x, y, ex, ey, zoneType } = drawingLayoutZone;
+      const rx = Math.min(x, ex);
+      const ry = Math.min(y, ey);
+      const rw = Math.abs(ex - x);
+      const rh = Math.abs(ey - y);
+      if (rw > 15 && rh > 15) {
+        const meta = getLayoutZoneMeta(zoneType);
+        onLayoutZonesChange?.([...(layoutZones || []), {
+          id: `zone-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          floor: currentFloor,
+          zone_type: zoneType,
+          name: meta.label,
+          x: Math.round(rx),
+          y: Math.round(ry),
+          width: Math.round(rw),
+          height: Math.round(rh),
+          source: 'manual',
+        }]);
+      }
+      setDrawingLayoutZone(null);
+    }
     if (isMarkupTool(selectedTool) && drawingMarkup) {
       const tool = getMarkupTool(selectedTool);
       const bounds = getMarkupBounds(drawingMarkup);
@@ -868,7 +979,7 @@ export default function FloorPlanCanvas({
       setDrawingMarkup(null);
     }
     setDragging(null);
-  }, [currentFloor, drawingMarkup, drawingRoom, markups, onMarkupsChange, onRoomNameRequest, onRoomsChange, rooms, selectedTool]);
+  }, [currentFloor, drawingLayoutZone, drawingMarkup, drawingRoom, layoutZones, markups, onLayoutZonesChange, onMarkupsChange, onRoomNameRequest, onRoomsChange, rooms, selectedTool]);
 
   const handleWheel = useCallback((event) => {
     event.preventDefault();
