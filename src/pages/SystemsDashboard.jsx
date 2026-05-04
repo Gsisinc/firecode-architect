@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { base44 } from '@/api/base44Client';
@@ -8,6 +8,8 @@ import { Plus, CheckCircle2, Flame, Shield, Video, Speaker, Cable } from 'lucide
 import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
 import SystemsAppShell from '@/components/systems/SystemsAppShell';
 import DashboardProjectMiniature, { thumbnailDisciplineForProject } from '@/components/systems/DashboardProjectMiniature';
+
+const ACTIVE_PROJECT_KEY = 'systemsActiveProjectId';
 
 const TAB_ITEMS = [
   { id: DISCIPLINE_IDS.FIRE_ALARM, icon: Flame, description: 'NFPA-oriented device palette, SLC/NAC circuits, life-safety workflow, auto-place, simulation, and riser views.' },
@@ -18,21 +20,42 @@ const TAB_ITEMS = [
 ];
 
 export default function SystemsDashboard() {
-  const { id: projectId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const projectIdParam = searchParams.get('project');
   const [selectedDiscipline, setSelectedDiscipline] = useState(DISCIPLINE_IDS.FIRE_ALARM);
   const [search, setSearch] = useState('');
-
-  const { data: project, isLoading: projectLoading } = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: () => base44.entities.Project.filter({ id: projectId }),
-    select: (data) => data[0],
-    enabled: !!projectId,
-  });
 
   const { data: projects = [], isLoading: listLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: () => base44.entities.Project.list('-updated_date', 50),
+  });
+
+  const resolvedProjectId = useMemo(() => {
+    if (!projects.length) return null;
+    if (projectIdParam && projects.some((p) => p.id === projectIdParam)) return projectIdParam;
+    try {
+      const stored = localStorage.getItem(ACTIVE_PROJECT_KEY);
+      if (stored && projects.some((p) => p.id === stored)) return stored;
+    } catch {
+      /* ignore */
+    }
+    return projects[0].id;
+  }, [projects, projectIdParam]);
+
+  useEffect(() => {
+    if (listLoading) return;
+    if (!resolvedProjectId) return;
+    if (projectIdParam !== resolvedProjectId) {
+      setSearchParams({ project: resolvedProjectId }, { replace: true });
+    }
+  }, [listLoading, projectIdParam, resolvedProjectId, setSearchParams]);
+
+  const { data: project, isLoading: projectLoading } = useQuery({
+    queryKey: ['project', resolvedProjectId],
+    queryFn: () => base44.entities.Project.filter({ id: resolvedProjectId }),
+    select: (data) => data[0],
+    enabled: !!resolvedProjectId,
   });
 
   const filteredProjects = useMemo(() => {
@@ -46,22 +69,29 @@ export default function SystemsDashboard() {
 
   const selectedCfg = DISCIPLINES[selectedDiscipline];
 
-  if (projectLoading || !project) {
-    return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center text-slate-500 text-sm">
-        Loading project…
-      </div>
-    );
-  }
+  const setActiveProject = (id) => {
+    try {
+      localStorage.setItem(ACTIVE_PROJECT_KEY, id);
+    } catch {
+      /* ignore */
+    }
+    setSearchParams({ project: id }, { replace: true });
+  };
+
+  const subtitle = (() => {
+    if (listLoading) return 'Loading projects…';
+    if (!projects.length) return 'Create a project to open designers and build floor plans.';
+    if (projectLoading || !project) return 'Loading project…';
+    return [project.name, project.address].filter(Boolean).join(' · ');
+  })();
 
   return (
-    <SystemsAppShell projectId={projectId} searchValue={search} onSearchChange={setSearch}>
+    <SystemsAppShell projectId={resolvedProjectId || undefined} searchValue={search} onSearchChange={setSearch}>
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Systems dashboard</h1>
           <p className="text-slate-500 mt-1 max-w-2xl text-sm leading-relaxed">
-            {project.name}
-            {project.address ? ` · ${project.address}` : ''}
+            {subtitle}
           </p>
         </div>
         <Button
@@ -121,21 +151,24 @@ export default function SystemsDashboard() {
           <div>
             <p className="text-sm font-medium text-slate-900">Open {selectedCfg.label} designer</p>
             <p className="text-xs text-slate-500 mt-1 max-w-xl">
-              Same floor plan workflow; palette and circuits switch for this discipline.
+              {resolvedProjectId
+                ? 'Same floor plan workflow; palette and circuits switch for this discipline.'
+                : 'Select or create a project below first.'}
             </p>
           </div>
           <Button
             type="button"
-            className="shrink-0 text-white border-0 shadow-lg rounded-full px-6"
+            disabled={!resolvedProjectId}
+            className="shrink-0 text-white border-0 shadow-lg rounded-full px-6 disabled:opacity-50"
             style={{ backgroundColor: selectedCfg.theme.primary }}
-            onClick={() => navigate(`/project/${projectId}/designer/${selectedDiscipline}`)}
+            onClick={() => resolvedProjectId && navigate(`/project/${resolvedProjectId}/designer/${selectedDiscipline}`)}
           >
             Open designer
           </Button>
         </div>
       </section>
 
-      <section>
+      <section id="recent-projects">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">Recent projects</h2>
         {listLoading ? (
           <p className="text-sm text-slate-500">Loading projects…</p>
@@ -150,12 +183,12 @@ export default function SystemsDashboard() {
             {filteredProjects.map((p) => {
               const thumbDisc = thumbnailDisciplineForProject(p.id);
               const tcfg = DISCIPLINES[thumbDisc];
-              const isCurrent = p.id === projectId;
+              const isCurrent = p.id === resolvedProjectId;
               return (
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => navigate(`/project/${p.id}/systems`)}
+                  onClick={() => setActiveProject(p.id)}
                   className={`text-left rounded-2xl border bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 ${
                     isCurrent ? 'ring-2 ring-red-500/40 border-red-200' : 'border-slate-200'
                   }`}

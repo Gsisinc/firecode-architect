@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useCallback } from 'react';
 import {
   LayoutDashboard,
   FolderKanban,
@@ -25,11 +26,35 @@ const DISCIPLINE_NAV = [
   { id: DISCIPLINE_IDS.LOW_VOLTAGE, icon: Cable },
 ];
 
+function homeSearch(projectId) {
+  return projectId ? `?project=${encodeURIComponent(projectId)}` : '';
+}
+
 const MAIN_NAV = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: (projectId) => `/project/${projectId}/systems`, match: (pathname, projectId) => pathname === `/project/${projectId}/systems` },
-  { label: 'Projects', icon: FolderKanban, path: () => '/', match: (pathname) => pathname === '/' },
-  { label: 'Code reference', icon: BookOpen, path: () => '/code-reference', match: (pathname) => pathname.startsWith('/code-reference') },
-  { label: 'Project setup', icon: Settings, path: (projectId) => `/project/${projectId}/setup`, match: (pathname, projectId) => pathname === `/project/${projectId}/setup` },
+  {
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+    path: (projectId) => `/${homeSearch(projectId)}`,
+    match: (pathname, hash) => pathname === '/' && !hash?.replace('#', ''),
+  },
+  {
+    label: 'Projects',
+    icon: FolderKanban,
+    path: (projectId) => `/${homeSearch(projectId)}#recent-projects`,
+    match: (pathname, hash) => pathname === '/' && hash === '#recent-projects',
+  },
+  {
+    label: 'Code reference',
+    icon: BookOpen,
+    path: () => '/code-reference',
+    match: (pathname) => pathname.startsWith('/code-reference'),
+  },
+  {
+    label: 'Project setup',
+    icon: Settings,
+    path: (projectId) => (projectId ? `/project/${projectId}/setup` : '/'),
+    match: (pathname, projectId) => !!projectId && pathname === `/project/${projectId}/setup`,
+  },
 ];
 
 function displayFirstName(user) {
@@ -51,9 +76,14 @@ export default function SystemsAppShell({
   children,
 }) {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   const { user } = useAuth();
   const greetingName = displayFirstName(user) || 'there';
+
+  const openDiscipline = useCallback((disciplineId) => {
+    if (!projectId) return;
+    navigate(`/project/${projectId}/designer/${disciplineId}`);
+  }, [navigate, projectId]);
 
   return (
     <div className="min-h-screen flex bg-slate-100 text-slate-900">
@@ -72,7 +102,20 @@ export default function SystemsAppShell({
           <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Menu</p>
           {MAIN_NAV.map(({ label, icon: Icon, path, match }) => {
             const to = path(projectId);
-            const active = match(pathname, projectId);
+            const active = label === 'Project setup' ? match(pathname, projectId) : match(pathname, hash);
+            const isSetupWithoutProject = label === 'Project setup' && !projectId;
+            if (isSetupWithoutProject) {
+              return (
+                <span
+                  key={label}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 cursor-not-allowed"
+                  title="Select a project from the dashboard first"
+                >
+                  <Icon className="w-4 h-4 shrink-0 opacity-50" />
+                  {label}
+                </span>
+              );
+            }
             return (
               <Link
                 key={label}
@@ -92,14 +135,16 @@ export default function SystemsAppShell({
           <p className="px-3 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Disciplines</p>
           {DISCIPLINE_NAV.map(({ id, icon: Icon }) => {
             const cfg = DISCIPLINES[id];
-            const to = `/project/${projectId}/designer/${id}`;
             const active = pathname.includes(`/designer/${id}`);
+            const disabled = !projectId;
             return (
               <button
                 key={id}
                 type="button"
-                onClick={() => navigate(to)}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left transition-colors ${
+                disabled={disabled}
+                title={disabled ? 'Select a project on the dashboard first' : undefined}
+                onClick={() => openDiscipline(id)}
+                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${
                   active
                     ? 'bg-white/10 text-white'
                     : 'text-slate-400 hover:text-white hover:bg-white/5'

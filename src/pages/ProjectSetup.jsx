@@ -90,7 +90,12 @@ export default function ProjectSetup() {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       const projectId = result?.id || id;
       toast({ title: 'Project saved', description: 'Code analysis complete.' });
-      navigate(`/project/${projectId}/systems`);
+      try {
+        localStorage.setItem('systemsActiveProjectId', projectId);
+      } catch {
+        /* ignore */
+      }
+      navigate(`/?project=${encodeURIComponent(projectId)}`);
     },
     onError: (error) => {
       toast({

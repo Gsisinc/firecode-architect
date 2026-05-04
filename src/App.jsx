@@ -6,16 +6,21 @@ import { BrowserRouter as Router, Navigate, Route, Routes, useParams } from 'rea
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
-import ProjectList from './pages/ProjectList';
 import ProjectSetup from './pages/ProjectSetup';
 import ProjectDesigner from './pages/ProjectDesigner';
 import SystemsDashboard from './pages/SystemsDashboard';
 import CodeReference from './pages/CodeReference';
 
-/** Bare `/designer` always sends users to the per-project systems dashboard to pick a discipline. */
+/** Bare `/designer` opens the main dashboard with that project selected. */
 function RedirectProjectToSystems() {
   const { id } = useParams();
-  return <Navigate to={`/project/${id}/systems`} replace />;
+  return <Navigate to={`/?project=${encodeURIComponent(id)}`} replace />;
+}
+
+/** Legacy bookmarked URL → main dashboard. */
+function RedirectLegacySystemsRoute() {
+  const { id } = useParams();
+  return <Navigate to={`/?project=${encodeURIComponent(id)}`} replace />;
 }
 
 const AuthenticatedApp = () => {
@@ -40,10 +45,10 @@ const AuthenticatedApp = () => {
 
   return (
     <Routes>
-      <Route path="/" element={<ProjectList />} />
+      <Route path="/" element={<SystemsDashboard />} />
       <Route path="/project/new" element={<ProjectSetup />} />
       <Route path="/project/:id/setup" element={<ProjectSetup />} />
-      <Route path="/project/:id/systems" element={<SystemsDashboard />} />
+      <Route path="/project/:id/systems" element={<RedirectLegacySystemsRoute />} />
       <Route path="/project/:id/designer" element={<RedirectProjectToSystems />} />
       <Route path="/project/:id/designer/:discipline" element={<ProjectDesigner />} />
       <Route path="/code-reference" element={<CodeReference />} />
