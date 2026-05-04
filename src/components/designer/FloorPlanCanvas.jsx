@@ -345,8 +345,33 @@ function makeDeviceLabel(type, existingDevices, palette) {
   return `${prefix}-${String(count).padStart(3, '0')}`;
 }
 
+/** Boresight handle position in world px (matches drawCameraFov geometry). */
+function getCameraFovHandleWorld(device, pxPerFt) {
+  if (!device?.type?.startsWith('cam_')) return null;
+  const rangeFt = Number(device.fov_range_ft) > 0 ? Number(device.fov_range_ft) : 35;
+  const aimDeg = Number.isFinite(Number(device.fov_aim_deg)) ? Number(device.fov_aim_deg) : 0;
+  const scale = Math.max(pxPerFt || 3, 1);
+  const r = rangeFt * scale;
+  const aim = aimDeg * (Math.PI / 180);
+  return {
+    x: device.x + Math.cos(aim) * r * 0.92,
+    y: device.y + Math.sin(aim) * r * 0.92,
+    r,
+    aimRad: aim,
+  };
+}
+
+const FOV_HANDLE_HIT_PX = 12;
+
+function hitCameraFovHandle(selectedDevice, world, currentFloor, pxPerFt) {
+  if (!selectedDevice?.type?.startsWith('cam_') || !sameFloor(selectedDevice.floor, currentFloor)) return false;
+  const h = getCameraFovHandleWorld(selectedDevice, pxPerFt);
+  if (!h) return false;
+  return Math.hypot(world.x - h.x, world.y - h.y) <= FOV_HANDLE_HIT_PX;
+}
+
 /** Horizontal FOV wedge in canvas space; range uses pxPerFt when set, else ~3 px per ft. */
-function drawCameraFov(ctx, device, pxPerFt) {
+function drawCameraFov(ctx, device, pxPerFt, isSelected = false) {
   if (!device?.type?.startsWith('cam_')) return;
   const deg = Number(device.fov_degrees) > 0 ? Number(device.fov_degrees) : 90;
   const rangeFt = Number(device.fov_range_ft) > 0 ? Number(device.fov_range_ft) : 35;
@@ -367,6 +392,23 @@ function drawCameraFov(ctx, device, pxPerFt) {
   ctx.lineWidth = 1.25;
   ctx.fill();
   ctx.stroke();
+  if (isSelected) {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(r * 0.92, 0);
+    ctx.strokeStyle = 'rgba(180, 83, 9, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(r * 0.92, 0, 7, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.strokeStyle = '#b45309';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -696,7 +738,7 @@ function drawFloorPlanScene(ctx, scene) {
 
   devices
     .filter((device) => sameFloor(device.floor, currentFloor) && device.type?.startsWith('cam_'))
-    .forEach((device) => drawCameraFov(ctx, device, pxPerFt));
+    .forEach((device) => drawCameraFov(ctx, device, pxPerFt, selectedDevice?.id === device.id));
 
   devices.filter((device) => sameFloor(device.floor, currentFloor)).forEach((device) => {
     if (device.x == null || device.y == null) return;
@@ -801,6 +843,11 @@ export default function FloorPlanCanvas({
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [dropPreview, setDropPreview] = useState(null);
   const [toolbarDismissedDeviceId, setToolbarDismissedDeviceId] = useState(null);
+  const [hoverFovHandle, setHoverFovHandle] = useState(false);
+
+  useEffect(() => {
+    if (!selectedDevice?.type?.startsWith('cam_')) setHoverFovHandle(false);
+  }, [selectedDevice?.id, selectedDevice?.type]);
 
   const activeToolbarDevice = useMemo(() => {
     const id = hoveredDeviceId || selectedDevice?.id;
@@ -1093,6 +1140,14 @@ export default function FloorPlanCanvas({
     }
 
     if (selectedTool === 'select' || !selectedTool) {
+      if (
+        selectedDevice?.type?.startsWith('cam_') &&
+        sameFloor(selectedDevice.floor, currentFloor) &&
+        hitCameraFovHandle(selectedDevice, world, currentFloor, pxPerFt)
+      ) {
+        setDragging({ type: 'fov_aim', id: selectedDevice.id });
+        return;
+      }
       if (hit) {
         onDeviceSelect?.(hit);
         setHoveredDeviceId(hit.id);
@@ -1102,7 +1157,7 @@ export default function FloorPlanCanvas({
         setDragging({ type: 'pan', start: { x: event.clientX - offset.x, y: event.clientY - offset.y } });
       }
     }
-  }, [addDeviceAt, currentFloor, deleteDevice, devices, disciplineId, markups, offset, onDeviceSelect, onDevicesChange, onMarkupsChange, onWiresChange, selectedCableType, selectedCircuitId, selectedCircuitType, selectedTool, snapGrid, toWorld, wireStart, wires]);
+  }, [addDeviceAt, currentFloor, deleteDevice, devices, disciplineId, markups, offset, onDeviceSelect, onDevicesChange, onMarkupsChange, onWiresChange, pxPerFt, selectedCableType, selectedCircuitId, selectedCircuitType, selectedDevice, selectedTool, snapGrid, toWorld, wireStart, wires]);
 
   const handleMouseMove = useCallback((event) => {
     const world = toWorld(event);
@@ -1112,6 +1167,14 @@ export default function FloorPlanCanvas({
         const hit = deviceHitTest(devices, currentFloor, world, 8);
         if (hit?.id !== toolbarDismissedDeviceId) setToolbarDismissedDeviceId(null);
         setHoveredDeviceId(hit?.id || null);
+      }
+      if ((selectedTool === 'select' || !selectedTool) && selectedDevice?.type?.startsWith('cam_')) {
+        setHoverFovHandle(
+          sameFloor(selectedDevice.floor, currentFloor) &&
+            hitCameraFovHandle(selectedDevice, world, currentFloor, pxPerFt)
+        );
+      } else {
+        setHoverFovHandle(false);
       }
     }
     if (drawingRoom && !dragging) {
@@ -1135,8 +1198,20 @@ export default function FloorPlanCanvas({
           ? { ...device, x: snapToGrid(world.x - dragging.startX, snapGrid), y: snapToGrid(world.y - dragging.startY, snapGrid) }
           : device
       )));
+    } else if (dragging.type === 'fov_aim') {
+      const d = devices.find((x) => x.id === dragging.id);
+      if (d?.x != null && d?.y != null) {
+        let deg = (Math.atan2(world.y - d.y, world.x - d.x) * 180) / Math.PI;
+        if (event.shiftKey) {
+          deg = Math.round(deg / 15) * 15;
+        }
+        const next = devices.map((dev) => (dev.id === dragging.id ? { ...dev, fov_aim_deg: deg } : dev));
+        onDevicesChange(next);
+        const updated = next.find((x) => x.id === dragging.id);
+        if (updated) onDeviceSelect?.(updated);
+      }
     }
-  }, [currentFloor, devices, dragging, drawingLayoutZone, drawingMarkup, drawingRoom, onDevicesChange, selectedTool, snapGrid, toWorld]);
+  }, [currentFloor, devices, dragging, drawingLayoutZone, drawingMarkup, drawingRoom, onDeviceSelect, onDevicesChange, pxPerFt, selectedDevice, selectedTool, snapGrid, toWorld, toolbarDismissedDeviceId]);
 
   const handleMouseUp = useCallback(() => {
     if (selectedTool === 'room' && drawingRoom) {
@@ -1378,11 +1453,13 @@ export default function FloorPlanCanvas({
   );
 
   const getCursor = () => {
+    if (dragging?.type === 'fov_aim') return 'grabbing';
     if (selectedTool === 'pan' || dragging?.type === 'pan') return dragging ? 'grabbing' : 'grab';
     if (selectedTool === 'room' || isMarkupTool(selectedTool) || isLayoutZoneTool(selectedTool)) return 'crosshair';
     if (selectedTool === 'delete') return 'not-allowed';
     if (selectedTool === 'wire') return wireStart ? 'cell' : 'crosshair';
     if (selectedTool?.startsWith('place_device_')) return 'copy';
+    if (hoverFovHandle && (selectedTool === 'select' || !selectedTool)) return 'grab';
     if (hoveredDeviceId) return 'move';
     return 'default';
   };
@@ -1408,6 +1485,7 @@ export default function FloorPlanCanvas({
           setDrawingRoom(null);
           setDrawingMarkup(null);
           setHoveredDeviceId(null);
+          setHoverFovHandle(false);
         }}
         onWheel={handleWheel}
       />

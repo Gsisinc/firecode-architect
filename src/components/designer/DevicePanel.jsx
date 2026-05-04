@@ -201,6 +201,9 @@ export default function DevicePanel({
                     <PanelInput value={form.mount_height_aff || ''} onChange={e => handleChange('mount_height_aff', e.target.value)} placeholder="e.g. 10 ft AFF" />
                   </Field>
                 </div>
+                <p className="text-sm text-slate-600">
+                  On the plan, select the camera and drag the white dot at the end of the dashed boresight to rotate aim. Hold Shift for 15° steps.
+                </p>
                 <h3 className="text-xl text-slate-950 pt-2">Imaging &amp; stream</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Resolution">
