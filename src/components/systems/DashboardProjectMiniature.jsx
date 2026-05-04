@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { DISCIPLINE_IDS, DISCIPLINES } from '@/lib/disciplines';
 
 function hashSeed(str) {
@@ -13,8 +14,17 @@ function rnd(seed, i) {
   return ((seed >> (i * 5)) & 0x7fff) / 0x7fff;
 }
 
-/** Small floor-plan-style preview with discipline-colored symbols (mockup-style). */
-export default function DashboardProjectMiniature({ projectId, disciplineId }) {
+/** First uploaded floor plan image on the project, if any. */
+export function getFirstFloorPlanPreviewUrl(project) {
+  if (!project?.floor_plans || !Array.isArray(project.floor_plans)) return null;
+  for (const fp of project.floor_plans) {
+    const url = typeof fp?.image_url === 'string' ? fp.image_url.trim() : '';
+    if (url) return url;
+  }
+  return null;
+}
+
+function SvgFallback({ projectId, disciplineId }) {
   const seed = hashSeed(`${projectId}-${disciplineId}`);
   const primary = DISCIPLINES[disciplineId]?.theme?.primary || '#64748b';
   const w = 280;
@@ -95,4 +105,30 @@ export default function DashboardProjectMiniature({ projectId, disciplineId }) {
       )}
     </svg>
   );
+}
+
+/**
+ * Card thumbnail: real first floor plan image from the project when uploaded;
+ * otherwise discipline SVG placeholder.
+ */
+export default function DashboardProjectMiniature({ project, projectId, disciplineId }) {
+  const planUrl = getFirstFloorPlanPreviewUrl(project);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (planUrl && !imgFailed) {
+    return (
+      <div className="w-full h-full min-h-[8rem] bg-slate-200 relative overflow-hidden flex items-center justify-center">
+        <img
+          src={planUrl}
+          alt=""
+          className="w-full h-full min-h-[8rem] object-cover object-center"
+          loading="lazy"
+          decoding="async"
+          onError={() => setImgFailed(true)}
+        />
+      </div>
+    );
+  }
+
+  return <SvgFallback projectId={projectId} disciplineId={disciplineId} />;
 }

@@ -199,7 +199,7 @@ export default function ProjectsHub() {
               className="group text-left rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm hover:shadow-md hover:border-slate-300 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1e3a5f]/40"
             >
               <div className="aspect-[4/3] bg-slate-100 border-b border-slate-100 max-h-56">
-                <DashboardProjectMiniature projectId={p.id} disciplineId={discipline} />
+                <DashboardProjectMiniature project={p} projectId={p.id} disciplineId={discipline} />
               </div>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2">
