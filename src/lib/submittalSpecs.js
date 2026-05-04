@@ -35,8 +35,9 @@ export function getLegendRows(devices = [], equipmentSpecs = {}) {
   const grouped = {};
   devices.forEach((d) => {
     const type = d.type || 'other';
-    if (!grouped[type]) grouped[type] = { type, qty: 0, subtype: d.subtype };
+    if (!grouped[type]) grouped[type] = { type, qty: 0, subtype: d.subtype, hasExisting: false };
     grouped[type].qty += 1;
+    if (d.existing === true || d.is_existing === true) grouped[type].hasExisting = true;
   });
   const symbolMap = {
     smoke_detector: 'S',
@@ -62,6 +63,7 @@ export function getLegendRows(devices = [], equipmentSpecs = {}) {
     return {
       symbol: symbolMap[g.type] || '—',
       qty: g.qty,
+      existing: g.hasExisting ? 'X' : '',
       manufacturer: spec.manufacturer || def.manufacturer,
       model: spec.model || def.model,
       description: g.type.replace(/_/g, ' '),

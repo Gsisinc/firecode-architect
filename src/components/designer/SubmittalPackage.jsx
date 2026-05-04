@@ -9,6 +9,55 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { runSubmittalPackagePdf } from "@/lib/submittalPackagePdf";
 
+const DEFAULT_FA0_META = {
+  scope_of_work: "",
+  contractor_license: "",
+  prepared_by: "",
+  checked_by: "",
+  project_manager: "",
+  project_number: "",
+  submittal_date: "",
+  cover_title_lines:
+    "COVER SHEET\nLEGEND, BATTERY CALC & OPS MATRIX",
+  drawing_index_lines:
+    "FA-0 — Legend, battery calculations & communication matrix\nFA-1 — Floor plan, general notes, riser & zone schedule\nFA-2 — Details / as-builts (as applicable)",
+  site_map_image_data_url: "",
+  central_station_ccn: "",
+  central_station_file_no: "",
+  central_station_vol_no: "",
+  codes_adopted: "",
+  building_occupancy_type: "",
+  building_occupancy_load: "",
+  building_total_area_sf: "",
+  building_sprinklered: "",
+  building_stories: "",
+  building_construction_type: "",
+  designer_name: "",
+  designer_nicet: "",
+  designer_phone: "",
+  battery_callout: "",
+  monitoring_notes: "",
+  revisions: [
+    { date: "", by: "", text: "" },
+    { date: "", by: "", text: "" },
+    { date: "", by: "", text: "" },
+  ],
+};
+
+function packSubmittalMetaForSave(raw) {
+  const m = { ...raw };
+  if (typeof m.cover_title_lines === "string") {
+    m.cover_title_lines = m.cover_title_lines.split(/\r?\n/).filter(Boolean);
+  }
+  if (typeof m.drawing_index_lines === "string") {
+    m.drawing_index_lines = m.drawing_index_lines.split(/\r?\n/).filter(Boolean);
+  }
+  if (Array.isArray(m.revisions)) {
+    m.revisions = m.revisions.filter((r) => r && (r.date || r.by || r.text));
+  }
+  return m;
+}
+
 export default function SubmittalPackage({
   project,
   devices,
@@ -24,18 +73,31 @@ export default function SubmittalPackage({
 }) {
   const [generating, setGenerating] = useState(false);
   const [ahjCover, setAhjCover] = useState(true);
-  const [submittalMeta, setSubmittalMeta] = useState({
-    scope_of_work: "",
-    contractor_license: "",
-  });
+  const [submittalMeta, setSubmittalMeta] = useState(() => ({ ...DEFAULT_FA0_META }));
   useEffect(() => {
     const m = project?.submittal_meta;
-    if (m && typeof m === "object") {
-      setSubmittalMeta((s) => ({
-        scope_of_work: m.scope_of_work || s.scope_of_work,
-        contractor_license: m.contractor_license || s.contractor_license,
-      }));
+    if (!m || typeof m !== "object") {
+      setSubmittalMeta({ ...DEFAULT_FA0_META });
+      return;
     }
+    setSubmittalMeta({
+      ...DEFAULT_FA0_META,
+      ...m,
+      cover_title_lines: Array.isArray(m.cover_title_lines)
+        ? m.cover_title_lines.join("\n")
+        : m.cover_title_lines ?? DEFAULT_FA0_META.cover_title_lines,
+      drawing_index_lines: Array.isArray(m.drawing_index_lines)
+        ? m.drawing_index_lines.join("\n")
+        : m.drawing_index_lines ?? DEFAULT_FA0_META.drawing_index_lines,
+      revisions:
+        Array.isArray(m.revisions) && m.revisions.length
+          ? [
+              { ...DEFAULT_FA0_META.revisions[0], ...m.revisions[0] },
+              { ...DEFAULT_FA0_META.revisions[1], ...m.revisions[1] },
+              { ...DEFAULT_FA0_META.revisions[2], ...m.revisions[2] },
+            ]
+          : DEFAULT_FA0_META.revisions,
+    });
   }, [project?.id, project?.submittal_meta]);
   const [sections, setSections] = useState({
     cover: true,
@@ -53,8 +115,25 @@ export default function SubmittalPackage({
   const toggleSection = (key) => setSections(s => ({ ...s, [key]: !s[key] }));
 
   const generate = async () => {
+    if (ahjCover) {
+      const missing = [];
+      if (!(project?.address || "").trim()) missing.push("Project address (project settings)");
+      if (!(submittalMeta.prepared_by || "").trim()) missing.push("Prepared by");
+      if (!(submittalMeta.scope_of_work || "").trim()) missing.push("Scope of work");
+      if (missing.length) {
+        window.alert(`Sheet FA-0 needs the following before generating:\n\n• ${missing.join("\n• ")}`);
+        return;
+      }
+      if (!(submittalMeta.site_map_image_data_url || "").trim()) {
+        const ok = window.confirm(
+          "No site map image was uploaded. FA-0 will show a text placeholder in the site location box. Continue?"
+        );
+        if (!ok) return;
+      }
+    }
+    const packed = packSubmittalMetaForSave(submittalMeta);
     setGenerating(true);
-    onSaveSubmittalMeta?.(submittalMeta);
+    onSaveSubmittalMeta?.(packed);
     try {
       await runSubmittalPackagePdf({
         project,
@@ -67,11 +146,20 @@ export default function SubmittalPackage({
         captureRef,
         sections,
         ahjCover,
-        submittalMeta,
+        submittalMeta: packed,
+        activeFloor,
       });
     } finally {
       setGenerating(false);
     }
+  };
+
+  const setRev = (i, field, value) => {
+    setSubmittalMeta((s) => {
+      const revs = [...(s.revisions || DEFAULT_FA0_META.revisions)];
+      revs[i] = { ...revs[i], [field]: value };
+      return { ...s, revisions: revs };
+    });
   };
 
   const SECTION_OPTIONS = [
@@ -116,12 +204,245 @@ export default function SubmittalPackage({
               </Label>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] text-slate-600">Scope of work (printed on FA-0)</Label>
+              <Label className="text-[10px] text-slate-600">
+                Prepared by <span className="text-red-600">*</span>
+              </Label>
+              <Input
+                className="text-xs h-8"
+                placeholder="e.g. M.A. Johnson"
+                value={submittalMeta.prepared_by}
+                onChange={(e) => setSubmittalMeta((m) => ({ ...m, prepared_by: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Checked by</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.checked_by}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, checked_by: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Project manager</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.project_manager}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, project_manager: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Project # (title block)</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.project_number}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, project_number: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Submittal date (optional)</Label>
+                <Input
+                  className="text-xs h-8"
+                  placeholder="Defaults to today"
+                  value={submittalMeta.submittal_date}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, submittal_date: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Cover title lines (title block)</Label>
+              <Textarea
+                className="text-xs min-h-[52px] font-mono"
+                value={submittalMeta.cover_title_lines}
+                onChange={(e) => setSubmittalMeta((m) => ({ ...m, cover_title_lines: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Site map image (embedded in FA-0)</Label>
+              <Input
+                type="file"
+                accept="image/*"
+                className="text-xs h-8 file:mr-2 file:text-xs"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const reader = new FileReader();
+                  reader.onload = () =>
+                    setSubmittalMeta((m) => ({
+                      ...m,
+                      site_map_image_data_url: typeof reader.result === "string" ? reader.result : "",
+                    }));
+                  reader.readAsDataURL(f);
+                }}
+              />
+              {submittalMeta.site_map_image_data_url ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-[10px] h-7 px-2"
+                  onClick={() => setSubmittalMeta((m) => ({ ...m, site_map_image_data_url: "" }))}
+                >
+                  Remove map image
+                </Button>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-600">CCN</Label>
+                <Input
+                  className="text-xs h-7 px-1.5"
+                  value={submittalMeta.central_station_ccn}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, central_station_ccn: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-600">File No.</Label>
+                <Input
+                  className="text-xs h-7 px-1.5"
+                  value={submittalMeta.central_station_file_no}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, central_station_file_no: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-600">Vol.</Label>
+                <Input
+                  className="text-xs h-7 px-1.5"
+                  value={submittalMeta.central_station_vol_no}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, central_station_vol_no: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Codes adopted (AHJ sidebar)</Label>
+              <Textarea
+                className="text-xs min-h-[48px]"
+                placeholder="One line or paragraph; wraps in PDF"
+                value={submittalMeta.codes_adopted}
+                onChange={(e) => setSubmittalMeta((m) => ({ ...m, codes_adopted: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Occupancy type</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.building_occupancy_type}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, building_occupancy_type: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Occupant load</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.building_occupancy_load}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, building_occupancy_load: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Total area (SF)</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.building_total_area_sf}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, building_total_area_sf: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Construction type</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.building_construction_type}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, building_construction_type: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1.5 col-span-3 sm:col-span-1">
+                <Label className="text-[10px] text-slate-600">Designer name</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.designer_name}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, designer_name: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">NICET #</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.designer_nicet}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, designer_nicet: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-600">Phone</Label>
+                <Input
+                  className="text-xs h-8"
+                  value={submittalMeta.designer_phone}
+                  onChange={(e) => setSubmittalMeta((m) => ({ ...m, designer_phone: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Revisions (up to 3)</Label>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex flex-wrap gap-1 items-center">
+                  <Input
+                    className="text-[10px] h-7 w-[72px] px-1"
+                    placeholder="Date"
+                    value={submittalMeta.revisions?.[i]?.date ?? ""}
+                    onChange={(e) => setRev(i, "date", e.target.value)}
+                  />
+                  <Input
+                    className="text-[10px] h-7 w-[52px] px-1"
+                    placeholder="By"
+                    value={submittalMeta.revisions?.[i]?.by ?? ""}
+                    onChange={(e) => setRev(i, "by", e.target.value)}
+                  />
+                  <Input
+                    className="text-[10px] h-7 flex-1 min-w-[120px] px-1"
+                    placeholder="Description"
+                    value={submittalMeta.revisions?.[i]?.text ?? ""}
+                    onChange={(e) => setRev(i, "text", e.target.value)}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Drawing index lines</Label>
+              <Textarea
+                className="text-xs min-h-[48px] font-mono"
+                value={submittalMeta.drawing_index_lines}
+                onChange={(e) => setSubmittalMeta((m) => ({ ...m, drawing_index_lines: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Battery callout override (optional)</Label>
+              <Input
+                className="text-xs h-8"
+                placeholder="e.g. (2) 12V 7AH batteries @ 24VDC"
+                value={submittalMeta.battery_callout}
+                onChange={(e) => setSubmittalMeta((m) => ({ ...m, battery_callout: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">
+                Scope of work <span className="text-red-600">*</span> (FA-0)
+              </Label>
               <Textarea
                 className="text-xs min-h-[56px]"
                 placeholder="e.g. Tenant improvement — new addressable devices, duct smoke per mechanical…"
                 value={submittalMeta.scope_of_work}
                 onChange={(e) => setSubmittalMeta((m) => ({ ...m, scope_of_work: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-slate-600">Monitoring notes override (optional)</Label>
+              <Textarea
+                className="text-xs min-h-[40px]"
+                value={submittalMeta.monitoring_notes}
+                onChange={(e) => setSubmittalMeta((m) => ({ ...m, monitoring_notes: e.target.value }))}
               />
             </div>
             <div className="space-y-1.5">

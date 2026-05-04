@@ -11,6 +11,7 @@ import {
   addGsisLogoTopRight,
   GSIS_LOGO_ASPECT,
 } from '@/lib/submittalBranding';
+import { drawRossSooMatrix, drawFa0RightSidebar } from '@/lib/submittalFa0Ross';
 
 export const SHEET_36_24_LANDSCAPE_MM = [914.4, 609.6];
 
@@ -46,37 +47,87 @@ function drawTitleBlock(
   logoAspect = GSIS_LOGO_ASPECT,
   meta = {}
 ) {
-  const tbH = 28;
   const m = meta || {};
+  const isFa0 = sheetNo === 'FA-0';
+  const tbH = isFa0 ? 44 : 28;
+  const y0 = H - tbH - (isFa0 ? 7 : 8);
+
   doc.setDrawColor(20);
-  doc.setLineWidth(0.3);
-  doc.rect(8, H - tbH - 8, W - 16, tbH);
+  doc.setLineWidth(0.25);
+  doc.rect(8, y0, W - 16, tbH);
+
   let textLeft = 12;
   if (logoDataUrl) {
     try {
-      const { w, h } = fitLogoSizeMm(26, 13, logoAspect);
-      doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 10, H - tbH - 7, w, h);
-      textLeft = 10 + w + 5;
+      const maxW = isFa0 ? 22 : 26;
+      const maxH = isFa0 ? 12 : 13;
+      const { w, h } = fitLogoSizeMm(maxW, maxH, logoAspect);
+      doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 10, y0 + (isFa0 ? 3 : 2), w, h);
+      textLeft = 10 + w + (isFa0 ? 4 : 5);
     } catch {
       /* ignore bad image */
     }
   }
+
+  if (isFa0) {
+    doc.line(8, y0 + 20, W - 8, y0 + 20);
+    const prep = m.prepared_by || m.drawn_by || '—';
+    const subDate = m.submittal_date || new Date().toLocaleDateString();
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(40);
+    doc.text(`PREPARED BY: ${prep}`, textLeft, y0 + 7);
+    doc.text(`CHECKED BY: ${m.checked_by || '—'}`, textLeft, y0 + 13);
+    doc.text(`PROJECT MANAGER: ${m.project_manager || '—'}`, textLeft, y0 + 18);
+    doc.text(`DATE: ${subDate}`, W * 0.42, y0 + 7);
+    doc.text(`PROJECT NO: ${m.project_number || project?.project_number || '—'}`, W * 0.42, y0 + 13);
+    const tl = (() => {
+      if (Array.isArray(m.cover_title_lines)) return m.cover_title_lines;
+      if (typeof m.cover_title_lines === 'string' && m.cover_title_lines.trim()) {
+        return m.cover_title_lines.split(/\r?\n/).filter(Boolean);
+      }
+      return ['COVER SHEET', 'LEGEND, BATTERY CALC & OPS MATRIX'];
+    })();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6);
+    doc.text('TITLE:', W * 0.42, y0 + 24);
+    doc.setFont('helvetica', 'normal');
+    let tly = y0 + 29;
+    tl.slice(0, 3).forEach((line) => {
+      doc.text(String(line).slice(0, 52), W * 0.42, tly);
+      tly += 3.5;
+    });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`SHEET  ${sheetNo}`, W - 14, y0 + 14, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(100);
+    doc.text('SCALE: NTS (floor plans as noted)', W - 14, y0 + 24, { align: 'right' });
+    doc.setTextColor(184, 134, 11);
+    doc.text('GOLDEN STATE INTEGRATED SYSTEMS', W - 14, y0 + 32, { align: 'right' });
+    doc.setTextColor(100);
+    doc.text('Preliminary — verify with AHJ. Licensed contractor / EOR responsible for permit.', W / 2, y0 + tbH - 2, { align: 'center' });
+    return;
+  }
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(40);
-  doc.text(`PROJECT: ${project?.name || '—'}`, textLeft, H - tbH - 1);
-  doc.text(`ADDRESS: ${project?.address || '—'}`, textLeft, H - tbH + 5);
-  doc.text(`DATE: ${new Date().toLocaleDateString()}`, textLeft, H - tbH + 11);
-  doc.text(`PROJ. NO.: ${m.project_number || project?.project_number || '—'}`, textLeft, H - tbH + 17);
-  doc.text(`DRAWN: ${m.drawn_by || '—'}    CHECKED: ${m.checked_by || '—'}`, W / 2 - 40, H - tbH + 17);
+  doc.text(`PROJECT: ${project?.name || '—'}`, textLeft, y0 + 6);
+  doc.text(`ADDRESS: ${project?.address || '—'}`, textLeft, y0 + 12);
+  doc.text(`DATE: ${new Date().toLocaleDateString()}`, textLeft, y0 + 18);
+  doc.text(`PROJ. NO.: ${m.project_number || project?.project_number || '—'}`, textLeft, y0 + 24);
+  doc.text(`DRAWN: ${m.drawn_by || '—'}    CHECKED: ${m.checked_by || '—'}`, W / 2 - 40, y0 + 24);
   const sheetLine =
     sheetDetail ||
     (sheetNo === 'FA-1' ? 'FLOOR PLAN — DEVICES & CIRCUITS' : 'COVER · LEGEND · CALCS · OPS MATRIX');
-  doc.text(`SHEET: ${sheetNo}  ${sheetLine}`, W / 2, H - tbH + 5, { align: 'center' });
-  doc.text(`SCALE: AS NOTED (floor plans min. 1/8" = 1'-0" where shown)`, W - 12, H - tbH + 5, { align: 'right' });
+  doc.text(`SHEET: ${sheetNo}  ${sheetLine}`, W / 2, y0 + 10, { align: 'center' });
+  doc.text(`SCALE: AS NOTED (floor plans min. 1/8" = 1'-0" where shown)`, W - 12, y0 + 10, { align: 'right' });
   doc.setFontSize(6);
   doc.setTextColor(184, 134, 11);
-  doc.text('GOLDEN STATE INTEGRATED SYSTEMS', W - 12, H - tbH + 13, { align: 'right' });
+  doc.text('GOLDEN STATE INTEGRATED SYSTEMS', W - 12, y0 + 18, { align: 'right' });
   doc.setTextColor(100);
   doc.text('Preliminary — verify with AHJ. Licensed contractor / EOR responsible for permit.', W / 2, H - 6, { align: 'center' });
 }
@@ -340,38 +391,62 @@ export function drawAhjCoverPage(
     }
   }
 
-  const siteY = headerH + 5;
-  const siteH = 34;
-  const mapW = 58;
+  const titleBlockH = 44;
+  const titleTop = H - titleBlockH - 7;
+  const sidebarW = 100;
+  const sidebarX = W - 12 - sidebarW;
+
+  const siteY = headerH + 4;
+  const siteH = 29;
+  const mapW = 50;
   const mapH = siteH - 2;
   doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(186, 199, 216);
+  doc.setDrawColor(55, 65, 81);
+  doc.setLineWidth(0.35);
   doc.rect(12, siteY, mapW, mapH, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
+  doc.setFontSize(6.5);
   doc.setTextColor(51, 65, 85);
-  doc.text('SITE / LOCATION', 16, siteY + 6);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6);
-  doc.setTextColor(100, 116, 139);
-  let mapTy = siteY + 11;
-  doc.splitTextToSize('Vicinity map or aerial per AHJ (attach civil / GIS exhibit). Not to scale unless noted.', mapW - 10).forEach((ln) => {
-    doc.text(ln, 16, mapTy);
-    mapTy += 3.6;
-  });
+  doc.text('- SITE LOCATION -', 12 + mapW / 2, siteY + 5, { align: 'center' });
+  const mapImg = m.site_map_image_data_url;
+  if (mapImg) {
+    try {
+      const fmt = dataUrlImageFormat(mapImg);
+      doc.addImage(mapImg, fmt, 13.5, siteY + 8, mapW - 3, mapH - 11);
+    } catch {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.5);
+      doc.setTextColor(120);
+      doc.text('Map image failed to embed.', 15, siteY + 18);
+    }
+  } else {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.5);
+    doc.setTextColor(100, 116, 139);
+    let mapTy = siteY + 10;
+    doc
+      .splitTextToSize(
+        'Upload a site map in the Submittal dialog or attach a civil / GIS exhibit. Not to scale unless noted.',
+        mapW - 8
+      )
+      .forEach((ln) => {
+        doc.text(ln, 14, mapTy);
+        mapTy += 3.4;
+      });
+  }
 
-  const infoX = 12 + mapW + 8;
-  const infoW = W - infoX - 12;
+  const infoX = 12 + mapW + 5;
+  const infoW = sidebarX - 5 - infoX;
   doc.setFillColor(241, 245, 249);
   doc.rect(infoX, siteY, infoW, mapH, 'FD');
-  doc.setDrawColor(186, 199, 216);
+  doc.setDrawColor(55, 65, 81);
   doc.rect(infoX, siteY, infoW, mapH, 'S');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('PROJECT / SITE INFORMATION', infoX + 4, siteY + 6);
+  doc.text('PROJECT / SITE INFORMATION', infoX + 3, siteY + 5);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
+  doc.setFontSize(6.5);
   doc.setTextColor(51, 65, 85);
   const siteL = [
     [`Address`, project?.address || '—'],
@@ -383,38 +458,31 @@ export function drawAhjCoverPage(
     [`Sprinkler`, project?.sprinkler_status || '—'],
     [`Code edition`, project?.adopted_code_edition || '2021 IBC / 2022 NFPA 72'],
     [`Devices (all floors)`, String(devices?.length ?? 0)],
-    [`Submittal date`, new Date().toLocaleDateString()],
+    [`Submittal date`, m.submittal_date || new Date().toLocaleDateString()],
   ];
-  let sx = infoX + 4;
-  let sy = siteY + 11;
-  const colW = (infoW - 12) / 3;
+  const sx0 = infoX + 3;
+  const sy0 = siteY + 10;
+  const colW = (infoW - 10) / 3;
   siteL.forEach(([a, b], i) => {
     const col = i % 3;
     const row = Math.floor(i / 3);
-    const cx = sx + col * colW;
-    const cy = sy + row * 5;
+    const cx = sx0 + col * colW;
+    const cy = sy0 + row * 4.8;
     doc.setTextColor(100, 116, 139);
     doc.text(`${a}:`, cx, cy);
     doc.setTextColor(30, 41, 59);
-    doc.text(String(b).slice(0, 36), cx + 38, cy);
+    doc.text(String(b).slice(0, 32), cx + 34, cy);
   });
 
-  const monY = siteY + siteH + 3;
-  doc.setFillColor(255, 251, 235);
-  doc.rect(12, monY, W - 24, 12, 'FD');
-  doc.setDrawColor(245, 158, 11);
-  doc.rect(12, monY, W - 24, 12, 'S');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(146, 64, 14);
-  doc.text('MONITORING / CENTRAL STATION', 16, monY + 5);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
-  doc.setTextColor(80);
-  const monTxt =
-    m.monitoring_notes ||
-    `Alarm signals shall be transmitted to a listed central station per NFPA 72. Coordinate DACT / IP / radio with ${project?.installer_name || 'the fire alarm contractor'}.`;
-  doc.splitTextToSize(monTxt, W - 36).forEach((ln, i) => doc.text(ln, 16, monY + 9 + i * 3.5));
+  drawFa0RightSidebar(doc, sidebarX, siteY, sidebarW, titleTop - siteY - 3, project, m);
+
+  const contentY = siteY + siteH + 4;
+  const mainLeft = 12;
+  const mainWTotal = sidebarX - 8 - mainLeft;
+  const leftColW = 235;
+  const gutter = 5;
+  const rightColX = mainLeft + leftColW + gutter;
+  const rightColW = mainWTotal - leftColW - gutter;
 
   const byFloor = {};
   (devices || []).forEach((d) => {
@@ -424,218 +492,237 @@ export function drawAhjCoverPage(
   });
   const riserData = generateRiserDiagram(project || {}, byFloor);
 
-  let y = monY + 16;
-  doc.setTextColor(15, 23, 42);
+  let yL = contentY;
+  doc.setFillColor(252, 252, 253);
+  doc.setDrawColor(55, 65, 81);
+  doc.rect(mainLeft, yL, leftColW, 38, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('SCOPE OF WORK', 14, y);
-  y += 6;
-  doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  doc.text('FIRE ALARM DRAWING INDEX', mainLeft + leftColW / 2, yL + 6, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(30, 41, 59);
+  const idxLines = m.drawing_index_lines;
+  const idx = Array.isArray(idxLines) && idxLines.length
+    ? idxLines
+    : typeof idxLines === 'string' && idxLines.trim()
+      ? idxLines.split(/\r?\n/).filter(Boolean)
+      : [
+          'FA-0 — Legend, battery calculations & communication matrix',
+          'FA-1 — Floor plan, general notes, riser & zone schedule',
+          'FA-2 — Details / as-builts (as applicable)',
+        ];
+  let iy = yL + 12;
+  idx.slice(0, 5).forEach((ln) => {
+    doc.text(String(ln).slice(0, 54), mainLeft + 3, iy);
+    iy += 4;
+  });
+  yL += 41;
+
+  doc.setFillColor(255, 255, 255);
+  doc.rect(mainLeft, yL, leftColW, 52, 'FD');
+  doc.rect(mainLeft, yL, leftColW, 52, 'S');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('SCOPE OF WORK', mainLeft + 3, yL + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(30, 41, 59);
   const scope =
     m.scope_of_work ||
     `Design basis: NFPA 72 (adopted edition), IBC, NFPA 101 as applicable. ${reqs.fireAlarmRequired ? 'Fire alarm / occupant notification per applicable sections.' : 'See code analysis.'} Coordinate duct smoke with mechanical. Replace bracketed legend data with manufacturer cut sheets & CSFM listings for CA.`;
-  doc.splitTextToSize(scope, W * 0.42).forEach((line) => {
-    doc.text(line, 14, y);
-    y += 4.2;
+  let syL = yL + 10;
+  doc.splitTextToSize(scope, leftColW - 8).forEach((line) => {
+    doc.text(line, mainLeft + 3, syL);
+    syL += 3.8;
   });
+  yL += 55;
 
+  doc.setFillColor(255, 251, 235);
+  doc.rect(mainLeft, yL, leftColW, 26, 'FD');
+  doc.setDrawColor(245, 158, 11);
+  doc.rect(mainLeft, yL, leftColW, 26, 'S');
   doc.setFont('helvetica', 'bold');
-  doc.text('DRAWING INDEX (typical)', 14, y + 6);
-  y += 12;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  ['FA-0  Cover, legend, calculations summary, sequence matrix', 'FA-1  Floor plan(s) — devices, candela / circuits', 'FA-2  Riser / wiring — Class A/B as designed'].forEach((r) => {
-    doc.text(r, 14, y);
-    y += 4;
-  });
-
-  const legendX = W * 0.48;
-  let ly = monY + 16;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('EQUIPMENT LEGEND & SPECIFICATIONS', legendX, ly);
-  ly += 8;
-  const rows = getLegendRows(devices, equipmentSpecs);
-  doc.setFontSize(7);
-  doc.setFillColor(230, 235, 240);
-  doc.rect(legendX, ly - 4, W - legendX - 14, 7, 'F');
-  doc.setTextColor(30, 41, 59);
-  const cx = [legendX, legendX + 12, legendX + 22, legendX + 75, legendX + 130, legendX + 210, legendX + 270];
-  ['Sym', 'Qty', 'Mfr', 'Model', 'Description', 'CSFM', 'Mount'].forEach((c, i) => doc.text(c, cx[i], ly));
-  ly += 8;
-  doc.setFont('helvetica', 'normal');
-  rows.slice(0, 14).forEach((r, i) => {
-    doc.setFillColor(i % 2 === 0 ? 255 : 248, 250, 252);
-    doc.rect(legendX, ly - 4, W - legendX - 14, 6, 'F');
-    doc.setTextColor(20);
-    doc.text(r.symbol, cx[0], ly);
-    doc.text(String(r.qty), cx[1], ly);
-    doc.text(String(r.manufacturer).slice(0, 18), cx[2], ly);
-    doc.text(String(r.model).slice(0, 14), cx[3], ly);
-    doc.text(String(r.description).slice(0, 22), cx[4], ly);
-    doc.text(String(r.csfm).slice(0, 14), cx[5], ly);
-    doc.text(String(r.mounting).slice(0, 16), cx[6], ly);
-    ly += 6;
-  });
-  if (rows.length > 14) {
-    doc.setFontSize(6);
-    doc.setTextColor(100);
-    doc.text(`+ ${rows.length - 14} additional types — see device schedule.`, legendX, ly + 2);
-    ly += 5;
-  }
-
-  const riserBoxW = W - legendX - 14;
-  const riserY = ly + 6;
-  const riserH = Math.min(118, Math.max(52, H - riserY - 38));
-  if (riserH >= 48 && riserBoxW > 80) {
-    drawAhjRiserSchematic(doc, riserData, legendX, riserY, riserBoxW, riserH);
-  }
-
-  const mx = 14;
-  let my = Math.max(y + 8, 168);
-  const matrixBlockTop = my;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.text('SEQUENCE OF OPERATIONS — INPUT / OUTPUT MATRIX', mx, my);
-  my += 5;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
-  doc.text('SYSTEM INPUTS (representative)', mx, my);
-  doc.text('SYSTEM OUTPUTS', mx + 118, my);
-  my += 6;
-  doc.setTextColor(30, 41, 59);
-  const inputs = ['Manual pull', 'Smoke', 'Duct smoke', 'Waterflow', 'Elev recall'];
-  const outputs = ['Alarm NAC', 'HVAC shut', 'CS alarm', 'Elev recall'];
-  const hit = (inp, out) => {
-    if (out === 'Alarm NAC' && ['Manual pull', 'Smoke', 'Duct smoke', 'Waterflow'].includes(inp)) return true;
-    if (inp === 'Duct smoke' && out === 'HVAC shut') return true;
-    if (inp === 'Elev recall' && out === 'Elev recall') return reqs.elevatorRecallRequired;
-    if (inp === 'Waterflow' && out === 'CS alarm') return true;
-    return false;
-  };
-  doc.setFontSize(7);
-  const ox = mx + 40;
-  outputs.forEach((o, i) => doc.text(o, ox + i * 40, my));
-  my += 5;
-  inputs.forEach((inp, ri) => {
-    doc.text(inp, mx, my + ri * 6);
-    outputs.forEach((out, ci) => {
-      if (hit(inp, out)) doc.text('●', ox + ci * 40 + 16, my + ri * 6);
-    });
-  });
-  my += inputs.length * 6 + 6;
-
-  const stampW = 78;
-  const stampH = 50;
-  const stampX = W - stampW - 14;
-  const stampY = matrixBlockTop + 10;
-  doc.setDrawColor(220, 38, 38);
-  doc.setLineWidth(0.4);
-  if (typeof doc.roundedRect === 'function') {
-    doc.roundedRect(stampX, stampY, stampW, stampH, 2, 2, 'S');
-    doc.setLineDash([2, 2], 0);
-    doc.roundedRect(stampX + 2, stampY + 2, stampW - 4, stampH - 4, 1, 1, 'S');
-    doc.setLineDash([], 0);
-  } else {
-    doc.rect(stampX, stampY, stampW, stampH, 'S');
-    doc.setLineDash([2, 2], 0);
-    doc.rect(stampX + 2, stampY + 2, stampW - 4, stampH - 4, 'S');
-    doc.setLineDash([], 0);
-  }
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(185, 28, 28);
-  doc.text('AHJ / PLAN REVIEW', stampX + stampW / 2, stampY + 14, { align: 'center' });
+  doc.setFontSize(6.5);
+  doc.setTextColor(146, 64, 14);
+  doc.text('MONITORING / CENTRAL STATION', mainLeft + 3, yL + 5);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6);
-  doc.setTextColor(100);
-  doc.text('Reserved for jurisdiction', stampX + stampW / 2, stampY + 22, { align: 'center' });
-  doc.text('approval stamp & signature', stampX + stampW / 2, stampY + 28, { align: 'center' });
+  doc.setTextColor(80);
+  const monTxt =
+    m.monitoring_notes ||
+    `Alarm signals shall be transmitted to a listed central station per NFPA 72. Coordinate DACT / IP / radio with ${project?.installer_name || 'the fire alarm contractor'}.`;
+  let myMon = yL + 9;
+  doc.splitTextToSize(monTxt, leftColW - 8).forEach((ln) => {
+    doc.text(ln, mainLeft + 3, myMon);
+    myMon += 3.4;
+  });
+  yL += 29;
 
-  my += stampH + 4;
+  const riserH = Math.min(56, Math.max(40, titleTop - yL - 118));
+  if (riserH >= 38) {
+    drawAhjRiserSchematic(doc, riserData, mainLeft, yL, leftColW, riserH);
+    yL += riserH + 4;
+  }
+
+  const stampW = 62;
+  const stampH = 40;
+  const stampX = mainLeft + leftColW - stampW - 2;
+  const stampY = yL;
+  doc.setDrawColor(220, 38, 38);
+  doc.setLineWidth(0.35);
+  if (typeof doc.roundedRect === 'function') {
+    doc.roundedRect(stampX, stampY, stampW, stampH, 2, 2, 'S');
+  } else {
+    doc.rect(stampX, stampY, stampW, stampH, 'S');
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(185, 28, 28);
+  doc.text('AHJ / PLAN REVIEW', stampX + stampW / 2, stampY + 12, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.5);
+  doc.setTextColor(100);
+  doc.text('Approval stamp', stampX + stampW / 2, stampY + 20, { align: 'center' });
+  yL += stampH + 3;
 
   const batt = calculateBatterySizing(devices.length);
   const nac = calculateNacLoading(devices);
+  const mx = mainLeft;
+  let my = yL;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
   doc.text('PANEL / CIRCUIT LOAD (summary)', mx, my);
-  my += 6;
+  my += 5;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
+  doc.setFontSize(6.3);
+  const nacRows = Math.min(nac.length, 4);
   doc.setFillColor(241, 245, 249);
-  doc.rect(mx, my - 2, W * 0.42, 5 + Math.min(nac.length, 6) * 4.5, 'F');
+  doc.rect(mx, my - 1, leftColW, 5 + nacRows * 4, 'F');
   doc.setTextColor(40);
   doc.text('Circuit', mx + 2, my + 2);
-  doc.text('Devices', mx + 52, my + 2);
-  doc.text('Alarm mA', mx + 82, my + 2);
-  doc.text('% of 3 A', mx + 118, my + 2);
-  my += 6;
+  doc.text('Dev', mx + 48, my + 2);
+  doc.text('mA', mx + 62, my + 2);
+  doc.text('%/3A', mx + leftColW - 14, my + 2);
+  my += 5;
   const slcAddr = devices.filter((d) =>
     ['smoke_detector', 'heat_detector', 'pull_station', 'duct_detector', 'monitor_module', 'control_module'].includes(d.type)
   ).length;
-  doc.text('SLC-1 (initiating & modules)', mx + 2, my);
-  doc.text(String(slcAddr), mx + 52, my);
-  doc.text(`~${slcAddr} mA stby est.`, mx + 82, my);
-  doc.text('—', mx + 118, my);
-  my += 4.5;
-  nac.slice(0, 6).forEach((c) => {
-    doc.text(String(c.circuit).slice(0, 18), mx + 2, my);
-    doc.text(String(c.device_count), mx + 52, my);
-    doc.text(`${c.total_current_mA} mA`, mx + 82, my);
-    doc.text(`${c.percent_of_rating}%`, mx + 118, my);
-    my += 4.5;
+  doc.text('SLC (init./mod)', mx + 2, my);
+  doc.text(String(slcAddr), mx + 48, my);
+  doc.text(`~${slcAddr}`, mx + 62, my);
+  doc.text('—', mx + leftColW - 8, my);
+  my += 4;
+  nac.slice(0, 4).forEach((c) => {
+    doc.text(String(c.circuit).slice(0, 14), mx + 2, my);
+    doc.text(String(c.device_count), mx + 48, my);
+    doc.text(`${c.total_current_mA}`, mx + 62, my);
+    doc.text(`${c.percent_of_rating}%`, mx + leftColW - 8, my);
+    my += 4;
   });
-  my += 6;
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.text('SECONDARY POWER / BATTERY', mx, my);
-  my += 6;
-  doc.setFillColor(254, 243, 199);
-  doc.setDrawColor(217, 119, 6);
-  doc.rect(mx, my, W * 0.44, 18, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(146, 64, 14);
-  doc.text(`PROVIDE: ${batt.recommended_batteries}`, mx + 4, my + 7);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(80);
-  doc.text(
-    `Required Ah (24 h stby + 5 min alarm × 1.20): ${batt.required_Ah} Ah  ·  Panel stby ${batt.standby_current_mA} mA  ·  alarm ${batt.alarm_current_mA} mA`,
-    mx + 4,
-    my + 13
-  );
-  my += 22;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Reference: ${batt.code_ref}`, mx, my);
-  my += 10;
-  doc.setFillColor(255, 251, 235);
-  doc.rect(mx, my, W - 28, 22, 'F');
-  doc.setDrawColor(245, 158, 11);
-  doc.rect(mx, my, W - 28, 22, 'S');
+  my += 4;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.setTextColor(146, 64, 14);
-  doc.text('AUDIBLE — TEMPORAL CODE-3 (California / NFPA 72 §18.4)', mx + 3, my + 6);
-  doc.setFont('helvetica', 'normal');
+  doc.text('SECONDARY POWER / BATTERY', mx, my);
+  my += 5;
+  doc.setFillColor(254, 243, 199);
+  doc.setDrawColor(217, 119, 6);
+  doc.rect(mx, my, leftColW, 18, 'FD');
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
+  doc.setTextColor(146, 64, 14);
+  const battHead = m.battery_callout || batt.recommended_batteries;
+  const battLines = doc.splitTextToSize(`PROVIDE: ${battHead}`, leftColW - 6);
+  battLines.slice(0, 2).forEach((ln, i) => doc.text(ln, mx + 3, my + 6 + i * 4));
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.8);
   doc.setTextColor(80);
-  const audLines = doc.splitTextToSize(
-    'Notification appliances shall use the standard Emergency Evacuation Signal (Temporal Code 3) unless alternate listing applies. Program per manufacturer and AHJ.',
-    W - 40
+  doc.text(
+    `Ah req. ${batt.required_Ah} · stby ${batt.standby_current_mA} mA · alarm ${batt.alarm_current_mA} mA`,
+    mx + 3,
+    my + 14
   );
-  audLines.forEach((ln, i) => doc.text(ln, mx + 3, my + 12 + i * 4));
-
+  my += 22;
+  doc.setFontSize(6);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Ref: ${batt.code_ref}`, mx, my);
+  my += 6;
+  doc.setFillColor(255, 251, 235);
+  doc.rect(mx, my, leftColW, 18, 'F');
+  doc.setDrawColor(245, 158, 11);
+  doc.rect(mx, my, leftColW, 18, 'S');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(146, 64, 14);
+  doc.text('AUDIBLE — TEMPORAL CODE-3', mx + 2, my + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.8);
+  doc.setTextColor(80);
+  doc
+    .splitTextToSize(
+      'Emergency Evacuation Signal (Temporal Code 3) unless alternate listing applies. Program per manufacturer and AHJ.',
+      leftColW - 6
+    )
+    .forEach((ln, i) => doc.text(ln, mx + 2, my + 10 + i * 3.5));
+  my += 22;
   if (m.contractor_license) {
-    doc.setFontSize(7);
+    doc.setFontSize(6);
     doc.setTextColor(50);
-    doc.text(`Contractor license (C-10 / as applicable): ${m.contractor_license}`, mx, my + 28);
+    doc.text(`Contractor license: ${m.contractor_license}`, mx, my);
   }
+
+  let yR = contentY;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('- FIRE EQUIPMENT LEGEND -', rightColX + rightColW / 2, yR + 4, { align: 'center' });
+  yR += 8;
+  const rows = getLegendRows(devices, equipmentSpecs);
+  const legLeft = rightColX;
+  const legW = rightColW;
+  doc.setFontSize(6);
+  doc.setFillColor(230, 235, 240);
+  doc.rect(legLeft, yR - 2, legW, 6, 'F');
+  doc.setTextColor(30, 41, 59);
+  const lcx = [
+    legLeft + 1,
+    legLeft + 11,
+    legLeft + 19,
+    legLeft + 27,
+    legLeft + 58,
+    legLeft + 100,
+    legLeft + 150,
+    legLeft + legW - 26,
+  ];
+  ['Sym', 'Qty', 'Ex', 'Mfr', 'Model', 'Description', 'CSFM', 'Mount'].forEach((c, i) => doc.text(c, lcx[i], yR + 2));
+  yR += 8;
+  doc.setFont('helvetica', 'normal');
+  const maxLegRows = 11;
+  rows.slice(0, maxLegRows).forEach((r, i) => {
+    doc.setFillColor(i % 2 === 0 ? 255 : 248, 250, 252);
+    doc.rect(legLeft, yR - 3, legW, 5.2, 'F');
+    doc.setTextColor(20);
+    doc.text(String(r.symbol).slice(0, 6), lcx[0], yR);
+    doc.text(String(r.qty), lcx[1], yR);
+    doc.text(String(r.existing || ''), lcx[2], yR);
+    doc.text(String(r.manufacturer).slice(0, 12), lcx[3], yR);
+    doc.text(String(r.model).slice(0, 11), lcx[4], yR);
+    doc.text(String(r.description).slice(0, 20), lcx[5], yR);
+    doc.text(String(r.csfm).slice(0, 12), lcx[6], yR);
+    doc.text(String(r.mounting).slice(0, 11), lcx[7], yR);
+    yR += 5.2;
+  });
+  if (rows.length > maxLegRows) {
+    doc.setFontSize(5.5);
+    doc.setTextColor(100);
+    doc.text(`+ ${rows.length - maxLegRows} types — see schedule.`, legLeft, yR + 2);
+    yR += 5;
+  }
+  yR += 2;
+  const matrixH = Math.max(52, titleTop - yR - 4);
+  drawRossSooMatrix(doc, legLeft, yR, legW, matrixH, reqs);
 
   drawTitleBlock(doc, W, H, project, 'FA-0', logoDataUrl, null, logoAspect, m);
 }
