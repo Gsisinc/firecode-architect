@@ -1,10 +1,13 @@
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { formatDistanceToNow } from 'date-fns';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Building2, Flame, Shield, Video, Speaker, Cable } from 'lucide-react';
+import { Plus, CheckCircle2, Flame, Shield, Video, Speaker, Cable } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
+import SystemsAppShell from '@/components/systems/SystemsAppShell';
+import DashboardProjectMiniature, { thumbnailDisciplineForProject } from '@/components/systems/DashboardProjectMiniature';
 
 const TAB_ITEMS = [
   { id: DISCIPLINE_IDS.FIRE_ALARM, icon: Flame, description: 'NFPA-oriented device palette, SLC/NAC circuits, life-safety workflow, auto-place, simulation, and riser views.' },
@@ -17,114 +20,190 @@ const TAB_ITEMS = [
 export default function SystemsDashboard() {
   const { id: projectId } = useParams();
   const navigate = useNavigate();
+  const [selectedDiscipline, setSelectedDiscipline] = useState(DISCIPLINE_IDS.FIRE_ALARM);
+  const [search, setSearch] = useState('');
 
-  const { data: project, isLoading } = useQuery({
+  const { data: project, isLoading: projectLoading } = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => base44.entities.Project.filter({ id: projectId }),
     select: (data) => data[0],
     enabled: !!projectId,
   });
 
-  if (isLoading || !project) {
+  const { data: projects = [], isLoading: listLoading } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => base44.entities.Project.list('-updated_date', 50),
+  });
+
+  const filteredProjects = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) =>
+      p.name?.toLowerCase().includes(q) ||
+      p.address?.toLowerCase().includes(q)
+    );
+  }, [projects, search]);
+
+  const selectedCfg = DISCIPLINES[selectedDiscipline];
+
+  if (projectLoading || !project) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white/60 text-sm">
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center text-slate-500 text-sm">
         Loading project…
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      <header className="border-b border-white/10 bg-black/20">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white"
-            aria-label="Back to projects"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
-              <Building2 className="w-5 h-5 text-white/80" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-lg font-semibold truncate">{project.name || 'Project'}</h1>
-              <p className="text-xs text-white/40 truncate">{project.address || 'Pick a system, then open its designer'}</p>
-            </div>
-          </div>
-          <Button
-            variant="outline"
-            className="ml-auto border-white/20 text-white/80 hover:bg-white/10"
-            onClick={() => navigate(`/project/${projectId}/setup`)}
-          >
-            Setup
-          </Button>
+    <SystemsAppShell projectId={projectId} searchValue={search} onSearchChange={setSearch}>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Systems dashboard</h1>
+          <p className="text-slate-500 mt-1 max-w-2xl text-sm leading-relaxed">
+            {project.name}
+            {project.address ? ` · ${project.address}` : ''}
+          </p>
         </div>
-      </header>
+        <Button
+          className="shrink-0 bg-red-600 hover:bg-red-700 text-white shadow-md rounded-full px-6"
+          onClick={() => navigate('/project/new')}
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          New project
+        </Button>
+      </div>
 
-      <main className="max-w-5xl mx-auto px-6 py-8">
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-white/35 mb-2">Project home</p>
-        <h2 className="text-2xl font-bold text-white mb-1">Systems dashboard</h2>
-        <p className="text-sm text-white/50 mb-6 max-w-2xl">
-          Choose a discipline tab, then open that designer. Fire alarm opens the full NFPA workflow you have been using; other tabs use the same canvas and properties pattern with that system&apos;s symbols and circuits.
-        </p>
-
-        <Tabs defaultValue={DISCIPLINE_IDS.FIRE_ALARM} className="w-full">
-          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-white/5 p-2 rounded-xl border border-white/10">
-            {TAB_ITEMS.map(({ id, icon: Icon }) => {
-              const cfg = DISCIPLINES[id];
-              return (
-                <TabsTrigger
-                  key={id}
-                  value={id}
-                  className="flex items-center gap-2 rounded-lg border border-transparent px-3 py-2.5 text-xs font-medium text-white/65 data-[state=active]:text-white data-[state=active]:border-white/25 data-[state=active]:bg-white/10 sm:text-sm"
-                >
-                  <Icon className="w-4 h-4 shrink-0" style={{ color: cfg.theme.primary }} />
-                  <span className="truncate">{cfg.label}</span>
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
-
+      <section className="mb-10">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">Disciplines</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {TAB_ITEMS.map(({ id, icon: Icon, description }) => {
             const cfg = DISCIPLINES[id];
+            const selected = selectedDiscipline === id;
             return (
-              <TabsContent key={id} value={id} className="mt-6 outline-none">
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSelectedDiscipline(id)}
+                className={`relative text-left rounded-2xl border-2 bg-white p-5 shadow-sm transition-all hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-red-500/40 ${
+                  selected ? 'shadow-md' : 'border-slate-200'
+                }`}
+                style={{
+                  borderColor: selected ? cfg.theme.primary : undefined,
+                }}
+              >
+                {selected && (
+                  <CheckCircle2
+                    className="absolute top-3 right-3 w-5 h-5"
+                    style={{ color: cfg.theme.primary }}
+                    aria-hidden
+                  />
+                )}
                 <div
-                  className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 sm:p-8"
-                  style={{ borderLeftWidth: 4, borderLeftColor: cfg.theme.primary }}
+                  className="w-11 h-11 rounded-xl flex items-center justify-center mb-3"
+                  style={{ backgroundColor: `${cfg.theme.primary}22`, color: cfg.theme.primary }}
                 >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex gap-4 min-w-0">
-                      <div
-                        className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0"
-                        style={{ backgroundColor: `${cfg.theme.primary}28`, color: cfg.theme.primary }}
-                      >
-                        <Icon className="w-7 h-7" />
-                      </div>
-                      <div className="min-w-0">
-                        <h3 className="text-xl font-semibold text-white">{cfg.label}</h3>
-                        <p className="text-sm text-white/50 mt-2 leading-relaxed max-w-xl">{description}</p>
-                        <p className="text-[11px] text-white/35 mt-3 font-mono">{cfg.devicePalette.length} device types in palette</p>
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      className="shrink-0 text-white border-0 shadow-lg"
-                      style={{ backgroundColor: cfg.theme.primary }}
-                      onClick={() => navigate(`/project/${projectId}/designer/${id}`)}
-                    >
-                      Open {cfg.label} designer
-                    </Button>
-                  </div>
+                  <Icon className="w-6 h-6" />
                 </div>
-              </TabsContent>
+                <h3 className="font-semibold text-slate-900 text-sm leading-snug">{cfg.label}</h3>
+                <p className="text-xs text-slate-500 mt-2 line-clamp-3 leading-relaxed">{description}</p>
+                <p className="text-[11px] text-slate-400 mt-3 font-medium">
+                  {cfg.devicePalette.length} device types
+                </p>
+              </button>
             );
           })}
-        </Tabs>
-      </main>
-    </div>
+        </div>
+
+        <div
+          className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+          style={{ borderLeftWidth: 4, borderLeftColor: selectedCfg.theme.primary }}
+        >
+          <div>
+            <p className="text-sm font-medium text-slate-900">Open {selectedCfg.label} designer</p>
+            <p className="text-xs text-slate-500 mt-1 max-w-xl">
+              Same floor plan workflow; palette and circuits switch for this discipline.
+            </p>
+          </div>
+          <Button
+            type="button"
+            className="shrink-0 text-white border-0 shadow-lg rounded-full px-6"
+            style={{ backgroundColor: selectedCfg.theme.primary }}
+            onClick={() => navigate(`/project/${projectId}/designer/${selectedDiscipline}`)}
+          >
+            Open designer
+          </Button>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">Recent projects</h2>
+        {listLoading ? (
+          <p className="text-sm text-slate-500">Loading projects…</p>
+        ) : (
+          <>
+            {search.trim() && filteredProjects.length === 0 && (
+              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-4">
+                No projects match your search. Clear the search bar to see all projects.
+              </p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+            {filteredProjects.map((p) => {
+              const thumbDisc = thumbnailDisciplineForProject(p.id);
+              const tcfg = DISCIPLINES[thumbDisc];
+              const isCurrent = p.id === projectId;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => navigate(`/project/${p.id}/systems`)}
+                  className={`text-left rounded-2xl border bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 ${
+                    isCurrent ? 'ring-2 ring-red-500/40 border-red-200' : 'border-slate-200'
+                  }`}
+                >
+                  <div className="h-40 bg-slate-100 border-b border-slate-100">
+                    <DashboardProjectMiniature projectId={p.id} disciplineId={thumbDisc} />
+                  </div>
+                  <div className="p-4">
+                    <span
+                      className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full text-white mb-2"
+                      style={{ backgroundColor: tcfg.theme.primary }}
+                    >
+                      {tcfg.label}
+                    </span>
+                    <h3 className="font-semibold text-slate-900 truncate">{p.name || 'Untitled project'}</h3>
+                    <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
+                      <span>
+                        Updated{' '}
+                        {p.updated_date
+                          ? formatDistanceToNow(new Date(p.updated_date), { addSuffix: true })
+                          : 'recently'}
+                      </span>
+                      <span
+                        className="w-7 h-7 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center"
+                        aria-hidden
+                      >
+                        {(p.name || 'P').slice(0, 1).toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => navigate('/project/new')}
+              className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/50 min-h-[280px] flex flex-col items-center justify-center gap-3 text-slate-500 hover:border-red-300 hover:bg-red-50/30 hover:text-red-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
+            >
+              <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center">
+                <Plus className="w-7 h-7" />
+              </div>
+              <span className="font-semibold text-sm">New project</span>
+            </button>
+            </div>
+          </>
+        )}
+      </section>
+    </SystemsAppShell>
   );
 }
