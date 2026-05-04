@@ -8,36 +8,7 @@ import { Button } from '@/components/ui/button';
 import { MARKUP_TOOLS } from '@/lib/bluebeamMarkupTools';
 import { feetBetween, getFloorScale } from '@/lib/designScale';
 import { buildLifeSafetyReviewFlags } from '@/lib/lifeSafetyReview';
-
-// NFPA 170-aligned fire alarm device palette. Lettering follows common NFPA 170 plan-symbol
-// conventions; device engineering requirements still come from NFPA 72/NEC checks elsewhere.
-export const DEVICE_PALETTE = [
-  { type: 'smoke_detector',   symbol: 'S',    prefix: 'SD',   label: 'Smoke Detector',       color: '#2563eb', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm symbol / NFPA 72 §17.7' },
-  { type: 'heat_detector',    symbol: 'H',    prefix: 'HD',   label: 'Heat Detector',        color: '#d97706', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm symbol / NFPA 72 §17.6' },
-  { type: 'pull_station',     symbol: 'MPS',  prefix: 'MPS',  label: 'Manual Pull Station',  color: '#dc2626', shape: 'square',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 manual station / NFPA 72 §17.14' },
-  { type: 'horn_strobe',      symbol: 'H/S',  prefix: 'HS',   label: 'Horn/Strobe',          color: '#ea580c', shape: 'hex',     defaultCircuitType: 'NAC', nfpa: 'NFPA 170 notification appliance / NFPA 72 ch. 18' },
-  { type: 'horn',             symbol: 'H',    prefix: 'HN',   label: 'Horn Only',            color: '#ef4444', shape: 'diamond', defaultCircuitType: 'NAC', nfpa: 'NFPA 170 audible notification appliance / NFPA 72 ch. 18' },
-  { type: 'strobe',           symbol: 'CD',   prefix: 'STR',  label: 'Strobe Only',          color: '#7c3aed', shape: 'circle',  defaultCircuitType: 'NAC', nfpa: 'NFPA 170 visual notification appliance / NFPA 72 §18.5' },
-  { type: 'speaker',          symbol: 'SP',   prefix: 'SP',   label: 'Speaker',              color: '#0891b2', shape: 'speaker', defaultCircuitType: 'NAC', nfpa: 'NFPA 170 speaker notification appliance / NFPA 72 ch. 18' },
-  { type: 'duct_detector',    symbol: 'D',    prefix: 'DD',   label: 'Duct Smoke Detector',  color: '#4f46e5', shape: 'rect',    defaultCircuitType: 'SLC', nfpa: 'NFPA 170 duct detector / NFPA 72 §17.7.5' },
-  { type: 'beam_detector',    symbol: 'B',    prefix: 'BD',   label: 'Beam Smoke Detector',  color: '#7c3aed', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 beam detector / NFPA 72 §17.7' },
-  { type: 'waterflow_switch', symbol: 'WF',   prefix: 'WF',   label: 'Waterflow Switch',     color: '#059669', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 sprinkler waterflow / NFPA 72 §17.16' },
-  { type: 'valve_tamper',     symbol: 'VS',   prefix: 'VS',   label: 'Valve Tamper Switch',  color: '#0d9488', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 supervisory valve / NFPA 72 §17.16' },
-  { type: 'monitor_module',   symbol: 'MM',   prefix: 'MM',   label: 'Monitor Module',       color: '#0f766e', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 72 — addressable module supervising sprinkler device circuit' },
-  { type: 'control_module',   symbol: 'CM',   prefix: 'CM',   label: 'Control / Relay Module', color: '#475569', shape: 'square', defaultCircuitType: 'SLC', nfpa: 'NFPA 72 — door release, elevator, fan interface modules' },
-  { type: 'co_detector',      symbol: 'CO',   prefix: 'CO',   label: 'CO Detector',          color: '#65a30d', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 gas detector family / IBC §915' },
-  { type: 'door_holder',      symbol: 'DH',   prefix: 'DH',   label: 'Door Holdback',        color: '#dc2626', shape: 'square',  defaultCircuitType: 'AUX', nfpa: 'NFPA 170 door release/hold-open interface' },
-  { type: 'annunciator',      symbol: 'ANN',  prefix: 'ANN',  label: 'Remote Annunciator',   color: '#dc2626', shape: 'panel',   defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm annunciator' },
-  { type: 'facp',             symbol: 'FACP', prefix: 'FACP', label: 'FACP',                 color: '#dc2626', shape: 'panel',   defaultCircuitType: 'SLC', nfpa: 'NFPA 170 control equipment / NFPA 72 §10.4' },
-  { type: 'elevator_recall',  symbol: 'ER',   prefix: 'ER',   label: 'Elevator Recall',      color: '#7c3aed', shape: 'circle',  defaultCircuitType: 'SLC', nfpa: 'NFPA 170 elevator recall detector / IBC §3006' },
-];
-
-export const CIRCUIT_TYPES = [
-  { value: 'SLC', label: 'SLC', description: 'Signaling Line Circuit', color: '#2563eb' },
-  { value: 'NAC', label: 'NAC', description: 'Notification Appliance Circuit', color: '#ea580c' },
-  { value: 'IDC', label: 'IDC', description: 'Initiating Device Circuit', color: '#16a34a' },
-  { value: 'AUX', label: 'AUX', description: 'Auxiliary / Control Circuit', color: '#64748b' },
-];
+import { getDisciplineConfig } from '@/lib/disciplines';
 
 export default function DesignerSidebar({
   project,
@@ -65,9 +36,22 @@ export default function DesignerSidebar({
   onDeleteLayoutZone,
   onDeleteWire,
   onDeleteMarkup,
+  disciplineId = 'fire_alarm',
+  devicePalette: devicePaletteProp,
+  circuitTypes: circuitTypesProp,
+  theme: themeProp,
+  showFireAlarmWorkflow = false,
+  selectedCableType = '',
+  onCableTypeChange,
 }) {
   const [openSection, setOpenSection] = useState('tools');
   const [openLayerList, setOpenLayerList] = useState('rooms');
+
+  const disciplineResolved = getDisciplineConfig(disciplineId);
+  const devicePalette = devicePaletteProp ?? disciplineResolved.devicePalette;
+  const circuitTypes = circuitTypesProp ?? disciplineResolved.circuitTypes;
+  const theme = themeProp ?? disciplineResolved.theme;
+  const legendItems = disciplineResolved.legend || [];
 
   const floorDevices = devices.filter(d => d.floor === currentFloor);
   const floorRooms = rooms.filter(room => room.floor === currentFloor);
@@ -78,8 +62,8 @@ export default function DesignerSidebar({
     acc[d.type] = (acc[d.type] || 0) + 1;
     return acc;
   }, {});
-  const floorWireSummary = summarizeWireByType({ wires, devices, floorPlans, floor: currentFloor });
-  const allWireSummary = summarizeWireByType({ wires, devices, floorPlans });
+  const floorWireSummary = summarizeWireByType({ wires, devices, floorPlans, floor: currentFloor, circuitTypes });
+  const allWireSummary = summarizeWireByType({ wires, devices, floorPlans, circuitTypes });
 
   const lifeSafetyFlags = useMemo(
     () => buildLifeSafetyReviewFlags(project, requirements, floorPlans, devices, rooms),
@@ -100,9 +84,10 @@ export default function DesignerSidebar({
               onClick={() => onFloorChange(floor)}
               className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                 currentFloor === floor
-                  ? 'bg-orange-500 text-white'
+                  ? 'text-white'
                   : 'bg-white/10 text-white/60 hover:bg-white/15 hover:text-white'
               }`}
+              style={currentFloor === floor ? { backgroundColor: theme.primary } : undefined}
             >
               {floor}
             </button>
@@ -144,7 +129,7 @@ export default function DesignerSidebar({
               Select the circuit type and ID before using the Wire tool. Saved line segments keep this assignment.
             </p>
             <div className="grid grid-cols-2 gap-1">
-              {CIRCUIT_TYPES.map((circuit) => (
+              {circuitTypes.map((circuit) => (
                 <button
                   key={circuit.value}
                   type="button"
@@ -173,6 +158,13 @@ export default function DesignerSidebar({
               className="w-full h-8 rounded bg-white/5 border border-white/10 px-2 text-xs font-mono text-white outline-none focus:border-orange-400"
               placeholder={`${selectedCircuitType}-1`}
             />
+            <label className="block text-[10px] uppercase tracking-wider text-white/35 px-1 mt-2">Cable / media (optional)</label>
+            <input
+              value={selectedCableType}
+              onChange={(event) => onCableTypeChange?.(event.target.value)}
+              className="w-full h-8 rounded bg-white/5 border border-white/10 px-2 text-xs text-white outline-none focus:border-orange-400"
+              placeholder="e.g. Cat6A UTP, OS2"
+            />
           </div>
         </SidebarSection>
 
@@ -186,7 +178,7 @@ export default function DesignerSidebar({
                 className="w-full flex items-center justify-between px-2 py-1.5 rounded hover:bg-white/5 text-xs"
               >
                 <span className="text-white/60 capitalize">{key.replace(/_/g, ' ')}</span>
-                {visible ? <Eye className="w-3 h-3 text-orange-400" /> : <EyeOff className="w-3 h-3 text-white/20" />}
+                {visible ? <Eye className="w-3 h-3" style={{ color: theme.primary }} /> : <EyeOff className="w-3 h-3 text-white/20" />}
               </button>
             ))}
             <div className="mt-2 space-y-1 border-t border-white/10 pt-2">
@@ -272,7 +264,7 @@ export default function DesignerSidebar({
         {/* Device Palette */}
         <SidebarSection title="Place Device" icon={Zap} open={openSection === 'devices'} onToggle={() => toggle('devices')}>
           <div className="space-y-0.5">
-            {DEVICE_PALETTE.map(device => {
+            {devicePalette.map(device => {
               const key = device.subtype || device.type;
               const toolId = 'place_device_' + (device.subtype || device.type);
               const count = deviceCounts[device.type] || 0;
@@ -286,21 +278,32 @@ export default function DesignerSidebar({
                     event.dataTransfer.setData('text/plain', toolId);
                     event.dataTransfer.effectAllowed = 'copy';
                   }}
-                  title={`${device.label} — ${device.nfpa}`}
+                  title={`${device.label} — ${device.nfpa || ''}`}
                   className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
-                    selectedTool === toolId ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40' : 'text-white/60 hover:bg-white/5 hover:text-white'
+                    selectedTool === toolId ? 'ring-1' : 'text-white/60 hover:bg-white/5 hover:text-white'
                   }`}
+                  style={
+                    selectedTool === toolId
+                      ? {
+                          backgroundColor: theme.primaryMuted,
+                          boxShadow: `0 0 0 1px ${theme.primary}66`,
+                          color: theme.primary,
+                        }
+                      : undefined
+                  }
                 >
                   <DeviceSymbol device={device} size={16} />
                   <span className="truncate flex-1 text-left">{device.label}</span>
-                  {count > 0 && <span className="text-orange-400 font-mono text-[10px]">{count}</span>}
+                  {count > 0 && (
+                    <span className="font-mono text-[10px]" style={{ color: theme.primary }}>{count}</span>
+                  )}
                 </button>
               );
             })}
           </div>
         </SidebarSection>
 
-        {lifeSafetyFlags.length > 0 && (
+        {showFireAlarmWorkflow && lifeSafetyFlags.length > 0 && (
           <SidebarSection title="Life safety — review" icon={AlertTriangle} open={openSection === 'lfs'} onToggle={() => toggle('lfs')}>
             <div className="space-y-2 max-h-48 overflow-y-auto pr-0.5">
               {lifeSafetyFlags.map((f) => (
@@ -324,7 +327,7 @@ export default function DesignerSidebar({
         )}
 
         {/* Code Requirements */}
-        {requirements && (
+        {showFireAlarmWorkflow && requirements && (
           <SidebarSection title="Code Requirements" icon={AlertTriangle} open={openSection === 'code'} onToggle={() => toggle('code')}>
             <div className="space-y-1">
               <ReqItem label="Fire Alarm" value={requirements.fireAlarmRequired} />
@@ -373,7 +376,7 @@ export default function DesignerSidebar({
         {/* Device Count */}
         <SidebarSection title="Device Count" icon={LayoutList} open={openSection === 'count'} onToggle={() => toggle('count')}>
           <div className="space-y-0.5">
-            {DEVICE_PALETTE.filter(d => deviceCounts[d.type] > 0).map(device => (
+            {devicePalette.filter(d => deviceCounts[d.type] > 0).map(device => (
               <div key={device.type + device.label} className="flex justify-between items-center text-xs px-2 py-0.5">
                 <span className="text-white/50 truncate">{device.label}</span>
                 <span className="text-white font-mono ml-2">{deviceCounts[device.type]}</span>
@@ -385,11 +388,11 @@ export default function DesignerSidebar({
             <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
               <div className="flex justify-between text-xs font-medium px-2">
                 <span className="text-white/50">Floor {currentFloor}</span>
-                <span className="text-orange-400 font-mono">{floorDevices.length}</span>
+                <span className="font-mono" style={{ color: theme.primary }}>{floorDevices.length}</span>
               </div>
               <div className="flex justify-between text-xs font-medium px-2">
                 <span className="text-white/50">All Floors</span>
-                <span className="text-orange-400 font-mono">{devices.length}</span>
+                <span className="font-mono" style={{ color: theme.primary }}>{devices.length}</span>
               </div>
             </div>
             <div className="mt-2 pt-2 border-t border-white/10 space-y-1">
@@ -415,17 +418,10 @@ export default function DesignerSidebar({
         </SidebarSection>
 
         {/* NFPA Legend */}
-        <SidebarSection title="NFPA 170 Legend" icon={LayoutList} open={openSection === 'legend'} onToggle={() => toggle('legend')}>
+        <SidebarSection title={showFireAlarmWorkflow ? 'NFPA 170 Legend' : 'Symbol legend'} icon={LayoutList} open={openSection === 'legend'} onToggle={() => toggle('legend')}>
           <div className="space-y-1">
-            {[
-              { shape: 'circle', label: 'Initiating Device (circle)' },
-              { shape: 'square', label: 'Notification Appliance (square)' },
-              { shape: 'diamond', label: 'Supervisory Device (diamond)' },
-              { shape: 'panel', label: 'Control Panel (rectangle)' },
-              { shape: 'speaker', label: 'Speaker (trapezoid)' },
-              { shape: 'hex', label: 'Combination appliance (hexagon)' },
-            ].map(item => (
-              <div key={item.shape} className="flex items-center gap-2 text-[10px] text-white/50">
+            {legendItems.map((item, idx) => (
+              <div key={`${item.shape}-${item.label}-${idx}`} className="flex items-center gap-2 text-[10px] text-white/50">
                 <LegendShape shape={item.shape} />
                 <span>{item.label}</span>
               </div>
@@ -436,9 +432,11 @@ export default function DesignerSidebar({
 
       {/* Bottom Actions */}
       <div className="p-3 border-t border-white/10 space-y-2 shrink-0">
-        <Button onClick={onAutoPlace} className="w-full bg-orange-500 hover:bg-orange-600 text-white text-xs gap-1.5 h-8">
+        {showFireAlarmWorkflow && (
+        <Button onClick={onAutoPlace} className="w-full text-white text-xs gap-1.5 h-8 border-0" style={{ backgroundColor: theme.primary }}>
           <Zap className="w-3 h-3" /> Auto-Place Devices
         </Button>
+        )}
         <Button onClick={() => onExport('pdf')} variant="outline" className="w-full border-white/20 text-white/70 hover:bg-white/10 text-xs gap-1.5 h-8">
           <Download className="w-3 h-3" /> Export PDF Report
         </Button>
@@ -532,7 +530,7 @@ function LayerItemGroup({ title, open, onToggle, items = [], emptyText, getLabel
   );
 }
 
-function summarizeWireByType({ wires = [], devices = [], floorPlans = [], floor }) {
+function summarizeWireByType({ wires = [], devices = [], floorPlans = [], floor, circuitTypes = [] }) {
   const summary = {};
   let totalFeet = 0;
 
@@ -548,7 +546,7 @@ function summarizeWireByType({ wires = [], devices = [], floorPlans = [], floor 
     const scale = getFloorScale(floorPlans, wireFloor);
     const feet = Math.round(feetBetween(from, to, scale));
     if (!summary[type]) {
-      const circuitMeta = CIRCUIT_TYPES.find((circuit) => circuit.value === type);
+      const circuitMeta = circuitTypes.find((circuit) => circuit.value === type);
       summary[type] = {
         type,
         feet: 0,
@@ -587,6 +585,7 @@ function LegendShape({ shape }) {
   if (shape === 'hex') return <svg width="16" height="14"><polygon points="5,1 11,1 15,7 11,13 5,13 1,7" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
   if (shape === 'panel') return <svg width="20" height="12"><rect x="1" y="1" width="18" height="10" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
   if (shape === 'speaker') return <svg width="14" height="14"><polygon points="4,4 10,2 10,12 4,10" fill="none" stroke="#94a3b8" strokeWidth="1.5"/></svg>;
+  if (typeof shape === 'string' && shape.startsWith('cam_')) return <svg width="14" height="14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="#94a3b8" strokeWidth="1.5"/><circle cx="7" cy="7" r="2" fill="none" stroke="#94a3b8" strokeWidth="1"/></svg>;
   return null;
 }
 
@@ -632,5 +631,14 @@ export function DeviceSymbol({ device, size = 20, selected = false }) {
       <text x="10" y="21" textAnchor="middle" fontSize="5" fill={c} fontWeight="bold" fontFamily="Arial, sans-serif">{label}</text>
     </svg>
   );
+  if (typeof shape === 'string' && shape.startsWith('cam_')) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 20 20">
+        <circle cx="10" cy="10" r="7.5" fill={`${c}22`} stroke={c} strokeWidth={selected ? 2 : 1.5} />
+        <circle cx="10" cy="10" r="3" fill="none" stroke={c} strokeWidth="1" />
+        <text x="10" y="13.5" textAnchor="middle" fontSize="6" fill={c} fontWeight="bold" fontFamily="Arial, sans-serif">{label}</text>
+      </svg>
+    );
+  }
   return null;
 }

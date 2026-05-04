@@ -94,6 +94,22 @@ export function routeCircuits(devices, rooms, currentFloor) {
   const CIRCUIT_COLORS = {
     SLC: "#3b82f6",
     NAC: "#f97316",
+    IDC: "#16a34a",
+    AUX: "#64748b",
+    DOOR: "#ea580c",
+    RS485: "#7c3aed",
+    POE: "#059669",
+    DATA: "#2563eb",
+    FIBER: "#7c3aed",
+    COAX: "#64748b",
+    AUDIO: "#7c3aed",
+    VIDEO: "#2563eb",
+    CONTROL: "#ea580c",
+    SPEAKER: "#059669",
+    CAT6: "#16a34a",
+    CAT6A: "#15803d",
+    FIBER_SM: "#7c3aed",
+    FIBER_MM: "#a855f7",
     default: "#94a3b8",
   };
 
@@ -104,7 +120,13 @@ export function routeCircuits(devices, rooms, currentFloor) {
     .forEach(d => {
       const key = d.circuit || "SLC-1";
       if (!circuitGroups[key]) circuitGroups[key] = [];
-      circuitGroups[key].push({ id: d.id, x: d.x, y: d.y, type: d.type });
+      circuitGroups[key].push({
+        id: d.id,
+        x: d.x,
+        y: d.y,
+        type: d.type,
+        circuit_type: d.circuit_type,
+      });
     });
 
   const floorRooms = rooms.filter(r => r.floor === currentFloor);
@@ -124,7 +146,9 @@ export function routeCircuits(devices, rooms, currentFloor) {
     // Estimate total wire length in feet (assume 3 px ≈ 1 ft)
     const totalLengthPx = segments.reduce((sum, s) => sum + s.lengthPx, 0);
 
-    const circuitType = circuit.startsWith("NAC") ? "NAC" : "SLC";
+    const inferred =
+      circuit.startsWith("NAC") ? "NAC" : circuit.startsWith("SLC") ? "SLC" : null;
+    const circuitType = nodes[0]?.circuit_type || inferred || "SLC";
     routes.push({
       circuit,
       circuitType,

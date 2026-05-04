@@ -9,14 +9,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
-import { DEVICE_PALETTE, CIRCUIT_TYPES } from '@/components/designer/DesignerSidebar';
-
-const DEVICE_TYPE_LABELS = Object.fromEntries(DEVICE_PALETTE.map(device => [device.type, device.label]));
-const DEVICE_COLORS = Object.fromEntries(DEVICE_PALETTE.map(device => [device.type, device.color]));
+import { isVideoCameraType } from '@/lib/disciplines';
 
 const STATUS_OPTIONS = ['Proposed', 'In Place', 'To Be Replaced', 'To Be Upgraded', 'To Be Removed'];
 const COLOR_OPTIONS = ['#d40b15', '#2563eb', '#ea580c', '#059669', '#7c3aed', '#0f172a'];
-const SECTIONS = [
+const BASE_SECTIONS = [
   { id: 'attributes', label: 'Attributes' },
   { id: 'profile', label: 'Element Profile' },
   { id: 'files', label: 'Files & Photos' },
@@ -27,6 +24,13 @@ const SECTIONS = [
   { id: 'accessories', label: 'Accessories' },
   { id: 'notes', label: 'Notes' },
 ];
+
+function buildNavSections(formType) {
+  if (!isVideoCameraType(formType)) return BASE_SECTIONS;
+  const next = [...BASE_SECTIONS];
+  next.splice(1, 0, { id: 'camera', label: 'Camera / video' });
+  return next;
+}
 
 function Field({ label, required, children }) {
   return (
@@ -54,15 +58,28 @@ function PanelSelect({ value, onValueChange, children, placeholder }) {
   );
 }
 
-export default function DevicePanel({ device, onUpdate, onDelete, onClose }) {
+export default function DevicePanel({
+  device,
+  onUpdate,
+  onDelete,
+  onClose,
+  devicePalette = [],
+  circuitTypes = [],
+  disciplineConfig,
+}) {
   const [form, setForm] = useState(null);
   const [activeSection, setActiveSection] = useState('attributes');
+
+  const DEVICE_TYPE_LABELS = Object.fromEntries(devicePalette.map((d) => [d.type, d.label]));
+  const DEVICE_COLORS = Object.fromEntries(devicePalette.map((d) => [d.type, d.color]));
 
   useEffect(() => {
     if (device) setForm({ ...device });
   }, [device]);
 
   if (!device || !form) return null;
+
+  const navSections = buildNavSections(form.type);
 
   const handleChange = (key, value) => {
     const updated = { ...form, [key]: value };
@@ -83,7 +100,9 @@ export default function DevicePanel({ device, onUpdate, onDelete, onClose }) {
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="text-xl text-slate-900 truncate">{form.label || form.id}</h2>
-          <p className="text-xs text-slate-500 truncate">{typeLabel} · {form.nfpa_symbol_reference || 'NFPA 170 symbol'}</p>
+          <p className="text-xs text-slate-500 truncate">
+            {typeLabel} · {form.nfpa_symbol_reference || disciplineConfig?.symbolReference || '—'}
+          </p>
         </div>
         <button onClick={onClose} className="text-slate-500 hover:text-slate-900">
           <X className="w-7 h-7" />
@@ -92,13 +111,19 @@ export default function DevicePanel({ device, onUpdate, onDelete, onClose }) {
 
       <div className="flex-1 min-h-0 flex">
         <nav className="w-48 border-r border-slate-200 bg-slate-50/60 py-4 shrink-0">
-          {SECTIONS.map(section => (
+          {navSections.map(section => (
             <button
               key={section.id}
+              type="button"
               onClick={() => setActiveSection(section.id)}
               className={`w-full text-left px-4 py-3 text-sm transition-colors ${
-                activeSection === section.id ? 'bg-white text-slate-950 border-l-4 border-blue-500' : 'text-slate-600 hover:bg-white'
+                activeSection === section.id ? 'bg-white text-slate-950 border-l-4' : 'text-slate-600 hover:bg-white'
               }`}
+              style={
+                activeSection === section.id
+                  ? { borderLeftColor: disciplineConfig?.theme?.primary || '#3b82f6' }
+                  : undefined
+              }
             >
               {section.label}
             </button>
@@ -127,17 +152,20 @@ export default function DevicePanel({ device, onUpdate, onDelete, onClose }) {
                 </PanelSelect>
               </Field>
               <Field label="Circuit Type" required>
-                <PanelSelect value={form.circuit_type || 'SLC'} onValueChange={value => {
+                <PanelSelect value={form.circuit_type || circuitTypes[0]?.value || 'SLC'} onValueChange={value => {
                   handleChange('circuit_type', value);
-                  if (!form.circuit || CIRCUIT_TYPES.some(c => form.circuit?.startsWith(c.value))) {
+                  if (!form.circuit || circuitTypes.some(c => form.circuit?.startsWith(c.value))) {
                     handleChange('circuit', `${value}-${form.floor || 1}`);
                   }
                 }}>
-                  {CIRCUIT_TYPES.map(circuit => <SelectItem key={circuit.value} value={circuit.value}>{circuit.label} - {circuit.description}</SelectItem>)}
+                  {circuitTypes.map(circuit => <SelectItem key={circuit.value} value={circuit.value}>{circuit.label} - {circuit.description}</SelectItem>)}
                 </PanelSelect>
               </Field>
               <Field label="Circuit ID" required>
-                <PanelInput value={form.circuit || ''} onChange={event => handleChange('circuit', event.target.value)} placeholder="SLC-1 / NAC-1" />
+                <PanelInput value={form.circuit || ''} onChange={event => handleChange('circuit', event.target.value)} placeholder="POE-1 / SLC-1" />
+              </Field>
+              <Field label="Cable / media type">
+                <PanelInput value={form.cable_type || ''} onChange={event => handleChange('cable_type', event.target.value)} placeholder="Cat6A, fiber, etc." />
               </Field>
               <Field label="Component Manufacturer" required>
                 <PanelInput value={form.manufacturer || ''} onChange={event => handleChange('manufacturer', event.target.value)} />
@@ -153,6 +181,82 @@ export default function DevicePanel({ device, onUpdate, onDelete, onClose }) {
               </Field>
             </div>
           </section>
+
+          {isVideoCameraType(form.type) && (
+            <>
+              <Separator />
+              <section id="camera" className="space-y-4">
+                <h3 className="text-2xl text-slate-950">Field of view &amp; aim</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="FOV angle (°)">
+                    <PanelInput type="number" min="1" max="360" value={form.fov_degrees ?? 90} onChange={e => handleChange('fov_degrees', Number(e.target.value))} />
+                  </Field>
+                  <Field label="FOV range (ft)">
+                    <PanelInput type="number" min="1" value={form.fov_range_ft ?? 35} onChange={e => handleChange('fov_range_ft', Number(e.target.value))} />
+                  </Field>
+                  <Field label="Aim azimuth (°)">
+                    <PanelInput type="number" value={form.fov_aim_deg ?? 0} onChange={e => handleChange('fov_aim_deg', Number(e.target.value))} placeholder="0 = +X on plan" />
+                  </Field>
+                  <Field label="Mount height (AFF)">
+                    <PanelInput value={form.mount_height_aff || ''} onChange={e => handleChange('mount_height_aff', e.target.value)} placeholder="e.g. 10 ft AFF" />
+                  </Field>
+                </div>
+                <h3 className="text-xl text-slate-950 pt-2">Imaging &amp; stream</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Resolution">
+                    <PanelInput value={form.camera_resolution || ''} onChange={e => handleChange('camera_resolution', e.target.value)} placeholder="e.g. 4 MP / 1080p" />
+                  </Field>
+                  <Field label="Lens / focal">
+                    <PanelInput value={form.camera_lens || ''} onChange={e => handleChange('camera_lens', e.target.value)} placeholder="mm or varifocal range" />
+                  </Field>
+                  <Field label="Codec">
+                    <PanelSelect value={form.camera_codec || 'H.265'} onValueChange={v => handleChange('camera_codec', v)}>
+                      <SelectItem value="H.265">H.265</SelectItem>
+                      <SelectItem value="H.264">H.264</SelectItem>
+                      <SelectItem value="MJPEG">MJPEG</SelectItem>
+                    </PanelSelect>
+                  </Field>
+                  <Field label="IR / low light">
+                    <PanelInput value={form.camera_ir_mode || ''} onChange={e => handleChange('camera_ir_mode', e.target.value)} placeholder="Smart IR, EXIR, none" />
+                  </Field>
+                  <Field label="Stream / VMS channel">
+                    <PanelInput value={form.camera_stream_id || ''} onChange={e => handleChange('camera_stream_id', e.target.value)} />
+                  </Field>
+                  <Field label="IP address">
+                    <PanelInput value={form.ip_address || ''} onChange={e => handleChange('ip_address', e.target.value)} />
+                  </Field>
+                </div>
+                {form.type === 'cam_ptz' && (
+                  <>
+                    <h3 className="text-xl text-slate-950 pt-2">PTZ</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Field label="Pan range (°)">
+                        <PanelInput value={form.ptz_pan_range || ''} onChange={e => handleChange('ptz_pan_range', e.target.value)} placeholder="e.g. 360" />
+                      </Field>
+                      <Field label="Tilt range (°)">
+                        <PanelInput value={form.ptz_tilt_range || ''} onChange={e => handleChange('ptz_tilt_range', e.target.value)} placeholder="e.g. -15 to 90" />
+                      </Field>
+                      <Field label="Optical zoom (×)">
+                        <PanelInput type="number" step="0.1" value={form.ptz_zoom_optical ?? ''} onChange={e => handleChange('ptz_zoom_optical', e.target.value === '' ? '' : Number(e.target.value))} />
+                      </Field>
+                      <Field label="Presets (#)">
+                        <PanelInput type="number" min="0" value={form.ptz_presets_count ?? ''} onChange={e => handleChange('ptz_presets_count', e.target.value === '' ? '' : Number(e.target.value))} />
+                      </Field>
+                      <Field label="Patrol / pattern">
+                        <PanelInput value={form.ptz_patrol || ''} onChange={e => handleChange('ptz_patrol', e.target.value)} placeholder="Pattern A, tour name" />
+                      </Field>
+                      <Field label="Auto-tracking">
+                        <PanelSelect value={form.ptz_auto_track ? 'yes' : 'no'} onValueChange={v => handleChange('ptz_auto_track', v === 'yes')}>
+                          <SelectItem value="no">No</SelectItem>
+                          <SelectItem value="yes">Yes</SelectItem>
+                        </PanelSelect>
+                      </Field>
+                    </div>
+                  </>
+                )}
+              </section>
+            </>
+          )}
 
           <Separator />
 

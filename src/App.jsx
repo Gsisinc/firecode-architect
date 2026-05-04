@@ -9,6 +9,7 @@ import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ProjectList from './pages/ProjectList';
 import ProjectSetup from './pages/ProjectSetup';
 import ProjectDesigner from './pages/ProjectDesigner';
+import SystemsDashboard from './pages/SystemsDashboard';
 import CodeReference from './pages/CodeReference';
 
 const AuthenticatedApp = () => {
@@ -36,7 +37,9 @@ const AuthenticatedApp = () => {
       <Route path="/" element={<ProjectList />} />
       <Route path="/project/new" element={<ProjectSetup />} />
       <Route path="/project/:id/setup" element={<ProjectSetup />} />
+      <Route path="/project/:id/systems" element={<SystemsDashboard />} />
       <Route path="/project/:id/designer" element={<ProjectDesigner />} />
+      <Route path="/project/:id/designer/:discipline" element={<ProjectDesigner />} />
       <Route path="/code-reference" element={<CodeReference />} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>

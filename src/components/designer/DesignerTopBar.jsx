@@ -4,9 +4,18 @@ import { ArrowLeft, Save, Download, Flame, CheckCircle2, Loader2, Table, GitBran
 import { Button } from '@/components/ui/button';
 import { downloadNfpaDesignReportPdf } from '@/lib/nfpaDesignReportPdf';
 
-export default function DesignerTopBar({ project, isSaving, onSave, activeTab, onTabChange }) {
+export default function DesignerTopBar({
+  project,
+  projectId,
+  discipline,
+  isSaving,
+  onSave,
+  activeTab,
+  onTabChange,
+}) {
   const navigate = useNavigate();
   const [exporting, setExporting] = useState(false);
+  const accent = discipline?.theme?.primary || '#ea580c';
 
   const handleExportPDF = async () => {
     setExporting(true);
@@ -29,17 +38,29 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
 
   return (
     <div className="h-14 bg-[hsl(222,47%,6%)] border-b border-white/10 flex items-center px-4 gap-3 shrink-0">
-      <button onClick={() => navigate('/')} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white shrink-0">
+      <button
+        type="button"
+        onClick={() => navigate(projectId ? `/project/${projectId}/systems` : '/')}
+        className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white shrink-0"
+        title="All systems"
+      >
         <ArrowLeft className="w-4 h-4" />
       </button>
 
       <div className="flex items-center gap-2 shrink-0">
-        <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center">
-          <Flame className="w-4 h-4 text-white" />
+        <div
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-white"
+          style={{ backgroundColor: accent }}
+        >
+          <Flame className="w-4 h-4" />
         </div>
         <div>
           <p className="text-sm font-semibold text-white leading-tight">{project?.name || 'Untitled Project'}</p>
-          <p className="text-xs text-white/30 leading-tight">Group {project?.occupancy_group || '—'} · {project?.num_floors || 1} floors</p>
+          <p className="text-xs text-white/30 leading-tight">
+            {discipline?.label || 'Designer'}
+            <span className="text-white/20"> · </span>
+            Group {project?.occupancy_group || '—'} · {project?.num_floors || 1} floors
+          </p>
         </div>
       </div>
 
@@ -53,9 +74,10 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
               onClick={() => onTabChange(tab.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
                 activeTab === tab.id
-                  ? 'bg-orange-500 text-white'
+                  ? 'text-white'
                   : 'text-white/50 hover:text-white hover:bg-white/10'
               }`}
+              style={activeTab === tab.id ? { backgroundColor: accent } : undefined}
             >
               <Icon className="w-3.5 h-3.5" />
               {tab.label}
@@ -91,7 +113,8 @@ export default function DesignerTopBar({ project, isSaving, onSave, activeTab, o
           onClick={handleExportPDF}
           disabled={exporting}
           size="sm"
-          className="bg-orange-500 hover:bg-orange-600 text-white gap-1.5 text-xs"
+          className="text-white gap-1.5 text-xs border-0"
+          style={{ backgroundColor: accent }}
         >
           {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
           Export PDF

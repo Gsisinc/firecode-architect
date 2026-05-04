@@ -1,7 +1,8 @@
-import React, { Suspense, lazy, useState, useCallback, useRef, useMemo } from "react";
+import React, { Suspense, lazy, useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
+import { getDisciplineConfig, normalizeDisciplineId } from "@/lib/disciplines";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan } from "lucide-react";
@@ -55,7 +56,9 @@ import {
 const DocumentWorkspace = lazy(() => import("@/components/designer/DocumentWorkspace"));
 
 export default function ProjectDesigner() {
-  const { id: projectId } = useParams();
+  const { id: projectId, discipline: disciplineRouteParam } = useParams();
+  const disciplineId = normalizeDisciplineId(disciplineRouteParam);
+  const disciplineConfig = getDisciplineConfig(disciplineId);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -96,9 +99,17 @@ export default function ProjectDesigner() {
   const [localDocumentWorkspace, setLocalDocumentWorkspace] = useState(null);
   const [analyzingFloor, setAnalyzingFloor] = useState(false);
   const [localWires, setLocalWires] = useState(null);
-  const [selectedCircuitType, setSelectedCircuitType] = useState('SLC');
-  const [selectedCircuitId, setSelectedCircuitId] = useState('SLC-1');
+  const [selectedCircuitType, setSelectedCircuitType] = useState(() => disciplineConfig.circuitTypes[0]?.value || 'SLC');
+  const [selectedCircuitId, setSelectedCircuitId] = useState(() => `${disciplineConfig.circuitTypes[0]?.value || 'SLC'}-1`);
+  const [selectedCableType, setSelectedCableType] = useState('');
   const [selectedSheetId, setSelectedSheetId] = useState(null);
+
+  useEffect(() => {
+    const t = disciplineConfig.circuitTypes[0]?.value || 'SLC';
+    setSelectedCircuitType(t);
+    setSelectedCircuitId(`${t}-1`);
+    setSelectedCableType('');
+  }, [disciplineId]);
   const [customPlanType, setCustomPlanType] = useState('');
   const [detectingSimilarZones, setDetectingSimilarZones] = useState(false);
   const [planVisionLoading, setPlanVisionLoading] = useState(false);
@@ -111,12 +122,20 @@ export default function ProjectDesigner() {
   });
 
   const rooms = localRooms ?? project?.rooms ?? [];
-  const devices = localDevices ?? project?.devices ?? [];
+  const storedDevices = localDevices ?? project?.devices ?? [];
+  const storedWires = localWires ?? project?.wires ?? [];
+  const devices = useMemo(
+    () => storedDevices.filter((d) => (d.discipline || 'fire_alarm') === disciplineId),
+    [storedDevices, disciplineId]
+  );
+  const wires = useMemo(
+    () => storedWires.filter((w) => (w.discipline || 'fire_alarm') === disciplineId),
+    [storedWires, disciplineId]
+  );
   const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
   const markups = localMarkups ?? project?.markups ?? [];
   const layoutZones = localLayoutZones ?? project?.layout_zones ?? [];
   const documentWorkspace = localDocumentWorkspace ?? project?.document_workspace ?? null;
-  const wires = localWires ?? project?.wires ?? [];
   const planSheets = localPlanSheets ?? project?.plan_sheets ?? derivePlanSheets(floorPlans);
   const planCategories = project?.plan_categories ?? [];
   const selectedSheet = planSheets.find(sheet => sheet.id === selectedSheetId) || planSheets[0] || null;
@@ -138,8 +157,31 @@ export default function ProjectDesigner() {
   );
 
   const canvasDevices = useMemo(
-    () => assignSprinklerMonitoringPositions(devices, rooms),
-    [devices, rooms]
+    () =>
+      disciplineId === 'fire_alarm'
+        ? assignSprinklerMonitoringPositions(devices, rooms)
+        : devices,
+    [disciplineId, devices, rooms]
+  );
+
+  const handleStoredDevicesChange = useCallback(
+    (nextForDiscipline) => {
+      const other = storedDevices.filter((d) => (d.discipline || 'fire_alarm') !== disciplineId);
+      setLocalDevices([...other, ...nextForDiscipline]);
+    },
+    [disciplineId, storedDevices]
+  );
+
+  const handleStoredWiresChange = useCallback(
+    (nextForDiscipline) => {
+      const tagged = nextForDiscipline.map((w) => ({
+        ...w,
+        discipline: w.discipline || disciplineId,
+      }));
+      const other = storedWires.filter((w) => (w.discipline || 'fire_alarm') !== disciplineId);
+      setLocalWires([...other, ...tagged]);
+    },
+    [disciplineId, storedWires]
   );
 
   const saveMutation = useMutation({
@@ -151,18 +193,19 @@ export default function ProjectDesigner() {
   });
 
   const saveProjectPatch = (patch) => {
+    const devs = patch.devices ?? storedDevices;
     return saveMutation.mutateAsync({
       rooms,
-      devices,
+      devices: devs,
       markups,
       layout_zones: layoutZones,
       floor_plans: patch.floor_plans ?? floorPlans,
       plan_sheets: patch.plan_sheets ?? planSheets,
       plan_categories: patch.plan_categories ?? planCategories,
       document_workspace: documentWorkspace,
-      wires,
+      wires: patch.wires ?? storedWires,
       analysis_results: analysisResults,
-      status: devices.length > 0 ? "in_progress" : "draft",
+      status: devs.length > 0 ? "in_progress" : "draft",
       ...patch,
     });
   };
@@ -170,16 +213,16 @@ export default function ProjectDesigner() {
   const handleSave = () => {
     saveMutation.mutate({
       rooms,
-      devices,
+      devices: storedDevices,
       markups,
       layout_zones: layoutZones,
       floor_plans: floorPlans,
       plan_sheets: planSheets,
       plan_categories: planCategories,
       document_workspace: documentWorkspace,
-      wires,
+      wires: storedWires,
       analysis_results: analysisResults,
-      status: devices.length > 0 ? "in_progress" : "draft",
+      status: storedDevices.length > 0 ? "in_progress" : "draft",
     });
   };
 
@@ -451,6 +494,10 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
   };
 
   const handleAutoPlace = useCallback(() => {
+    if (disciplineId !== 'fire_alarm') {
+      toast.error('Auto-place devices is only available in the Fire Alarm designer');
+      return;
+    }
     if (!project || rooms.length === 0) {
       toast.error("Define rooms before auto-placing devices");
       return;
@@ -464,7 +511,7 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
       default_type: project.default_ceiling_type || "smooth_flat",
     };
 
-    let allDevices = [];
+    let generatedDevices = [];
     const floorRooms = rooms.filter((r) => r.floor === activeFloor);
     const activeFloorZones = layoutZones.filter((zone) => zone.floor === activeFloor);
     const facpPt = suggestFacpPlacementPx(floorRooms, activeFloorZones, activeFloor);
@@ -475,29 +522,29 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
       const smokeRooms = rooms.filter(
         (r) => r.floor === activeFloor && r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
       );
-      allDevices.push(...calculateSmokeDetectorPlacement(smokeRooms, ceilingPayload));
-      allDevices.push(...calculateDuctDetectorPlacement(project, floorRooms, activeFloor, analysis));
+      generatedDevices.push(...calculateSmokeDetectorPlacement(smokeRooms, ceilingPayload));
+      generatedDevices.push(...calculateDuctDetectorPlacement(project, floorRooms, activeFloor, analysis));
     }
 
     // Heat detectors
-    allDevices.push(...calculateHeatDetectorPlacement(floorRooms, ceilingPayload));
+    generatedDevices.push(...calculateHeatDetectorPlacement(floorRooms, ceilingPayload));
 
     // Pull stations
-    allDevices.push(...calculatePullStationPlacement(floorRooms, analysis));
+    generatedDevices.push(...calculatePullStationPlacement(floorRooms, analysis));
 
     // Strobes
     if (needsAlarm) {
-      allDevices.push(...calculateStrobePlacement(floorRooms));
+      generatedDevices.push(...calculateStrobePlacement(floorRooms));
     }
 
     // Horn/strobes
     if (needsAlarm) {
-      allDevices.push(...calculateHornPlacement(floorRooms));
+      generatedDevices.push(...calculateHornPlacement(floorRooms));
     }
 
     // Elevator recall (supervisory lobby / MR / shaft detectors)
     const elevDevices = calculateElevatorRecallDetectors(project).filter((d) => d.floor === activeFloor);
-    allDevices.push(...elevDevices);
+    generatedDevices.push(...elevDevices);
 
     const sprinklerOk = ['Full (NFPA 13)', 'Full (NFPA 13R)', 'Partial'].includes(project.sprinkler_status || '');
     if (sprinklerOk) {
@@ -505,24 +552,24 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
         calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor),
         floorRooms
       );
-      allDevices.push(...sprinklerDevices);
-      allDevices.push(...attachSprinklerMonitorModules(sprinklerDevices));
+      generatedDevices.push(...sprinklerDevices);
+      generatedDevices.push(...attachSprinklerMonitorModules(sprinklerDevices));
     }
 
     // Elevator interface / shunt modules at panel cluster (floor 1)
     if (needsAlarm && activeFloor === 1 && (Number(project.elevator_count) || 0) > 0) {
-      allDevices.push(...calculateElevatorInterfaceModules(project, facpPt, activeFloor));
+      generatedDevices.push(...calculateElevatorInterfaceModules(project, facpPt, activeFloor));
     }
 
     // Door hold-open + door release control modules (exit / stair / vestibule rooms)
     if (needsAlarm) {
-      allDevices.push(...calculateDoorReleasePlacement(floorRooms, analysis));
+      generatedDevices.push(...calculateDoorReleasePlacement(floorRooms, analysis));
     }
 
     if (needsAlarm && activeFloor === 1) {
       const defH = ceilingPayload.default;
       const highBay = defH >= HIGH_BAY_SMOKE_CEILING_FT;
-      allDevices.push(
+      generatedDevices.push(
         {
           id: "FACP-1",
           type: "facp",
@@ -560,11 +607,12 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
       );
     }
 
-    allDevices = nudgeDevicesOutOfBlockedZones(allDevices, floorRooms, activeFloorZones);
+    generatedDevices = nudgeDevicesOutOfBlockedZones(generatedDevices, floorRooms, activeFloorZones);
 
     // Assign addresses
-    allDevices = allDevices.map((d, i) => ({
+    generatedDevices = generatedDevices.map((d, i) => ({
       ...d,
+      discipline: 'fire_alarm',
       address:
         d.address ||
         `${d.type === "smoke_detector"
@@ -594,10 +642,12 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
       generated_by: "auto_place",
     }));
 
-    const mergedDevices = mergeGeneratedDevices(devices, allDevices, activeFloor);
-    setLocalDevices(mergedDevices);
-    toast.success(`Auto-placed ${allDevices.length} generated devices on floor ${activeFloor}; manual devices were preserved`);
-  }, [project, rooms, devices, activeFloor, analysisResults, layoutZones]);
+    const fireExisting = storedDevices.filter((d) => (d.discipline || 'fire_alarm') === 'fire_alarm');
+    const mergedFire = mergeGeneratedDevices(fireExisting, generatedDevices, activeFloor);
+    const otherDisc = storedDevices.filter((d) => (d.discipline || 'fire_alarm') !== 'fire_alarm');
+    setLocalDevices([...otherDisc, ...mergedFire]);
+    toast.success(`Auto-placed ${generatedDevices.length} generated devices on floor ${activeFloor}; manual devices were preserved`);
+  }, [project, rooms, storedDevices, activeFloor, analysisResults, layoutZones, disciplineId]);
 
   const handleAddRoom = (roomData) => {
     const newRoom = {
@@ -612,7 +662,7 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
   };
 
   const handleUpdateDevice = (deviceId, updates) => {
-    const updated = devices.map((d) => {
+    const updated = storedDevices.map((d) => {
       if (d.id !== deviceId) return d;
       const merged = { ...d, ...updates };
       if (updates.simulation && d.simulation) {
@@ -632,14 +682,14 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
   };
 
   const handleDeleteDevice = (deviceId) => {
-    setLocalDevices(devices.filter((d) => d.id !== deviceId));
-    setLocalWires(wires.filter((wire) => wire.from !== deviceId && wire.to !== deviceId));
+    setLocalDevices(storedDevices.filter((d) => d.id !== deviceId));
+    setLocalWires(storedWires.filter((wire) => wire.from !== deviceId && wire.to !== deviceId));
     setSelectedDevice(null);
   };
 
   const handleDeleteRoom = (roomId) => {
     setLocalRooms(rooms.filter((room) => room.id !== roomId));
-    setLocalDevices(devices.filter((device) => device.room_id !== roomId));
+    setLocalDevices(storedDevices.filter((device) => device.room_id !== roomId));
     toast.success("Room deleted");
   };
 
@@ -710,7 +760,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
   };
 
   const handleDeleteWire = (wireId) => {
-    setLocalWires(wires.filter((wire) => wire.id !== wireId));
+    setLocalWires(storedWires.filter((wire) => wire.id !== wireId));
     toast.success("Wire segment deleted");
   };
 
@@ -889,6 +939,8 @@ Return only zones that are clearly the same kind of object. Do not include the o
     <div className="h-screen flex flex-col overflow-hidden">
       <DesignerTopBar
         project={project}
+        projectId={projectId}
+        discipline={disciplineConfig}
         isSaving={saveMutation.isPending}
         onSave={handleSave}
         activeTab={activeTab}
@@ -924,6 +976,13 @@ Return only zones that are clearly the same kind of object. Do not include the o
           onDeleteDevice={handleDeleteDevice}
           onDeleteWire={handleDeleteWire}
           onDeleteMarkup={handleDeleteMarkup}
+          disciplineId={disciplineId}
+          devicePalette={disciplineConfig.devicePalette}
+          circuitTypes={disciplineConfig.circuitTypes}
+          theme={disciplineConfig.theme}
+          showFireAlarmWorkflow={disciplineId === 'fire_alarm'}
+          selectedCableType={selectedCableType}
+          onCableTypeChange={setSelectedCableType}
         />
         )}
 
@@ -942,18 +1001,30 @@ Return only zones that are clearly the same kind of object. Do not include the o
           )}
           {activeTab === 'simulation' && (
             <div className="w-full h-full overflow-hidden flex flex-col">
-              <FireAlarmSimulation
-                project={project}
-                devices={devices}
-                activeFloor={activeFloor}
-                onFloorChange={setActiveFloor}
-                onUpdateDevice={handleUpdateDevice}
-              />
+              {disciplineId === 'fire_alarm' ? (
+                <FireAlarmSimulation
+                  project={project}
+                  devices={devices}
+                  activeFloor={activeFloor}
+                  onFloorChange={setActiveFloor}
+                  onUpdateDevice={handleUpdateDevice}
+                />
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-slate-500 text-sm p-8">
+                  Fire alarm simulation is available in the Fire Alarm designer. Open Systems → Fire alarm to use this view.
+                </div>
+              )}
             </div>
           )}
           {activeTab === 'riser' && (
             <div className="w-full h-full overflow-auto">
-              <RiserDiagram project={project} devices={devices} />
+              {disciplineId === 'fire_alarm' ? (
+                <RiserDiagram project={project} devices={devices} />
+              ) : (
+                <div className="flex items-center justify-center text-slate-500 text-sm p-8 min-h-[200px]">
+                  Riser diagrams are scoped to the Fire Alarm discipline.
+                </div>
+              )}
             </div>
           )}
           {activeTab === 'calculations' && (
@@ -1020,7 +1091,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 layers={layers}
                 selectedTool={selectedTool}
                 snapGrid={snapGrid}
-                onDevicesChange={setLocalDevices}
+                onDevicesChange={handleStoredDevicesChange}
                 onRoomsChange={setLocalRooms}
                 onLayoutZonesChange={setLocalLayoutZones}
                 onDeviceSelect={setSelectedDevice}
@@ -1030,7 +1101,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 captureRef={floorPlanCaptureRef}
                 onRoomNameRequest={handleRoomNameRequest}
                 wires={wires}
-                onWiresChange={setLocalWires}
+                onWiresChange={handleStoredWiresChange}
                 markups={markups}
                 onMarkupsChange={setLocalMarkups}
                 pxPerFt={canvasPxPerFt}
@@ -1044,6 +1115,10 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 }}
                 onDetectSimilarLayoutZones={handleDetectSimilarLayoutZones}
                 detectingSimilarLayoutZones={detectingSimilarZones}
+                disciplineId={disciplineId}
+                devicePalette={disciplineConfig.devicePalette}
+                circuitTypes={disciplineConfig.circuitTypes}
+                selectedCableType={selectedCableType}
               />
               <FloorPlanUploader
                 floorNumber={activeFloor}
@@ -1057,6 +1132,9 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 onClose={() => setSelectedDevice(null)}
                 onUpdate={handleUpdateDevice}
                 onDelete={handleDeleteDevice}
+                devicePalette={disciplineConfig.devicePalette}
+                circuitTypes={disciplineConfig.circuitTypes}
+                disciplineConfig={disciplineConfig}
               />
               {/* Collapsible bottom toolbar */}
               <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center pointer-events-none">

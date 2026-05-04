@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle 
 import { routeCircuits, drawCircuitRoutes } from '@/lib/circuitRouter';
 import { createMarkupFromTool, formatMarkupMeasurement, getMarkupBounds, getMarkupLayerKey, getMarkupTool, isMarkupTool } from '@/lib/bluebeamMarkupTools';
 import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
-import { CIRCUIT_TYPES, DEVICE_PALETTE } from '@/components/designer/DesignerSidebar';
+import { getDisciplineConfig } from '@/lib/disciplines';
 import { getLayoutZoneMeta, isLayoutZoneTool } from '@/lib/layoutZones';
 import { Copy, Edit3, MoreVertical, Trash2, Unplug, Wrench, X } from 'lucide-react';
 
@@ -99,6 +99,41 @@ const NFPA_SYMBOLS = {
   }),
   annunciator: rectSymbol('ANN', '#dc2626', 3, 1.8),
 };
+
+/** Access, video, AV, and structured-cabling plan symbols (merged with NFPA set for canvas lookup). */
+const EXTRA_PLAN_SYMBOLS = {
+  ac_controller: rectSymbol('AC', '#ea580c', 3, 1.75),
+  ac_reader: rectSymbol('RD', '#c2410c', 2.4, 1.35),
+  ac_keypad: squareSymbol('KP', '#9a3412'),
+  ac_maglock: rectSymbol('ML', '#b45309', 2.6, 1.25),
+  ac_strike: diamondSymbol('ES', '#d97706'),
+  ac_rex: circleSymbol('RX', '#f97316'),
+  ac_dps: diamondSymbol('DC', '#78350f'),
+  ac_turnstile: hexSymbol('TS', '#431407'),
+  cam_dome: circleSymbol('D', '#ca8a04'),
+  cam_turret: circleSymbol('T', '#a16207'),
+  cam_bullet: rectSymbol('B', '#854d0e', 2.8, 1.15),
+  cam_box: squareSymbol('X', '#713f12'),
+  cam_ptz: hexSymbol('P', '#b45309'),
+  cam_fisheye: circleSymbol('F', '#d97706'),
+  cam_multisensor: rectSymbol('M', '#92400e', 2.3, 1.45),
+  nvr: rectSymbol('NVR', '#422006', 3.2, 1.75),
+  av_display: rectSymbol('LCD', '#1d4ed8', 3, 1.75),
+  av_projector: rectSymbol('PRJ', '#1e40af', 2.8, 1.4),
+  av_speaker: NFPA_SYMBOLS.speaker,
+  av_mic: circleSymbol('MI', '#3b82f6'),
+  av_dsp: rectSymbol('DSP', '#1e3a8a', 3, 1.65),
+  av_amp: rectSymbol('AMP', '#172554', 2.8, 1.45),
+  av_wall_plate: squareSymbol('WP', '#60a5fa'),
+  lv_mdf: rectSymbol('MDF', '#14532d', 3.2, 1.8),
+  lv_idf: rectSymbol('IDF', '#166534', 3, 1.75),
+  lv_patch: rectSymbol('PP', '#15803d', 2.6, 1.35),
+  lv_jack: squareSymbol('JK', '#22c55e'),
+  lv_wap: circleSymbol('AP', '#4ade80'),
+  lv_camera_drop: diamondSymbol('CD', '#86efac'),
+};
+
+const ALL_PLAN_SYMBOLS = { ...NFPA_SYMBOLS, ...EXTRA_PLAN_SYMBOLS };
 
 function circleSymbol(label, color, adornment) {
   return {
@@ -281,30 +316,58 @@ function computeContentBoundsForExport({
 }
 
 function getSymbol(type, subtype) {
-  return NFPA_SYMBOLS[subtype] || NFPA_SYMBOLS[type] || NFPA_SYMBOLS.smoke_detector;
+  if (subtype && ALL_PLAN_SYMBOLS[subtype]) return ALL_PLAN_SYMBOLS[subtype];
+  if (ALL_PLAN_SYMBOLS[type]) return ALL_PLAN_SYMBOLS[type];
+  if (subtype && NFPA_SYMBOLS[subtype]) return NFPA_SYMBOLS[subtype];
+  return NFPA_SYMBOLS[type] || NFPA_SYMBOLS.smoke_detector;
 }
 
-function getPaletteDevice(type) {
-  return DEVICE_PALETTE.find((device) => device.type === type || device.subtype === type);
+function getPaletteDeviceFromPalette(type, palette) {
+  return palette.find((device) => device.type === type || device.subtype === type);
 }
 
-function getCircuitMeta(type = 'SLC') {
-  return CIRCUIT_TYPES.find((circuit) => circuit.value === type) || CIRCUIT_TYPES[0];
+function getCircuitMetaFrom(circuitTypes, type = 'SLC') {
+  return circuitTypes.find((c) => c.value === type) || circuitTypes[0] || { color: '#94a3b8', value: type, label: String(type) };
 }
 
-function defaultCircuitTypeForDevice(type) {
-  return getPaletteDevice(type)?.defaultCircuitType || (NOTIFICATION_TYPES.includes(type) ? 'NAC' : 'SLC');
+function defaultCircuitTypeForDevice(type, palette) {
+  return getPaletteDeviceFromPalette(type, palette)?.defaultCircuitType || (NOTIFICATION_TYPES.includes(type) ? 'NAC' : 'SLC');
 }
 
 function defaultCircuitId(type, floor) {
   return `${type}-${floor || 1}`;
 }
 
-function makeDeviceLabel(type, existingDevices) {
-  const palette = getPaletteDevice(type);
-  const prefix = palette?.prefix || type.slice(0, 3).toUpperCase();
+function makeDeviceLabel(type, existingDevices, palette) {
+  const p = getPaletteDeviceFromPalette(type, palette);
+  const prefix = p?.prefix || type.slice(0, 3).toUpperCase();
   const count = existingDevices.filter((device) => device.type === type || device.subtype === type).length + 1;
   return `${prefix}-${String(count).padStart(3, '0')}`;
+}
+
+/** Horizontal FOV wedge in canvas space; range uses pxPerFt when set, else ~3 px per ft. */
+function drawCameraFov(ctx, device, pxPerFt) {
+  if (!device?.type?.startsWith('cam_')) return;
+  const deg = Number(device.fov_degrees) > 0 ? Number(device.fov_degrees) : 90;
+  const rangeFt = Number(device.fov_range_ft) > 0 ? Number(device.fov_range_ft) : 35;
+  const aimDeg = Number.isFinite(Number(device.fov_aim_deg)) ? Number(device.fov_aim_deg) : 0;
+  const scale = Math.max(pxPerFt || 3, 1);
+  const r = rangeFt * scale;
+  const half = (deg / 2) * (Math.PI / 180);
+  const aim = aimDeg * (Math.PI / 180);
+  ctx.save();
+  ctx.translate(device.x, device.y);
+  ctx.rotate(aim);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.arc(0, 0, r, -half, half, false);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(234, 179, 8, 0.14)';
+  ctx.strokeStyle = 'rgba(180, 83, 9, 0.55)';
+  ctx.lineWidth = 1.25;
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
 }
 
 function deviceHitTest(devices, currentFloor, world, padding = 4) {
@@ -457,6 +520,9 @@ function drawFloorPlanScene(ctx, scene) {
     markups,
     pxPerFt,
     selectedCircuitType,
+    circuitTypes = [],
+    devicePalette = [],
+    disciplineId: _disciplineId = 'fire_alarm',
   } = scene;
 
   ctx.clearRect(0, 0, canvasSize.w, canvasSize.h);
@@ -578,7 +644,7 @@ function drawFloorPlanScene(ctx, scene) {
     const a = devices.find((device) => device.id === wire.from);
     const b = devices.find((device) => device.id === wire.to);
     if (!a || !b || a.x == null || b.x == null) return;
-    const meta = getCircuitMeta(wire.type || wire.circuit_type);
+    const meta = getCircuitMetaFrom(circuitTypes, wire.type || wire.circuit_type);
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -591,7 +657,8 @@ function drawFloorPlanScene(ctx, scene) {
     const ft = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / Math.max(pxPerFt || 10, 1));
     const mx = (a.x + b.x) / 2;
     const my = (a.y + b.y) / 2;
-    const label = `${wire.circuit || wire.type} ~${ft}ft`;
+    const cable = wire.cable_type ? ` · ${wire.cable_type}` : '';
+    const label = `${wire.circuit || wire.type} ~${ft}ft${cable}`;
     ctx.font = '8px Inter';
     const labelWidth = ctx.measureText(label).width + 8;
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
@@ -605,7 +672,7 @@ function drawFloorPlanScene(ctx, scene) {
   if (wireStart && mouseWorld) {
     const source = devices.find((device) => device.id === wireStart);
     if (source?.x != null) {
-      const meta = getCircuitMeta(selectedCircuitType);
+      const meta = getCircuitMetaFrom(circuitTypes, selectedCircuitType);
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(mouseWorld.x, mouseWorld.y);
@@ -618,7 +685,7 @@ function drawFloorPlanScene(ctx, scene) {
   }
 
   if (dropPreview) {
-    const palette = getPaletteDevice(dropPreview.type);
+    const palette = getPaletteDeviceFromPalette(dropPreview.type, devicePalette);
     const sym = getSymbol(dropPreview.type);
     ctx.save();
     ctx.globalAlpha = 0.72;
@@ -626,6 +693,10 @@ function drawFloorPlanScene(ctx, scene) {
     drawLabel(ctx, palette?.label || 'Device', dropPreview.x, dropPreview.y - 26, sym.color);
     ctx.restore();
   }
+
+  devices
+    .filter((device) => sameFloor(device.floor, currentFloor) && device.type?.startsWith('cam_'))
+    .forEach((device) => drawCameraFov(ctx, device, pxPerFt));
 
   devices.filter((device) => sameFloor(device.floor, currentFloor)).forEach((device) => {
     if (device.x == null || device.y == null) return;
@@ -705,7 +776,14 @@ export default function FloorPlanCanvas({
   onOpenDeviceProperties,
   onDetectSimilarLayoutZones,
   detectingSimilarLayoutZones = false,
+  disciplineId = 'fire_alarm',
+  devicePalette: devicePaletteProp,
+  circuitTypes: circuitTypesProp,
+  selectedCableType = '',
 }) {
+  const devicePalette = devicePaletteProp ?? getDisciplineConfig(disciplineId).devicePalette;
+  const circuitTypes = circuitTypesProp ?? getDisciplineConfig(disciplineId).circuitTypes;
+
   const internalCanvasRef = useRef(null);
   const canvasRef = externalCanvasRef || internalCanvasRef;
   const containerRef = useRef(null);
@@ -746,10 +824,12 @@ export default function FloorPlanCanvas({
   }, [canvasRef, offset, scale]);
 
   const addDeviceAt = useCallback((devType, world) => {
-    const palette = getPaletteDevice(devType);
-    const circuitType = palette?.defaultCircuitType || defaultCircuitTypeForDevice(devType);
+    const palette = getPaletteDeviceFromPalette(devType, devicePalette);
+    const circuitType = palette?.defaultCircuitType || defaultCircuitTypeForDevice(devType, devicePalette);
     const circuit = defaultCircuitId(circuitType, currentFloor);
-    const label = makeDeviceLabel(devType, devices);
+    const label = makeDeviceLabel(devType, devices, devicePalette);
+    const isCam = typeof devType === 'string' && devType.startsWith('cam_');
+    const slcLikeCount = devices.filter((device) => device.circuit_type === 'SLC').length;
     const newDevice = {
       id: `${devType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       type: devType,
@@ -762,21 +842,49 @@ export default function FloorPlanCanvas({
       installation_status: 'Proposed',
       circuit_type: circuitType,
       circuit,
-      address: circuitType === 'SLC' ? `1-${String(devices.filter((device) => device.circuit_type === 'SLC').length + 1).padStart(3, '0')}` : '',
+      discipline: disciplineId,
+      address:
+        disciplineId === 'fire_alarm' && circuitType === 'SLC'
+          ? `1-${String(slcLikeCount + 1).padStart(3, '0')}`
+          : '',
       zone: `F${currentFloor}-Z1`,
       color: palette?.color || getSymbol(devType).color,
-      mounting_height: NOTIFICATION_TYPES.includes(devType) || devType === 'pull_station' ? 'Wall - 84 AFF' : 'Ceiling',
+      mounting_height:
+        NOTIFICATION_TYPES.includes(devType) || devType === 'pull_station'
+          ? 'Wall - 84 AFF'
+          : isCam
+            ? 'Ceiling / wall — verify lens height & aim'
+            : 'Ceiling',
       quantity: 1,
       installation_hours: 1,
       source: 'manual',
+      cable_type: selectedCableType || '',
       nfpa_symbol_reference: palette?.nfpa,
+      ...(isCam
+        ? {
+            fov_degrees: 90,
+            fov_range_ft: 35,
+            fov_aim_deg: 0,
+          }
+        : {}),
     };
     onDevicesChange([...devices, newDevice]);
     onDeviceSelect?.(newDevice);
     onCircuitTypeChange?.(circuitType);
     onCircuitIdChange?.(circuit);
     return newDevice;
-  }, [currentFloor, devices, onCircuitIdChange, onCircuitTypeChange, onDeviceSelect, onDevicesChange, snapGrid]);
+  }, [
+    currentFloor,
+    devicePalette,
+    devices,
+    disciplineId,
+    onCircuitIdChange,
+    onCircuitTypeChange,
+    onDeviceSelect,
+    onDevicesChange,
+    selectedCableType,
+    snapGrid,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -871,7 +979,7 @@ export default function FloorPlanCanvas({
   }, [devices, hoveredDeviceId, onDeviceSelect, onDevicesChange, onWiresChange, selectedDevice?.id, wires]);
 
   const duplicateDevice = useCallback((device) => {
-    const label = makeDeviceLabel(device.type, devices);
+    const label = makeDeviceLabel(device.type, devices, devicePalette);
     const copy = {
       ...device,
       id: `${device.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -879,17 +987,18 @@ export default function FloorPlanCanvas({
       x: device.x + 28,
       y: device.y + 28,
       source: 'manual',
+      discipline: device.discipline || disciplineId,
     };
     onDevicesChange([...devices, copy]);
     onDeviceSelect?.(copy);
-  }, [devices, onDeviceSelect, onDevicesChange]);
+  }, [devicePalette, devices, disciplineId, onDeviceSelect, onDevicesChange]);
 
   const startWireFromToolbar = useCallback((device) => {
-    const circuitType = device.circuit_type || defaultCircuitTypeForDevice(device.type);
+    const circuitType = device.circuit_type || defaultCircuitTypeForDevice(device.type, devicePalette);
     setWireStart(device.id);
     onCircuitTypeChange?.(circuitType);
     onCircuitIdChange?.(device.circuit || defaultCircuitId(circuitType, currentFloor));
-  }, [currentFloor, onCircuitIdChange, onCircuitTypeChange]);
+  }, [currentFloor, devicePalette, onCircuitIdChange, onCircuitTypeChange]);
 
   const handleMouseDown = useCallback((event) => {
     const world = toWorld(event);
@@ -961,6 +1070,8 @@ export default function FloorPlanCanvas({
             type,
             circuit_type: type,
             circuit,
+            cable_type: selectedCableType || undefined,
+            discipline: disciplineId,
           };
           onWiresChange?.([...(wires || []), newWire]);
           onDevicesChange(devices.map((device) => (
@@ -991,7 +1102,7 @@ export default function FloorPlanCanvas({
         setDragging({ type: 'pan', start: { x: event.clientX - offset.x, y: event.clientY - offset.y } });
       }
     }
-  }, [addDeviceAt, currentFloor, deleteDevice, devices, markups, offset, onDeviceSelect, onDevicesChange, onMarkupsChange, onWiresChange, selectedCircuitId, selectedCircuitType, selectedTool, snapGrid, toWorld, wireStart, wires]);
+  }, [addDeviceAt, currentFloor, deleteDevice, devices, disciplineId, markups, offset, onDeviceSelect, onDevicesChange, onMarkupsChange, onWiresChange, selectedCableType, selectedCircuitId, selectedCircuitType, selectedTool, snapGrid, toWorld, wireStart, wires]);
 
   const handleMouseMove = useCallback((event) => {
     const world = toWorld(event);
@@ -1147,6 +1258,9 @@ export default function FloorPlanCanvas({
     markups,
     pxPerFt,
     selectedCircuitType,
+    circuitTypes,
+    devicePalette,
+    disciplineId,
   };
 
   useEffect(() => {
@@ -1155,7 +1269,7 @@ export default function FloorPlanCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     drawFloorPlanScene(ctx, sceneProps);
-  }, [canvasRef, currentFloor, devices, drawingLayoutZone, drawingMarkup, drawingRoom, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
+  }, [canvasRef, circuitTypes, currentFloor, devicePalette, devices, disciplineId, drawingLayoutZone, drawingMarkup, drawingRoom, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
 
   useImperativeHandle(
     captureRef,
@@ -1234,6 +1348,9 @@ export default function FloorPlanCanvas({
           markups,
           pxPerFt,
           selectedCircuitType,
+          circuitTypes,
+          devicePalette,
+          disciplineId,
         });
         const mime = options.mimeType || 'image/png';
         if (mime === 'image/jpeg') return canvasEl.toDataURL('image/jpeg', options.quality ?? 0.95);
@@ -1254,6 +1371,9 @@ export default function FloorPlanCanvas({
       markups,
       pxPerFt,
       selectedCircuitType,
+      circuitTypes,
+      devicePalette,
+      disciplineId,
     ]
   );
 
@@ -1325,7 +1445,7 @@ export default function FloorPlanCanvas({
         <span>Floor {currentFloor}</span>
         {snapGrid && <><span className="text-gray-300">|</span><span className="text-blue-500 font-semibold">SNAP</span></>}
         {selectedTool?.startsWith('place_device_') && <><span className="text-gray-300">|</span><span className="text-orange-500 font-semibold">PLACE - click or drag from palette</span></>}
-        {selectedTool === 'wire' && <><span className="text-gray-300">|</span><span className="font-semibold" style={{ color: getCircuitMeta(selectedCircuitType).color }}>{wireStart ? `WIRE ${selectedCircuitId} - click target` : `WIRE ${selectedCircuitId} - click source`}</span></>}
+        {selectedTool === 'wire' && <><span className="text-gray-300">|</span><span className="font-semibold" style={{ color: getCircuitMetaFrom(circuitTypes, selectedCircuitType).color }}>{wireStart ? `WIRE ${selectedCircuitId} - click target` : `WIRE ${selectedCircuitId} - click source`}</span></>}
         {selectedTool === 'room' && <><span className="text-gray-300">|</span><span className="text-orange-500 font-semibold">DRAW ROOM</span></>}
         {isLayoutZoneTool(selectedTool) && (
           <><span className="text-gray-300">|</span><span className="text-violet-600 font-semibold">{detectingSimilarLayoutZones ? 'AI FINDING SIMILAR...' : 'DRAW LAYOUT ZONE'}</span></>

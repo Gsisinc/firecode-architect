@@ -174,7 +174,7 @@ export default function ProjectList() {
                 <div
                   key={project.id}
                   className="group relative bg-white border border-slate-200 rounded-2xl overflow-hidden hover:shadow-lg hover:border-orange-300 transition-all duration-200 cursor-pointer"
-                  onClick={() => navigate(`/project/${project.id}/designer`)}
+                  onClick={() => navigate(`/project/${project.id}/systems`)}
                 >
                   {/* Color accent top bar */}
                   <div className={`h-1.5 w-full ${cfg.accent}`} />
