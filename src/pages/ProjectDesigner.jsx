@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { getDisciplineConfig, normalizeDisciplineId } from "@/lib/disciplines";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -54,8 +54,6 @@ import {
   calculateSprinklerMonitoring,
   assignSprinklerMonitoringPositions,
   calculateDuctDetectorPlacement,
-  generateDeviceSchedule,
-  generateSequenceOfOperations,
   HIGH_BAY_SMOKE_CEILING_FT,
   attachSprinklerMonitorModules,
   calculateElevatorInterfaceModules,
@@ -68,7 +66,6 @@ export default function ProjectDesigner() {
   const { id: projectId, discipline: disciplineRouteParam } = useParams();
   const disciplineId = normalizeDisciplineId(disciplineRouteParam);
   const disciplineConfig = getDisciplineConfig(disciplineId);
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [activeFloor, setActiveFloor] = useState(1);
@@ -521,13 +518,6 @@ Exclude title block, sheet border, and exterior parking.`,
     setAnalyzingFloor(false);
   };
 
-  const handleRunAnalysis = () => {
-    if (!project) return;
-    const results = determineSystemRequirements(project);
-    setAnalysisResults(results);
-    toast.success("Code analysis complete");
-  };
-
   const handleAutoPlace = useCallback(() => {
     if (disciplineId !== 'fire_alarm') {
       toast.error('Auto-place devices is only available in the Fire Alarm designer');
@@ -683,18 +673,6 @@ Exclude title block, sheet border, and exterior parking.`,
     setLocalDevices([...otherDisc, ...mergedFire]);
     toast.success(`Auto-placed ${generatedDevices.length} generated devices on floor ${activeFloor}; manual devices were preserved`);
   }, [project, rooms, storedDevices, activeFloor, analysisResults, layoutZones, disciplineId]);
-
-  const handleAddRoom = (roomData) => {
-    const newRoom = {
-      ...roomData,
-      id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      name: roomData.room_type.replace(/_/g, " "),
-      ceiling_height: project.default_ceiling_height,
-      ceiling_type: project.default_ceiling_type,
-      sqft: roomSqft(roomData, getFloorScale(floorPlans, activeFloor)),
-    };
-    setLocalRooms([...rooms, newRoom]);
-  };
 
   const handleUpdateDevice = (deviceId, updates) => {
     const updated = storedDevices.map((d) => {
@@ -892,7 +870,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
           const rendered = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
           src = rendered.dataUrl;
         }
-        await new Promise((resolve, reject) => {
+        await new Promise((resolve) => {
           const im = new Image();
           im.crossOrigin = 'anonymous';
           im.onload = () => {
@@ -1031,43 +1009,6 @@ Return only zones that are clearly the same kind of object. Do not include the o
     } finally {
       setPlanVisionLoading(false);
     }
-  };
-
-  // Export functions
-  const handleExportDeviceSchedule = () => {
-    const schedule = generateDeviceSchedule(devices);
-    const headers = ["#", "Type", "Address", "Zone", "Floor", "Mounting Height", "Candela", "dB Rating", "Code Ref"];
-    const rows = schedule.map((s) => [
-      s.item, s.device_type, s.address, s.zone, s.floor, s.mounting_height, s.candela, s.db_rating, s.code_ref,
-    ]);
-
-    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${project.name}_device_schedule.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Device schedule exported");
-  };
-
-  const handleExportSequence = () => {
-    const analysis = analysisResults || determineSystemRequirements(project);
-    const text = generateSequenceOfOperations(analysis, project);
-    const blob = new Blob([text], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${project.name}_sequence_of_operations.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Sequence of operations exported");
-  };
-
-  const handleExportPDF = () => {
-    toast.info("PDF export: Use the Calculations panel to review all data, then print to PDF");
-    setShowCalculations(true);
   };
 
   const currentFloorPlan = useMemo(
@@ -1830,10 +1771,6 @@ function upsertFloorPlan(floorPlans = [], plan) {
   if (idx >= 0) next[idx] = { ...next[idx], ...plan };
   else next.push(plan);
   return next;
-}
-
-function inferSheetType(text = '') {
-  return classifyPlanFromText(text);
 }
 
 function DocumentWorkspaceLoading() {

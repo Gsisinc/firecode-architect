@@ -589,16 +589,6 @@ function drawLayoutZone(ctx, zone, selected = false) {
   ctx.restore();
 }
 
-function getLayoutZoneCanvasStyle(type) {
-  const meta = getLayoutZoneMeta(type);
-  return {
-    label: meta.label,
-    color: meta.color,
-    fill: `${meta.color}18`,
-    dash: meta.blocksPlacement ? [8, 4] : [4, 3],
-  };
-}
-
 /** Full floor-plan scene (shared by on-screen canvas and high-res PDF export). */
 function drawFloorPlanScene(ctx, scene) {
   const {
@@ -757,7 +747,7 @@ function drawFloorPlanScene(ctx, scene) {
   if (layers.circuits) {
     try {
       drawCircuitRoutes(ctx, routeCircuits(devices, rooms, currentFloor), layers.labels !== false);
-    } catch (_error) {
+    } catch {
       /* optional */
     }
   }
@@ -1050,7 +1040,7 @@ export default function FloorPlanCanvas({
             });
           };
           img.src = renderedPage.dataUrl;
-        } catch (_error) {
+        } catch {
           if (!cancelled) setFloorImg(null);
         }
       })();
@@ -1408,7 +1398,7 @@ export default function FloorPlanCanvas({
     try {
       const device = JSON.parse(event.dataTransfer.getData('application/x-fire-device'));
       setDropPreview({ type: device.type, x: snapToGrid(world.x, snapGrid), y: snapToGrid(world.y, snapGrid) });
-    } catch (_error) {
+    } catch {
       setDropPreview(null);
     }
   }, [snapGrid, toWorld]);
