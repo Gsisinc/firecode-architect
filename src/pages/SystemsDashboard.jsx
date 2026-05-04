@@ -4,9 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
-import { Plus, CheckCircle2, Flame, Shield, Video, Speaker, Cable } from 'lucide-react';
+import { Plus, CheckCircle2, Flame, Shield, Video, Speaker, Cable, MoreVertical } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
 import { getProjectPrimaryDiscipline, SYSTEMS_LAST_PROJECT_KEY } from '@/lib/projectDiscipline';
+import { useAuth } from '@/lib/AuthContext';
 import SystemsAppShell from '@/components/systems/SystemsAppShell';
 import DashboardProjectMiniature from '@/components/systems/DashboardProjectMiniature';
 
@@ -27,6 +28,7 @@ function readLastProjectId() {
 }
 
 export default function SystemsDashboard() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [selectedDiscipline, setSelectedDiscipline] = useState(DISCIPLINE_IDS.FIRE_ALARM);
   const [search, setSearch] = useState('');
@@ -59,6 +61,11 @@ export default function SystemsDashboard() {
 
   const newProjectHref = `/project/new?discipline=${encodeURIComponent(selectedDiscipline)}`;
 
+  const greetingFirst =
+    user?.full_name?.trim?.()?.split?.(/\s+/)?.[0] ||
+    user?.first_name ||
+    user?.email?.split?.('@')?.[0];
+
   return (
     <SystemsAppShell
       projects={projects}
@@ -69,141 +76,167 @@ export default function SystemsDashboard() {
       searchValue={search}
       onSearchChange={setSearch}
     >
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-8 mb-10">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Systems dashboard</h1>
-          <p className="text-slate-500 mt-2 max-w-xl text-sm leading-relaxed">
-            Choose a discipline for your next project, open a recent job below, or start a new project. This screen is not tied to a single building — your selection applies when you create a project or open one from the list.
-          </p>
-        </div>
+      {/* Greeting + page title (mockup: above discipline row) */}
+      <p className="text-sm text-slate-500 mb-2">
+        Welcome back{greetingFirst ? `, ${greetingFirst}` : ''} <span aria-hidden>👋</span>
+      </p>
 
-        <div className="w-full lg:max-w-md shrink-0 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
-            <Button
-              className="shrink-0 bg-red-600 hover:bg-red-700 text-white shadow-md rounded-full px-8 h-11 text-base"
-              onClick={() => navigate(newProjectHref)}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              New project
-            </Button>
-          </div>
-
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Disciplines</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {TAB_ITEMS.map(({ id, icon: Icon, description }) => {
-                const cfg = DISCIPLINES[id];
-                const selected = selectedDiscipline === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setSelectedDiscipline(id)}
-                    className={`relative text-left rounded-xl border-2 bg-white p-4 shadow-sm transition-all hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-red-500/30 ${
-                      selected ? 'shadow-md' : 'border-slate-200'
-                    }`}
-                    style={{
-                      borderColor: selected ? cfg.theme.primary : undefined,
-                    }}
-                  >
-                    {selected && (
-                      <CheckCircle2
-                        className="absolute top-2.5 right-2.5 w-4 h-4"
-                        style={{ color: cfg.theme.primary }}
-                        aria-hidden
-                      />
-                    )}
-                    <div
-                      className="w-9 h-9 rounded-lg flex items-center justify-center mb-2"
-                      style={{ backgroundColor: `${cfg.theme.primary}22`, color: cfg.theme.primary }}
-                    >
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <h3 className="font-semibold text-slate-900 text-sm">{cfg.label}</h3>
-                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-2 leading-snug">{description}</p>
-                    <p className="text-[10px] text-slate-400 mt-2 font-medium">
-                      {cfg.devicePalette.length} device types
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-xs text-slate-500 mt-3">
-              New projects are created under the discipline you have selected (highlighted above and in the sidebar).
+      <div className="flex flex-col gap-8 lg:gap-10">
+        {/* Title row + New project (mockup: CTA top-right of header band) */}
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="min-w-0 max-w-3xl">
+            <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">Systems dashboard</h1>
+            <p className="text-slate-600 mt-3 text-sm sm:text-base leading-relaxed">
+              Choose a discipline, then create a new project or open a recent one. Your selection sets the default system type for the next project you start.
             </p>
           </div>
+          <Button
+            size="lg"
+            className="shrink-0 h-12 px-8 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold shadow-md"
+            onClick={() => navigate(newProjectHref)}
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            New project
+          </Button>
         </div>
-      </div>
 
-      <section id="recent-projects" className="border-t border-slate-200 pt-10">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">Recent projects</h2>
-        {listLoading ? (
-          <p className="text-sm text-slate-500">Loading projects…</p>
-        ) : (
-          <>
-            {search.trim() && filteredProjects.length === 0 && (
-              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-4">
-                No projects match your search. Clear the search bar to see all projects.
-              </p>
-            )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-              {filteredProjects.map((p) => {
-                const disc = getProjectPrimaryDiscipline(p);
-                const tcfg = DISCIPLINES[disc];
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => openProject(p)}
-                    className="text-left rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
+        {/* Full-width discipline row — five equal cards on large screens */}
+        <section aria-label="Disciplines">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">Disciplines</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-5">
+            {TAB_ITEMS.map(({ id, icon: Icon, description }) => {
+              const cfg = DISCIPLINES[id];
+              const selected = selectedDiscipline === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setSelectedDiscipline(id)}
+                  className={`relative text-left rounded-2xl border-2 bg-white p-5 min-h-[200px] flex flex-col shadow-sm transition-all hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 focus-visible:ring-offset-2 ${
+                    selected ? 'ring-1 ring-black/[0.04]' : 'border-slate-200'
+                  }`}
+                  style={{
+                    borderColor: selected ? cfg.theme.primary : undefined,
+                  }}
+                >
+                  {selected && (
+                    <CheckCircle2
+                      className="absolute top-4 right-4 w-5 h-5"
+                      style={{ color: cfg.theme.primary }}
+                      aria-hidden
+                    />
+                  )}
+                  <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center mb-4"
+                    style={{ backgroundColor: `${cfg.theme.primary}18`, color: cfg.theme.primary }}
                   >
-                    <div className="h-40 bg-slate-100 border-b border-slate-100">
-                      <DashboardProjectMiniature projectId={p.id} disciplineId={disc} />
-                    </div>
-                    <div className="p-4">
-                      <span
-                        className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full text-white mb-2"
-                        style={{ backgroundColor: tcfg.theme.primary }}
-                      >
-                        {tcfg.label}
-                      </span>
-                      <h3 className="font-semibold text-slate-900 truncate">{p.name || 'Untitled project'}</h3>
-                      <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
-                        <span>
-                          Updated{' '}
-                          {p.updated_date
-                            ? formatDistanceToNow(new Date(p.updated_date), { addSuffix: true })
-                            : 'recently'}
-                        </span>
-                        <span
-                          className="w-7 h-7 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center"
-                          aria-hidden
-                        >
-                          {(p.name || 'P').slice(0, 1).toUpperCase()}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    <Icon className="w-6 h-6" />
+                  </div>
+                  <h3 className="font-semibold text-slate-900 text-[15px] leading-snug">{cfg.label}</h3>
+                  <p className="text-xs text-slate-500 mt-2 line-clamp-3 leading-relaxed flex-1">{description}</p>
+                  <p className="text-[11px] text-slate-400 mt-4 font-semibold tabular-nums">
+                    {cfg.devicePalette.length} device types
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
-              <button
-                type="button"
-                onClick={() => navigate(newProjectHref)}
-                className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/50 min-h-[280px] flex flex-col items-center justify-center gap-3 text-slate-500 hover:border-red-300 hover:bg-red-50/30 hover:text-red-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
-              >
-                <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center">
-                  <Plus className="w-7 h-7" />
-                </div>
-                <span className="font-semibold text-sm">New project</span>
-                <span className="text-xs text-slate-400 px-4 text-center">
-                  Uses {DISCIPLINES[selectedDiscipline].label}
-                </span>
-              </button>
-            </div>
-          </>
-        )}
-      </section>
+        {/* Recent projects */}
+        <section id="recent-projects" className="pt-2 border-t border-slate-200/90">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Recent projects</h2>
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                document.getElementById('recent-projects')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="text-sm font-medium text-red-600 hover:text-red-700 w-fit"
+            >
+              View all projects
+            </button>
+          </div>
+
+          {listLoading ? (
+            <p className="text-sm text-slate-500">Loading projects…</p>
+          ) : (
+            <>
+              {search.trim() && filteredProjects.length === 0 && (
+                <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5">
+                  No projects match your search. Clear the search bar to see all projects.
+                </p>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {filteredProjects.map((p) => {
+                  const disc = getProjectPrimaryDiscipline(p);
+                  const tcfg = DISCIPLINES[disc];
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => openProject(p)}
+                      className="group text-left rounded-2xl border border-slate-200/90 bg-white overflow-hidden shadow-sm hover:shadow-md hover:border-slate-300 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/35"
+                    >
+                      <div className="h-44 bg-slate-100 border-b border-slate-100">
+                        <DashboardProjectMiniature projectId={p.id} disciplineId={disc} />
+                      </div>
+                      <div className="p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <span
+                            className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-md text-white"
+                            style={{ backgroundColor: tcfg.theme.primary }}
+                          >
+                            {tcfg.label}
+                          </span>
+                          <span
+                            className="p-1 rounded-md text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-hidden
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </span>
+                        </div>
+                        <h3 className="font-semibold text-slate-900 truncate mt-3 text-[15px]">
+                          {p.name || 'Untitled project'}
+                        </h3>
+                        <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
+                          <span>
+                            Updated{' '}
+                            {p.updated_date
+                              ? formatDistanceToNow(new Date(p.updated_date), { addSuffix: true })
+                              : 'recently'}
+                          </span>
+                          <span
+                            className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center justify-center"
+                            aria-hidden
+                          >
+                            {(p.name || 'P').slice(0, 1).toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => navigate(newProjectHref)}
+                  className="rounded-2xl border-2 border-dashed border-slate-300 bg-white min-h-[320px] flex flex-col items-center justify-center gap-3 px-6 text-center text-slate-500 hover:border-red-400 hover:bg-red-50/40 hover:text-red-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
+                >
+                  <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center">
+                    <Plus className="w-8 h-8" />
+                  </div>
+                  <span className="font-semibold text-slate-900">New project</span>
+                  <span className="text-sm text-slate-500 max-w-[240px]">
+                    Start designing a new {DISCIPLINES[selectedDiscipline].label.toLowerCase()} system.
+                  </span>
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
     </SystemsAppShell>
   );
 }
