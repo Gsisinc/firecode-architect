@@ -40,9 +40,9 @@ export default function DesignerTopBar({
     <div className="h-14 bg-[hsl(222,47%,6%)] border-b border-white/10 flex items-center px-4 gap-3 shrink-0">
       <button
         type="button"
-        onClick={() => navigate('/')}
+        onClick={() => navigate(discipline?.id ? `/projects/${discipline.id}` : '/')}
         className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white shrink-0"
-        title="All systems"
+        title="Back to projects"
       >
         <ArrowLeft className="w-4 h-4" />
       </button>

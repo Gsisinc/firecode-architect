@@ -12,7 +12,10 @@ import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ProjectSetup from './pages/ProjectSetup';
 import ProjectDesigner from './pages/ProjectDesigner';
 import SystemsDashboard from './pages/SystemsDashboard';
+import ProjectsHub from './pages/ProjectsHub';
+import SystemsLayout from './layouts/SystemsLayout';
 import CodeReference from './pages/CodeReference';
+import { DISCIPLINE_IDS } from './lib/disciplines';
 
 /** Bare `/project/:id/designer` → default designer for that project’s stored discipline. */
 function RedirectBareDesigner() {
@@ -61,7 +64,11 @@ const AuthenticatedApp = () => {
 
   return (
     <Routes>
-      <Route path="/" element={<SystemsDashboard />} />
+      <Route element={<SystemsLayout />}>
+        <Route path="/" element={<SystemsDashboard />} />
+        <Route path="/projects/:discipline" element={<ProjectsHub />} />
+      </Route>
+      <Route path="/projects" element={<Navigate to={`/projects/${DISCIPLINE_IDS.FIRE_ALARM}`} replace />} />
       <Route path="/project/new" element={<ProjectSetup />} />
       <Route path="/project/:id/setup" element={<ProjectSetup />} />
       <Route path="/project/:id/systems" element={<RedirectLegacySystemsRoute />} />

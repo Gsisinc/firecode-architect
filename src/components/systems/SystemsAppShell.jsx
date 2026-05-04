@@ -1,6 +1,5 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import {
-  BookOpen,
   Bell,
   HelpCircle,
   Search,
@@ -14,6 +13,7 @@ import {
   FolderKanban,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
+import { SYSTEMS_LAST_PROJECT_KEY } from '@/lib/projectDiscipline';
 import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,6 @@ const DISCIPLINE_NAV = [
   { id: DISCIPLINE_IDS.LOW_VOLTAGE, icon: Cable },
 ];
 
-/** Sidebar navy aligned to mockup (slate-800 family, not blue-gray). */
 const SIDEBAR = {
   bg: '#1e293b',
   bgElevated: '#243548',
@@ -43,23 +42,27 @@ function displayFirstName(user) {
   return email || null;
 }
 
+function readLastProjectId() {
+  try {
+    return localStorage.getItem(SYSTEMS_LAST_PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export default function SystemsAppShell({
-  projects = [],
-  selectedDisciplineId,
-  onSelectDiscipline,
-  lastProjectId,
-  onOpenProject,
   searchValue = '',
   onSearchChange,
   children,
 }) {
-  const { pathname, hash } = useLocation();
+  const { pathname } = useLocation();
+  const params = useParams();
   const { user } = useAuth();
   const greetingName = displayFirstName(user) || 'there';
+  const lastProjectId = readLastProjectId();
 
-  const orderedProjects = [...projects].slice(0, 24);
-  const dashboardActive = pathname === '/' && !hash;
-  const projectsNavActive = pathname === '/' && hash === '#recent-projects';
+  const dashboardActive = pathname === '/';
+  const projectsActive = pathname.startsWith('/projects');
 
   return (
     <div className="min-h-screen flex bg-[#f1f5f9] text-slate-900">
@@ -88,60 +91,25 @@ export default function SystemsAppShell({
               dashboardActive ? 'bg-red-600 text-white shadow-sm' : 'text-white/80 hover:bg-white/10'
             }`}
           >
-            <LayoutDashboard className={`w-4 h-4 shrink-0 ${dashboardActive ? '' : 'opacity-90'}`} />
+            <LayoutDashboard className="w-4 h-4 shrink-0 opacity-90" />
             Dashboard
           </Link>
           <Link
-            to="/#recent-projects"
+            to="/projects/fire_alarm"
             className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-              projectsNavActive ? 'bg-white/15 text-white' : 'text-white/80 hover:bg-white/10'
+              projectsActive ? 'bg-white/15 text-white' : 'text-white/80 hover:bg-white/10'
             }`}
           >
             <FolderKanban className="w-4 h-4 shrink-0 opacity-90" />
             Projects
           </Link>
-          <Link
-            to="/code-reference"
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-white/80 hover:bg-white/10 transition-colors ${
-              pathname.startsWith('/code-reference') ? 'bg-white/15 text-white' : ''
-            }`}
-          >
-            <BookOpen className="w-4 h-4 shrink-0 opacity-90" />
-            Code library
-          </Link>
         </div>
 
-        <nav className="p-2 space-y-1 flex-1 overflow-y-auto min-h-0">
-          <p
-            className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider"
-            style={{ color: SIDEBAR.muted }}
-          >
-            Project list
-          </p>
-          <div className="max-h-[200px] overflow-y-auto space-y-0.5 pr-1">
-            {orderedProjects.length === 0 ? (
-              <p className="px-3 py-2 text-xs" style={{ color: SIDEBAR.muted }}>
-                No projects yet.
-              </p>
-            ) : (
-              orderedProjects.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => onOpenProject?.(p)}
-                  className="w-full text-left rounded-lg px-3 py-2 text-sm transition-colors hover:bg-white/10 truncate text-white/90"
-                  title={p.name || 'Project'}
-                >
-                  {p.name || 'Untitled project'}
-                </button>
-              ))
-            )}
-          </div>
-
+        <nav className="p-2 flex flex-col flex-1 overflow-y-auto min-h-0">
           {lastProjectId && (
             <Link
               to={`/project/${lastProjectId}/setup`}
-              className="mt-2 mx-1 flex items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium transition-colors hover:bg-white/10 text-white/60"
+              className="mb-3 mx-1 flex items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium transition-colors hover:bg-white/10 text-white/70"
             >
               <Settings className="w-3.5 h-3.5 shrink-0" />
               Project setup
@@ -149,29 +117,28 @@ export default function SystemsAppShell({
           )}
 
           <p
-            className="px-3 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-wider"
+            className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider mt-auto"
             style={{ color: SIDEBAR.muted }}
           >
             Disciplines
           </p>
           {DISCIPLINE_NAV.map(({ id, icon: Icon }) => {
             const cfg = DISCIPLINES[id];
-            const active = selectedDisciplineId === id;
+            const tabActive = pathname.startsWith('/projects') && params.discipline === id;
             const inDesigner = pathname.includes(`/designer/${id}`);
             return (
-              <button
+              <Link
                 key={id}
-                type="button"
-                onClick={() => onSelectDiscipline?.(id)}
+                to={`/projects/${id}`}
                 className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left transition-colors"
                 style={{
-                  backgroundColor: active || inDesigner ? 'rgba(255,255,255,0.1)' : 'transparent',
-                  color: active || inDesigner ? '#fff' : 'rgba(255,255,255,0.75)',
+                  backgroundColor: tabActive || inDesigner ? 'rgba(255,255,255,0.1)' : 'transparent',
+                  color: tabActive || inDesigner ? '#fff' : 'rgba(255,255,255,0.75)',
                 }}
               >
                 <Icon className="w-4 h-4 shrink-0" style={{ color: cfg.theme.primary }} />
                 <span className="truncate">{cfg.label}</span>
-              </button>
+              </Link>
             );
           })}
         </nav>
@@ -183,7 +150,7 @@ export default function SystemsAppShell({
           >
             <p className="text-sm font-semibold text-white">Need help getting started?</p>
             <p className="text-xs mt-1.5 leading-relaxed" style={{ color: SIDEBAR.muted }}>
-              Guides, code context, and NFPA references.
+              Guides and NFPA references.
             </p>
             <Button
               asChild
