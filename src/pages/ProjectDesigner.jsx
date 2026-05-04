@@ -5,6 +5,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { getDisciplineConfig, normalizeDisciplineId } from "@/lib/disciplines";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
@@ -30,7 +33,11 @@ import {
   expandLayoutZonesFromDetectionPass,
   remapThumbnailCoordinatesToImageSpace,
 } from "@/lib/floorPlanDetection";
-import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale";
+import { getFloorScale, roomSqft, updateFloorPlanScale, updateFloorPlanManualCalibration } from "@/lib/designScale";
+import { MANUAL_ROOM_TYPE_OPTIONS, normalizeManualRoomType } from "@/lib/manualRoomTypes";
+import { placeFireAlarmDevicesWithOpenAI } from "@/lib/openaiDevicePlacement";
+import { extractPdfTextHintsForPlan } from "@/lib/pdfPlanTextHints";
+import { useBlueprintEditorStore } from "@/stores/blueprintEditorStore";
 import { mergeGeneratedDevices } from "@/lib/designValidation";
 import { renderPdfPageToDataUrl } from "@/lib/documentEngine";
 import { analyzeUploadedSheet, classifyPlanFromText } from "@/lib/planVision";
@@ -89,6 +96,13 @@ export default function ProjectDesigner() {
   const [toolbarOpen, setToolbarOpen] = useState(false);
   const [pendingRoom, setPendingRoom] = useState(null); // { x, y, width, height }
   const [pendingRoomName, setPendingRoomName] = useState('');
+  const [pendingRoomType, setPendingRoomType] = useState('office');
+  const [scaleDialogOpen, setScaleDialogOpen] = useState(false);
+  const [pendingScalePixels, setPendingScalePixels] = useState(0);
+  const [scaleFeetInput, setScaleFeetInput] = useState('');
+  const aiDevicePlacementLoading = useBlueprintEditorStore((s) => s.aiDevicePlacementLoading);
+  const setAiDevicePlacementLoading = useBlueprintEditorStore((s) => s.setAiDevicePlacementLoading);
+  const pdfHints = useBlueprintEditorStore((s) => s.pdfLabelSuggestionsByFloor?.[activeFloor]);
   const canvasRef = useRef(null);
   const floorPlanCaptureRef = useRef(null);
   const [analysisResults, setAnalysisResults] = useState(null);
@@ -799,14 +813,18 @@ Return only zones that are clearly the same kind of object. Do not include the o
   const handleRoomNameRequest = (rect) => {
     setPendingRoom(rect);
     setPendingRoomName('Room');
+    setPendingRoomType('office');
   };
 
   const handleRoomNameConfirm = () => {
     if (!pendingRoom) return;
+    const normalizedType = normalizeManualRoomType(pendingRoomType);
     const newRoom = {
       id: `room-${Date.now()}-${Math.random().toString(36).substr(2,6)}`,
       floor: activeFloor,
-      name: pendingRoomName || 'Room',
+      name: (pendingRoomName || '').trim() || normalizedType.replace(/_/g, ' '),
+      room_type: normalizedType,
+      user_room_kind: pendingRoomType,
       ...pendingRoom,
       sqft: roomSqft(pendingRoom, getFloorScale(floorPlans, activeFloor)),
       ceiling_height: project?.default_ceiling_height || 9,
@@ -816,6 +834,117 @@ Return only zones that are clearly the same kind of object. Do not include the o
     setPendingRoom(null);
     setPendingRoomName('');
   };
+
+  const handleScaleLineComplete = useCallback(({ drawnPixels }) => {
+    setPendingScalePixels(drawnPixels);
+    setScaleFeetInput('');
+    setScaleDialogOpen(true);
+  }, []);
+
+  const handleConfirmScaleDialog = useCallback(async () => {
+    const feet = parseFloat(scaleFeetInput, 10);
+    if (!Number.isFinite(feet) || feet <= 0) {
+      toast.error('Enter the real-world length of that line in feet (a positive number).');
+      return;
+    }
+    const nextPlans = updateFloorPlanManualCalibration(floorPlans, activeFloor, {
+      drawnPixels: pendingScalePixels,
+      feet,
+    });
+    setLocalFloorPlans(nextPlans);
+    useBlueprintEditorStore.getState().setLastCalibration(activeFloor, {
+      drawnPixels: pendingScalePixels,
+      feet,
+      pxPerFt: pendingScalePixels / feet,
+    });
+    try {
+      await saveProjectPatch({ floor_plans: nextPlans });
+      toast.success(`Scale saved: ${(pendingScalePixels / feet).toFixed(2)} pixels per foot. Room areas use this for sq ft.`);
+    } catch (e) {
+      toast.error(e?.message || 'Save failed');
+    }
+    setScaleDialogOpen(false);
+    setSelectedTool('select');
+  }, [activeFloor, floorPlans, pendingScalePixels, scaleFeetInput, saveProjectPatch]);
+
+  const handleAiDevicePlacementFromOpenAI = useCallback(async () => {
+    if (disciplineId !== 'fire_alarm') {
+      toast.error('AI device placement is for Fire Alarm discipline.');
+      return;
+    }
+    const floorRooms = rooms.filter((r) => Number(r.floor) === Number(activeFloor));
+    if (!floorRooms.length) {
+      toast.error('Draw at least one room on this floor first.');
+      return;
+    }
+    const plan = floorPlans.find((fp) => Number(fp.floor_number) === Number(activeFloor));
+    if (!plan?.image_url && !plan?.file_url) {
+      toast.error('Upload a floor plan for this floor first.');
+      return;
+    }
+    setAiDevicePlacementLoading(true);
+    try {
+      let imageWidth = 1000;
+      let imageHeight = 800;
+      try {
+        let src = plan.rendered_image_url || plan.image_url || plan.file_url;
+        if (plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(src || '')) {
+          const rendered = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
+          src = rendered.dataUrl;
+        }
+        await new Promise((resolve, reject) => {
+          const im = new Image();
+          im.crossOrigin = 'anonymous';
+          im.onload = () => {
+            imageWidth = im.naturalWidth || 1000;
+            imageHeight = im.naturalHeight || 800;
+            resolve();
+          };
+          im.onerror = () => resolve();
+          im.src = src;
+        });
+      } catch {
+        /* defaults */
+      }
+
+      const pxPerFt = getFloorScale(floorPlans, activeFloor);
+      const result = await placeFireAlarmDevicesWithOpenAI({
+        rooms,
+        floor: activeFloor,
+        imageWidth,
+        imageHeight,
+        pxPerFt,
+        disciplineId,
+      });
+
+      if (result.error && result.source !== 'openai') {
+        toast.error(result.error || 'Used grid fallback.');
+      } else if (result.error) {
+        toast.info(result.error);
+      }
+
+      const stripAi = (d) =>
+        Number(d.floor) !== Number(activeFloor) ||
+        !['openai_placement', 'deterministic_grid'].includes(d.source);
+
+      const merged = [...storedDevices.filter(stripAi), ...result.devices];
+      setLocalDevices(merged);
+      await saveProjectPatch({ devices: merged });
+      toast.success(`Placed ${result.devices.length} device(s) (${result.source === 'openai' ? 'GPT-4 class model' : '30×30 ft grid fallback'}).`);
+    } catch (e) {
+      toast.error(e?.message || 'Device placement failed');
+    } finally {
+      setAiDevicePlacementLoading(false);
+    }
+  }, [
+    activeFloor,
+    disciplineId,
+    floorPlans,
+    rooms,
+    saveProjectPatch,
+    setAiDevicePlacementLoading,
+    storedDevices,
+  ]);
 
   const handleAssignSheet = async ({ sheet, floor, planType }) => {
     if (!sheet) return;
@@ -948,6 +1077,21 @@ Return only zones that are clearly the same kind of object. Do not include the o
 
   const canvasPxPerFt = useMemo(() => getFloorScale(floorPlans, activeFloor), [floorPlans, activeFloor]);
 
+  useEffect(() => {
+    const plan = currentFloorPlan;
+    if (!plan?.file_url) return undefined;
+    const isPdf = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(plan.file_url || '');
+    if (!isPdf) return undefined;
+    let cancelled = false;
+    (async () => {
+      const hints = await extractPdfTextHintsForPlan(plan.file_url);
+      if (!cancelled) useBlueprintEditorStore.getState().setPdfLabelSuggestions(activeFloor, hints);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentFloorPlan?.file_url, currentFloorPlan?.file_type, activeFloor]);
+
   if (isLoading || !project) {
     return (
       <div className="h-screen flex items-center justify-center">
@@ -986,6 +1130,8 @@ Return only zones that are clearly the same kind of object. Do not include the o
           onAddDeviceType={() => {}}
           requirements={analysisResults}
           onAutoPlace={handleAutoPlace}
+          onAiDevicePlacement={handleAiDevicePlacementFromOpenAI}
+          aiDevicePlacementLoading={aiDevicePlacementLoading}
           onExport={() => setShowBOM(true)}
           rooms={rooms}
           layoutZones={layoutZones}
@@ -1136,6 +1282,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 }}
                 onDetectSimilarLayoutZones={handleDetectSimilarLayoutZones}
                 detectingSimilarLayoutZones={detectingSimilarZones}
+                onScaleLineComplete={handleScaleLineComplete}
                 disciplineId={disciplineId}
                 devicePalette={disciplineConfig.devicePalette}
                 circuitTypes={disciplineConfig.circuitTypes}
@@ -1285,23 +1432,98 @@ Return only zones that are clearly the same kind of object. Do not include the o
         />
       )}
 
-      {/* Room Name Dialog */}
+      {/* Room name + type (manual draw workflow) */}
       {pendingRoom && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-80">
-            <h3 className="text-sm font-semibold text-slate-800 mb-1">Name this room</h3>
-            <p className="text-xs text-slate-500 mb-3">{pendingRoom.width}×{pendingRoom.height}px · ~{Math.round(pendingRoom.width * pendingRoom.height / 9)} sf</p>
-            <input
-              autoFocus
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-400 mb-4"
-              value={pendingRoomName}
-              onChange={e => setPendingRoomName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') handleRoomNameConfirm(); if (e.key === 'Escape') setPendingRoom(null); }}
-              placeholder="e.g. Office, Corridor, Lobby..."
-            />
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Add room</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {pendingRoom.width}×{pendingRoom.height}px
+                {canvasPxPerFt ? ` · ~${roomSqft(pendingRoom, canvasPxPerFt)} sf (using ${canvasPxPerFt.toFixed(1)} px/ft)` : ''}
+              </p>
+            </div>
+            {pdfHints?.length ? (
+              <p className="text-[10px] text-slate-400 leading-snug">
+                PDF text suggestions (no positions): {pdfHints.slice(0, 12).join(', ')}
+                {pdfHints.length > 12 ? '…' : ''}
+              </p>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Room name</Label>
+              <Input
+                autoFocus
+                value={pendingRoomName}
+                onChange={(e) => setPendingRoomName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleRoomNameConfirm();
+                  if (e.key === 'Escape') setPendingRoom(null);
+                }}
+                placeholder="e.g. Electrical room"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Room type</Label>
+              <Select value={pendingRoomType} onValueChange={setPendingRoomType}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MANUAL_ROOM_TYPE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <Button variant="outline" size="sm" type="button" onClick={() => setPendingRoom(null)}>
+                Cancel
+              </Button>
+              <Button size="sm" className="bg-orange-500 hover:bg-orange-600 text-white" type="button" onClick={handleRoomNameConfirm}>
+                Add room
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scale calibration: line length in px → feet */}
+      {scaleDialogOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Calibrate scale</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                The line you drew is <strong>{Math.round(pendingScalePixels)}</strong> pixels long. Enter how many feet that distance represents on the blueprint.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Length (feet)</Label>
+              <Input
+                autoFocus
+                type="number"
+                min={0.01}
+                step={0.01}
+                value={scaleFeetInput}
+                onChange={(e) => setScaleFeetInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleConfirmScaleDialog();
+                  if (e.key === 'Escape') setScaleDialogOpen(false);
+                }}
+                placeholder="e.g. 32"
+                className="h-9"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" size="sm" onClick={() => setPendingRoom(null)}>Cancel</Button>
-              <Button size="sm" className="bg-orange-500 hover:bg-orange-600 text-white" onClick={handleRoomNameConfirm}>Add Room</Button>
+              <Button variant="outline" size="sm" type="button" onClick={() => setScaleDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" type="button" className="bg-sky-600 hover:bg-sky-700 text-white" onClick={handleConfirmScaleDialog}>
+                Save scale
+              </Button>
             </div>
           </div>
         </div>

@@ -51,3 +51,27 @@ export function updateFloorPlanScale(floorPlans = [], floor, scaleData = {}) {
   else next.push(updated);
   return next;
 }
+
+/**
+ * User-drawn calibration line: scaleFactor (px per foot) = drawnPixels / feet.
+ * Stored as px_per_ft on the floor plan row.
+ */
+export function updateFloorPlanManualCalibration(floorPlans = [], floor, { drawnPixels, feet }) {
+  const f = Math.max(Number(feet) || 0, 0.01);
+  const px = Math.max(Number(drawnPixels) || 0, 0.01);
+  const pxPerFt = px / f;
+  const next = [...(floorPlans || [])];
+  const idx = next.findIndex((plan) => Number(plan.floor_number) === Number(floor));
+  const existing = idx >= 0 ? next[idx] : { floor_number: floor, image_url: "" };
+  const updated = {
+    ...existing,
+    px_per_ft: pxPerFt,
+    scale_source: "manual_calibration_line",
+    manual_calibration_line_px: px,
+    manual_calibration_feet: f,
+    scale_updated_at: new Date().toISOString(),
+  };
+  if (idx >= 0) next[idx] = updated;
+  else next.push(updated);
+  return next;
+}

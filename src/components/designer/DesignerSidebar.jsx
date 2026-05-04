@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import {
   Layers, Zap, Download, ChevronDown, ChevronRight,
   Eye, EyeOff, LayoutList, AlertTriangle, CheckCircle2,
-  MousePointer, Square, Hand, Trash2, Settings2, Cable, MessageSquare, Network
+  MousePointer, Square, Hand, Trash2, Settings2, Cable, MessageSquare, Network, Ruler, Sparkles, Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MARKUP_TOOLS } from '@/lib/bluebeamMarkupTools';
@@ -23,6 +23,8 @@ export default function DesignerSidebar({
   layers,
   onToggleLayer,
   onAutoPlace,
+  onAiDevicePlacement,
+  aiDevicePlacementLoading = false,
   onExport,
   requirements,
   selectedTool,
@@ -101,11 +103,29 @@ export default function DesignerSidebar({
           <div className="grid grid-cols-2 gap-1">
             <ToolBtn active={selectedTool === 'select'} onClick={() => onToolSelect('select')} icon={<MousePointer className="w-3 h-3" />} label="Select" />
             <ToolBtn active={selectedTool === 'pan'} onClick={() => onToolSelect('pan')} icon={<Hand className="w-3 h-3" />} label="Pan" />
-            <ToolBtn active={selectedTool === 'room'} onClick={() => onToolSelect('room')} icon={<Square className="w-3 h-3" />} label="Room" />
+            <ToolBtn active={selectedTool === 'scale_line'} onClick={() => onToolSelect('scale_line')} icon={<Ruler className="w-3 h-3" />} label="Set Scale" />
+            <ToolBtn active={selectedTool === 'room'} onClick={() => onToolSelect('room')} icon={<Square className="w-3 h-3" />} label="Draw Room" />
             <ToolBtn active={selectedTool === 'wire'} onClick={() => onToolSelect('wire')} icon={<Cable className="w-3 h-3" />} label="Wire" />
             <ToolBtn active={selectedTool === 'delete'} onClick={() => onToolSelect('delete')} icon={<Trash2 className="w-3 h-3" />} label="Delete" danger />
           </div>
         </SidebarSection>
+
+        {showFireAlarmWorkflow && onAiDevicePlacement && (
+          <SidebarSection title="AI placement" icon={Sparkles} open={openSection === 'ai_place'} onToggle={() => toggle('ai_place')}>
+            <p className="text-[10px] text-white/35 px-1 leading-snug mb-2">
+              Uses OpenAI (GPT-4 class) when <code className="text-white/50">VITE_OPENAI_API_KEY</code> is set; otherwise a 30×30 ft grid fallback inside drawn rooms.
+            </p>
+            <button
+              type="button"
+              disabled={aiDevicePlacementLoading}
+              onClick={onAiDevicePlacement}
+              className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold bg-white/10 hover:bg-white/15 text-white border border-white/10 disabled:opacity-50"
+            >
+              {aiDevicePlacementLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              Place devices (AI)
+            </button>
+          </SidebarSection>
+        )}
 
         {/* Open-area intelligence zones */}
         <SidebarSection title="Layout Zones" icon={Square} open={openSection === 'zones'} onToggle={() => toggle('zones')}>

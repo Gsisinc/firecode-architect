@@ -4,9 +4,66 @@ import { createMarkupFromTool, formatMarkupMeasurement, getMarkupBounds, getMark
 import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
 import { getDisciplineConfig } from '@/lib/disciplines';
 import { getLayoutZoneMeta, isLayoutZoneTool } from '@/lib/layoutZones';
+import { fillColorForRoom } from '@/lib/manualRoomTypes';
 import { Copy, Edit3, MoreVertical, Trash2, Unplug, Wrench, X } from 'lucide-react';
 
 const DEVICE_RADIUS = 14;
+
+function usesInstructionSpec(device) {
+  return (
+    device?.symbol_style === 'instruction_spec' ||
+    device?.source === 'openai_placement' ||
+    device?.source === 'deterministic_grid'
+  );
+}
+
+/** Spec: smoke = circle r8 "S", pull = 16×16 "P", horn/strobe = diamond "H/S" */
+function drawInstructionSpecIcon(ctx, device, selected) {
+  const { x, y, type } = device;
+  ctx.save();
+  if (type === 'smoke_detector') {
+    ctx.beginPath();
+    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = selected ? '#dbeafe' : '#eff6ff';
+    ctx.fill();
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    drawSymbolText(ctx, 'S', x, y, 8, '#2563eb');
+  } else if (type === 'pull_station') {
+    const s = 16;
+    ctx.beginPath();
+    ctx.rect(x - s / 2, y - s / 2, s, s);
+    ctx.fillStyle = selected ? '#fee2e2' : '#fff5f5';
+    ctx.fill();
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    drawSymbolText(ctx, 'P', x, y, 9, '#dc2626');
+  } else if (type === 'horn_strobe') {
+    const r = 10;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r, y);
+    ctx.closePath();
+    ctx.fillStyle = selected ? '#ffedd5' : '#fff7ed';
+    ctx.fill();
+    ctx.strokeStyle = '#ea580c';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.font = 'bold 6px Arial';
+    ctx.fillStyle = '#ea580c';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('H/S', x, y);
+  } else {
+    const sym = getSymbol(type);
+    sym.draw(ctx, x, y, DEVICE_RADIUS, selected);
+  }
+  ctx.restore();
+}
 const GRID_SIZE = 20;
 const NOTIFICATION_TYPES = ['horn_strobe', 'strobe', 'speaker', 'horn'];
 
@@ -416,7 +473,11 @@ function deviceHitTest(devices, currentFloor, world, padding = 4) {
   return [...devices]
     .filter((device) => sameFloor(device.floor, currentFloor))
     .reverse()
-    .find((device) => device.x != null && Math.hypot(world.x - device.x, world.y - device.y) < DEVICE_RADIUS + padding);
+    .find((device) => {
+      if (device.x == null) return false;
+      const r = usesInstructionSpec(device) ? 12 : DEVICE_RADIUS + padding;
+      return Math.hypot(world.x - device.x, world.y - device.y) < r;
+    });
 }
 
 function drawLabel(ctx, text, x, y, color = '#1e293b') {
@@ -555,6 +616,7 @@ function drawFloorPlanScene(ctx, scene) {
     mouseWorld,
     selectedDevice,
     hoveredDeviceId,
+    drawingScaleLine,
     drawingRoom,
     drawingLayoutZone,
     drawingMarkup,
@@ -613,7 +675,7 @@ function drawFloorPlanScene(ctx, scene) {
   if (layers.rooms !== false) {
     rooms.filter((room) => sameFloor(room.floor, currentFloor)).forEach((room) => {
       ctx.strokeStyle = 'rgba(249,115,22,0.7)';
-      ctx.fillStyle = 'rgba(249,115,22,0.05)';
+      ctx.fillStyle = fillColorForRoom(room);
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 3]);
       ctx.beginPath();
@@ -634,6 +696,20 @@ function drawFloorPlanScene(ctx, scene) {
         }
       }
     });
+  }
+
+  if (drawingScaleLine) {
+    const { x, y, ex, ey } = drawingScaleLine;
+    ctx.strokeStyle = '#0ea5e9';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const len = Math.hypot(ex - x, ey - y);
+    drawLabel(ctx, `${Math.round(len)} px`, (x + ex) / 2, (y + ey) / 2 - 12, '#0ea5e9');
   }
 
   if (drawingRoom) {
@@ -749,12 +825,18 @@ function drawFloorPlanScene(ctx, scene) {
     const isSelected = selectedDevice?.id === device.id;
     const isHovered = hoveredDeviceId === device.id;
     const sym = getSymbol(device.type, device.subtype);
+    const instr = usesInstructionSpec(device);
+    const labelYOffset = instr ? 11 : DEVICE_RADIUS;
     ctx.save();
-    if (isSelected || isHovered) {
+    if (!instr && (isSelected || isHovered)) {
       ctx.shadowColor = sym.color;
       ctx.shadowBlur = isSelected ? 12 : 8;
     }
-    sym.draw(ctx, device.x, device.y, DEVICE_RADIUS, isSelected || isHovered);
+    if (instr) {
+      drawInstructionSpecIcon(ctx, device, isSelected || isHovered);
+    } else {
+      sym.draw(ctx, device.x, device.y, DEVICE_RADIUS, isSelected || isHovered);
+    }
     ctx.shadowBlur = 0;
     if (layers.labels !== false) {
       const labelText = device.label || device.id || '';
@@ -763,12 +845,12 @@ function drawFloorPlanScene(ctx, scene) {
       ctx.textBaseline = 'top';
       const labelWidth = ctx.measureText(labelText).width + 6;
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.fillRect(device.x - labelWidth / 2, device.y + DEVICE_RADIUS + 2, labelWidth, 11);
+      ctx.fillRect(device.x - labelWidth / 2, device.y + labelYOffset + 2, labelWidth, 11);
       ctx.strokeStyle = 'rgba(0,0,0,0.08)';
       ctx.lineWidth = 0.5;
-      ctx.strokeRect(device.x - labelWidth / 2, device.y + DEVICE_RADIUS + 2, labelWidth, 11);
+      ctx.strokeRect(device.x - labelWidth / 2, device.y + labelYOffset + 2, labelWidth, 11);
       ctx.fillStyle = '#1e293b';
-      ctx.fillText(labelText, device.x, device.y + DEVICE_RADIUS + 4);
+      ctx.fillText(labelText, device.x, device.y + labelYOffset + 4);
     }
     ctx.restore();
   });
@@ -822,6 +904,7 @@ export default function FloorPlanCanvas({
   onOpenDeviceProperties,
   onDetectSimilarLayoutZones,
   detectingSimilarLayoutZones = false,
+  onScaleLineComplete,
   disciplineId = 'fire_alarm',
   devicePalette: devicePaletteProp,
   circuitTypes: circuitTypesProp,
@@ -837,6 +920,7 @@ export default function FloorPlanCanvas({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(null);
   const [drawingRoom, setDrawingRoom] = useState(null);
+  const [drawingScaleLine, setDrawingScaleLine] = useState(null);
   const [drawingLayoutZone, setDrawingLayoutZone] = useState(null);
   const [drawingMarkup, setDrawingMarkup] = useState(null);
   const [wireStart, setWireStart] = useState(null);
@@ -1066,6 +1150,11 @@ export default function FloorPlanCanvas({
       return;
     }
 
+    if (selectedTool === 'scale_line') {
+      setDrawingScaleLine({ x: world.x, y: world.y, ex: world.x, ey: world.y });
+      return;
+    }
+
     if (selectedTool === 'room') {
       setDrawingRoom({ x: world.x, y: world.y, ex: world.x, ey: world.y });
       return;
@@ -1187,6 +1276,10 @@ export default function FloorPlanCanvas({
         setHoverFovHandle(false);
       }
     }
+    if (drawingScaleLine && !dragging) {
+      setDrawingScaleLine((line) => (line ? { ...line, ex: world.x, ey: world.y } : null));
+      return;
+    }
     if (drawingRoom && !dragging) {
       setDrawingRoom((room) => room ? { ...room, ex: world.x, ey: world.y } : null);
       return;
@@ -1221,9 +1314,17 @@ export default function FloorPlanCanvas({
         if (updated) onDeviceSelect?.(updated);
       }
     }
-  }, [currentFloor, devices, dragging, drawingLayoutZone, drawingMarkup, drawingRoom, onDeviceSelect, onDevicesChange, pxPerFt, selectedDevice, selectedTool, snapGrid, toWorld, toolbarDismissedDeviceId]);
+  }, [currentFloor, devices, dragging, drawingLayoutZone, drawingMarkup, drawingRoom, drawingScaleLine, onDeviceSelect, onDevicesChange, pxPerFt, selectedDevice, selectedTool, snapGrid, toWorld, toolbarDismissedDeviceId]);
 
   const handleMouseUp = useCallback(() => {
+    if (drawingScaleLine) {
+      const { x, y, ex, ey } = drawingScaleLine;
+      const len = Math.hypot(ex - x, ey - y);
+      if (len > 5 && onScaleLineComplete) {
+        onScaleLineComplete({ drawnPixels: len, x1: x, y1: y, x2: ex, y2: ey });
+      }
+      setDrawingScaleLine(null);
+    }
     if (selectedTool === 'room' && drawingRoom) {
       const { x, y, ex, ey } = drawingRoom;
       const rx = Math.min(x, ex);
@@ -1283,7 +1384,7 @@ export default function FloorPlanCanvas({
       setDrawingMarkup(null);
     }
     setDragging(null);
-  }, [currentFloor, drawingLayoutZone, drawingMarkup, drawingRoom, layoutZones, markups, onDetectSimilarLayoutZones, onLayoutZonesChange, onMarkupsChange, onRoomNameRequest, onRoomsChange, rooms, selectedTool]);
+  }, [currentFloor, drawingLayoutZone, drawingMarkup, drawingRoom, drawingScaleLine, layoutZones, markups, onDetectSimilarLayoutZones, onLayoutZonesChange, onMarkupsChange, onRoomNameRequest, onRoomsChange, onScaleLineComplete, rooms, selectedTool]);
 
   const handleWheel = useCallback((event) => {
     event.preventDefault();
@@ -1336,6 +1437,7 @@ export default function FloorPlanCanvas({
     mouseWorld,
     selectedDevice,
     hoveredDeviceId,
+    drawingScaleLine,
     drawingRoom,
     drawingLayoutZone,
     drawingMarkup,
@@ -1354,7 +1456,7 @@ export default function FloorPlanCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     drawFloorPlanScene(ctx, sceneProps);
-  }, [canvasRef, circuitTypes, currentFloor, devicePalette, devices, disciplineId, drawingLayoutZone, drawingMarkup, drawingRoom, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
+  }, [canvasRef, circuitTypes, currentFloor, devicePalette, devices, disciplineId, drawingLayoutZone, drawingMarkup, drawingRoom, drawingScaleLine, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
 
   useImperativeHandle(
     captureRef,
@@ -1426,6 +1528,7 @@ export default function FloorPlanCanvas({
           mouseWorld: null,
           selectedDevice: null,
           hoveredDeviceId: null,
+          drawingScaleLine: null,
           drawingRoom: null,
           drawingLayoutZone: null,
           drawingMarkup: null,
@@ -1465,7 +1568,7 @@ export default function FloorPlanCanvas({
   const getCursor = () => {
     if (dragging?.type === 'fov_aim') return 'grabbing';
     if (selectedTool === 'pan' || dragging?.type === 'pan') return dragging ? 'grabbing' : 'grab';
-    if (selectedTool === 'room' || isMarkupTool(selectedTool) || isLayoutZoneTool(selectedTool)) return 'crosshair';
+    if (selectedTool === 'scale_line' || selectedTool === 'room' || isMarkupTool(selectedTool) || isLayoutZoneTool(selectedTool)) return 'crosshair';
     if (selectedTool === 'delete') return 'not-allowed';
     if (selectedTool === 'wire') return wireStart ? 'cell' : 'crosshair';
     if (selectedTool?.startsWith('place_device_')) return 'copy';
@@ -1493,6 +1596,7 @@ export default function FloorPlanCanvas({
         onMouseLeave={() => {
           setDragging(null);
           setDrawingRoom(null);
+          setDrawingScaleLine(null);
           setDrawingMarkup(null);
           setHoveredDeviceId(null);
           setHoverFovHandle(false);
@@ -1534,6 +1638,7 @@ export default function FloorPlanCanvas({
         {snapGrid && <><span className="text-gray-300">|</span><span className="text-blue-500 font-semibold">SNAP</span></>}
         {selectedTool?.startsWith('place_device_') && <><span className="text-gray-300">|</span><span className="text-orange-500 font-semibold">PLACE - click or drag from palette</span></>}
         {selectedTool === 'wire' && <><span className="text-gray-300">|</span><span className="font-semibold" style={{ color: getCircuitMetaFrom(circuitTypes, selectedCircuitType).color }}>{wireStart ? `WIRE ${selectedCircuitId} - click target` : `WIRE ${selectedCircuitId} - click source`}</span></>}
+        {selectedTool === 'scale_line' && <><span className="text-gray-300">|</span><span className="text-sky-500 font-semibold">SET SCALE — drag a reference line</span></>}
         {selectedTool === 'room' && <><span className="text-gray-300">|</span><span className="text-orange-500 font-semibold">DRAW ROOM</span></>}
         {isLayoutZoneTool(selectedTool) && (
           <><span className="text-gray-300">|</span><span className="text-violet-600 font-semibold">{detectingSimilarLayoutZones ? 'AI FINDING SIMILAR...' : 'DRAW LAYOUT ZONE'}</span></>
