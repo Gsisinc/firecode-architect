@@ -2,15 +2,16 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Building2, ChevronRight, Flame, Shield, Video, Speaker, Cable } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ArrowLeft, Building2, Flame, Shield, Video, Speaker, Cable } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
 
-const CARDS = [
-  { id: DISCIPLINE_IDS.FIRE_ALARM, icon: Flame, description: 'NFPA-oriented device palette, SLC/NAC circuits, life-safety workflow.' },
-  { id: DISCIPLINE_IDS.ACCESS_CONTROL, icon: Shield, description: 'Readers, locks, REX, door loops — UL-aligned equipment notes.' },
-  { id: DISCIPLINE_IDS.VIDEO_SURVEILLANCE, icon: Video, description: 'Camera types with field-of-view overlays and structured cable circuits.' },
-  { id: DISCIPLINE_IDS.AUDIO_VISUAL, icon: Speaker, description: 'Displays, audio, control — AV signal classes.' },
-  { id: DISCIPLINE_IDS.LOW_VOLTAGE, icon: Cable, description: 'MDF/IDF, copper & fiber circuit types for structured cabling.' },
+const TAB_ITEMS = [
+  { id: DISCIPLINE_IDS.FIRE_ALARM, icon: Flame, description: 'NFPA-oriented device palette, SLC/NAC circuits, life-safety workflow, auto-place, simulation, and riser views.' },
+  { id: DISCIPLINE_IDS.ACCESS_CONTROL, icon: Shield, description: 'Readers, locks, REX, door loops — UL-aligned equipment notes and door-focused circuits.' },
+  { id: DISCIPLINE_IDS.VIDEO_SURVEILLANCE, icon: Video, description: 'Camera types with field-of-view overlays, PoE/data circuits, and structured cable metadata.' },
+  { id: DISCIPLINE_IDS.AUDIO_VISUAL, icon: Speaker, description: 'Displays, audio, control — AV signal classes and rack-level symbols.' },
+  { id: DISCIPLINE_IDS.LOW_VOLTAGE, icon: Cable, description: 'MDF/IDF, copper and fiber circuit types for structured cabling takeoffs.' },
 ];
 
 export default function SystemsDashboard() {
@@ -50,7 +51,7 @@ export default function SystemsDashboard() {
             </div>
             <div className="min-w-0">
               <h1 className="text-lg font-semibold truncate">{project.name || 'Project'}</h1>
-              <p className="text-xs text-white/40 truncate">{project.address || 'Systems designer'}</p>
+              <p className="text-xs text-white/40 truncate">{project.address || 'Pick a system, then open its designer'}</p>
             </div>
           </div>
           <Button
@@ -63,43 +64,66 @@ export default function SystemsDashboard() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-10">
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-white/35 mb-2">Choose discipline</p>
-        <h2 className="text-2xl font-bold text-white mb-1">Open designer</h2>
-        <p className="text-sm text-white/50 mb-8 max-w-xl">
-          Each system uses the same floor-plan canvas, properties, and wiring tools. Palettes, circuit types, and theme colors change by discipline.
+      <main className="max-w-5xl mx-auto px-6 py-8">
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-white/35 mb-2">Project home</p>
+        <h2 className="text-2xl font-bold text-white mb-1">Systems dashboard</h2>
+        <p className="text-sm text-white/50 mb-6 max-w-2xl">
+          Choose a discipline tab, then open that designer. Fire alarm opens the full NFPA workflow you have been using; other tabs use the same canvas and properties pattern with that system&apos;s symbols and circuits.
         </p>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          {CARDS.map(({ id, icon: Icon, description }) => {
+        <Tabs defaultValue={DISCIPLINE_IDS.FIRE_ALARM} className="w-full">
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-white/5 p-2 rounded-xl border border-white/10">
+            {TAB_ITEMS.map(({ id, icon: Icon }) => {
+              const cfg = DISCIPLINES[id];
+              return (
+                <TabsTrigger
+                  key={id}
+                  value={id}
+                  className="flex items-center gap-2 rounded-lg border border-transparent px-3 py-2.5 text-xs font-medium text-white/65 data-[state=active]:text-white data-[state=active]:border-white/25 data-[state=active]:bg-white/10 sm:text-sm"
+                >
+                  <Icon className="w-4 h-4 shrink-0" style={{ color: cfg.theme.primary }} />
+                  <span className="truncate">{cfg.label}</span>
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+
+          {TAB_ITEMS.map(({ id, icon: Icon, description }) => {
             const cfg = DISCIPLINES[id];
             return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => navigate(`/project/${projectId}/designer/${id}`)}
-                className="text-left rounded-2xl border border-white/10 bg-white/[0.04] p-5 hover:bg-white/[0.07] hover:border-white/20 transition-all group"
-              >
-                <div className="flex items-start gap-4">
-                  <div
-                    className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-                    style={{ backgroundColor: `${cfg.theme.primary}28`, color: cfg.theme.primary }}
-                  >
-                    <Icon className="w-6 h-6" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-white">{cfg.label}</h3>
-                      <ChevronRight className="w-4 h-4 text-white/25 group-hover:text-white/50 transition-colors shrink-0" />
+              <TabsContent key={id} value={id} className="mt-6 outline-none">
+                <div
+                  className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 sm:p-8"
+                  style={{ borderLeftWidth: 4, borderLeftColor: cfg.theme.primary }}
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex gap-4 min-w-0">
+                      <div
+                        className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: `${cfg.theme.primary}28`, color: cfg.theme.primary }}
+                      >
+                        <Icon className="w-7 h-7" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-xl font-semibold text-white">{cfg.label}</h3>
+                        <p className="text-sm text-white/50 mt-2 leading-relaxed max-w-xl">{description}</p>
+                        <p className="text-[11px] text-white/35 mt-3 font-mono">{cfg.devicePalette.length} device types in palette</p>
+                      </div>
                     </div>
-                    <p className="text-sm text-white/45 mt-1 leading-snug">{description}</p>
-                    <p className="text-[10px] text-white/30 mt-3 font-mono">{cfg.devicePalette.length} device types</p>
+                    <Button
+                      type="button"
+                      className="shrink-0 text-white border-0 shadow-lg"
+                      style={{ backgroundColor: cfg.theme.primary }}
+                      onClick={() => navigate(`/project/${projectId}/designer/${id}`)}
+                    >
+                      Open {cfg.label} designer
+                    </Button>
                   </div>
                 </div>
-              </button>
+              </TabsContent>
             );
           })}
-        </div>
+        </Tabs>
       </main>
     </div>
   );

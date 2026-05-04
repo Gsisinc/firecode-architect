@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster"
 import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
@@ -11,6 +11,12 @@ import ProjectSetup from './pages/ProjectSetup';
 import ProjectDesigner from './pages/ProjectDesigner';
 import SystemsDashboard from './pages/SystemsDashboard';
 import CodeReference from './pages/CodeReference';
+
+/** Bare `/designer` always sends users to the per-project systems dashboard to pick a discipline. */
+function RedirectProjectToSystems() {
+  const { id } = useParams();
+  return <Navigate to={`/project/${id}/systems`} replace />;
+}
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -38,7 +44,7 @@ const AuthenticatedApp = () => {
       <Route path="/project/new" element={<ProjectSetup />} />
       <Route path="/project/:id/setup" element={<ProjectSetup />} />
       <Route path="/project/:id/systems" element={<SystemsDashboard />} />
-      <Route path="/project/:id/designer" element={<ProjectDesigner />} />
+      <Route path="/project/:id/designer" element={<RedirectProjectToSystems />} />
       <Route path="/project/:id/designer/:discipline" element={<ProjectDesigner />} />
       <Route path="/code-reference" element={<CodeReference />} />
       <Route path="*" element={<PageNotFound />} />
