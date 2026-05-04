@@ -148,6 +148,62 @@ function collectScaleCandidate(dim, axis, imgW, imgH) {
   return validScale(pxPerFt) ? pxPerFt : null;
 }
 
+/** Graphic scale in title block / legend: bar length in px vs labeled span in feet */
+function collectScaleBarCandidate(scaleBar) {
+  if (!scaleBar || typeof scaleBar !== "object") return null;
+  const feet = getFirstFeet(scaleBar, ["feet", "ft", "span_ft", "represents_ft", "real_world_ft", "labeled_feet"]);
+  const len = getFirstNumber(scaleBar, ["length_px", "bar_length_px", "span_px", "width_px"]);
+  if (!feet || feet <= 0 || len == null || len <= 0) return null;
+  const pxPerFt = len / feet;
+  return validScale(pxPerFt) ? pxPerFt : null;
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/**
+ * Combine multiple px/ft readings: median, dropping outliers that disagree >~22% with the median.
+ * Averaging disagreeing horizontal vs vertical dimensions often produces a wrong scale.
+ */
+function reconcilePxPerFtCandidates(rawCandidates, areaFallback, sourceLabels) {
+  const candidates = rawCandidates
+    .map((v, i) => ({ v, label: sourceLabels[i] || `s${i}` }))
+    .filter((x) => x.v != null && validScale(x.v));
+
+  if (!candidates.length && areaFallback != null && validScale(areaFallback)) {
+    return { pxPerFt: areaFallback, scaleSource: "project floor gross area (no dimension lines)" };
+  }
+
+  const withArea =
+    areaFallback != null && validScale(areaFallback)
+      ? [...candidates.map((c) => c.v), areaFallback]
+      : candidates.map((c) => c.v);
+
+  if (!withArea.length) return { pxPerFt: null, scaleSource: "default" };
+
+  let workingVals = withArea;
+  const globalMed = median(workingVals);
+  if (workingVals.length >= 3) {
+    const close = workingVals.filter((c) => Math.abs(c - globalMed) / globalMed <= 0.22);
+    if (close.length >= 2) workingVals = close;
+  }
+
+  const value = median(workingVals);
+
+  const names = candidates.map((c) => c.label).filter(Boolean);
+  if (areaFallback != null && validScale(areaFallback) && workingVals.includes(areaFallback)) {
+    names.push("floor gross area");
+  }
+  const scaleSource =
+    names.length > 0 ? `reconciled: ${[...new Set(names)].join(", ")}` : "reconciled measurements";
+
+  return { pxPerFt: value, scaleSource };
+}
+
 function grossSqftForFloor(project, floor) {
   const match = (project?.gross_sqft_per_floor || []).find((f) => Number(f.floor) === Number(floor));
   const sqft = toNumber(match?.sqft);
@@ -157,32 +213,60 @@ function grossSqftForFloor(project, floor) {
 export function deriveDetectionGeometry({ pass1, imgW, imgH, project, floor }) {
   const normalizedPass1 = unwrapLlmResponse(pass1);
   const buildingBounds = normalizeBuildingBounds(normalizedPass1, imgW, imgH);
-  const candidates = [
-    collectScaleCandidate(normalizedPass1.horiz_dim || normalizedPass1.horizontal_dimension, "x", imgW, imgH),
-    collectScaleCandidate(normalizedPass1.vert_dim || normalizedPass1.vertical_dimension, "y", imgW, imgH),
-  ].filter(Boolean);
 
-  let pxPerFt = candidates.length
-    ? candidates.reduce((sum, scale) => sum + scale, 0) / candidates.length
-    : null;
-  let scaleSource = candidates.length ? "dimension callouts" : "default";
+  const horiz = collectScaleCandidate(
+    normalizedPass1.horiz_dim || normalizedPass1.horizontal_dimension,
+    "x",
+    imgW,
+    imgH,
+  );
+  const vert = collectScaleCandidate(
+    normalizedPass1.vert_dim || normalizedPass1.vertical_dimension,
+    "y",
+    imgW,
+    imgH,
+  );
+  const scaleBar = collectScaleBarCandidate(
+    normalizedPass1.scale_bar || normalizedPass1.graphic_scale || normalizedPass1.scalebar,
+  );
 
-  if (!pxPerFt) {
-    const floorSqft = grossSqftForFloor(project, floor);
-    if (floorSqft) {
-      const areaBasedScale = Math.sqrt((buildingBounds.width * buildingBounds.height) / floorSqft);
-      if (validScale(areaBasedScale)) {
-        pxPerFt = areaBasedScale;
-        scaleSource = "project floor area";
-      }
-    }
+  const floorSqft = grossSqftForFloor(project, floor);
+  const areaBasedScale =
+    floorSqft && buildingBounds.width > 0 && buildingBounds.height > 0
+      ? Math.sqrt((buildingBounds.width * buildingBounds.height) / floorSqft)
+      : null;
+  const areaOk = areaBasedScale && validScale(areaBasedScale) ? areaBasedScale : null;
+
+  const rawList = [horiz, vert, scaleBar];
+  const labelList = ["horizontal dimension", "vertical dimension", "graphic scale bar"];
+
+  let reconciled = reconcilePxPerFtCandidates(rawList, areaOk, labelList);
+
+  if (
+    horiz &&
+    vert &&
+    scaleBar &&
+    Math.abs(horiz - vert) / Math.min(horiz, vert) > 0.18 &&
+    validScale(scaleBar)
+  ) {
+    reconciled = {
+      pxPerFt: scaleBar,
+      scaleSource: "graphic scale bar (horizontal vs vertical dimensions disagreed)",
+    };
   }
+
+  const pxPerFt = reconciled.pxPerFt ?? DEFAULT_PX_PER_FT;
+  const scaleCandidates = rawList.filter((c) => c != null);
+  const scaleSource =
+    reconciled.pxPerFt != null
+      ? reconciled.scaleSource
+      : `assumed ${DEFAULT_PX_PER_FT} px/ft (add dimensions on the sheet or gross sqft in project setup)`;
 
   return {
     buildingBounds,
-    pxPerFt: pxPerFt || DEFAULT_PX_PER_FT,
+    pxPerFt,
     scaleSource,
-    scaleCandidates: candidates,
+    scaleCandidates,
   };
 }
 
@@ -202,10 +286,12 @@ function normalizeRoomType(rawType, name) {
 }
 
 function getRoomBounds(room, pxPerFt, buildingBounds, imgW, imgH) {
-  const x1 = getFirstNumber(room, ["x1_px", "left_px", "left", "x1", "px", "x"]) ?? buildingBounds.left;
-  const y1 = getFirstNumber(room, ["y1_px", "top_px", "top", "y1", "py", "y"]) ?? buildingBounds.top;
-  const x2 = getFirstNumber(room, ["x2_px", "right_px", "right", "x2"]);
-  const y2 = getFirstNumber(room, ["y2_px", "bottom_px", "bottom", "y2"]);
+  let x1 = getFirstNumber(room, ["x1_px", "left_px", "left", "x1", "px", "x"]) ?? buildingBounds.left;
+  let y1 = getFirstNumber(room, ["y1_px", "top_px", "top", "y1", "py", "y"]) ?? buildingBounds.top;
+  let x2 = getFirstNumber(room, ["x2_px", "right_px", "right", "x2"]);
+  let y2 = getFirstNumber(room, ["y2_px", "bottom_px", "bottom", "y2"]);
+  if (x1 != null && x2 != null && x1 > x2) [x1, x2] = [x2, x1];
+  if (y1 != null && y2 != null && y1 > y2) [y1, y2] = [y2, y1];
   const widthPx = getFirstNumber(room, ["width_px", "w_px", "width", "w"]);
   const heightPx = getFirstNumber(room, ["height_px", "h_px", "height", "h"]);
   const widthFt = getFirstFeet(room, ["width_ft", "width_feet", "width_label", "width_dimension"]);
@@ -240,7 +326,7 @@ export function normalizeDetectedRooms({ pass2, activeFloor, project, geometry, 
       if (seen.has(centerKey)) return null;
       seen.add(centerKey);
 
-      const explicitSqft = getFirstNumber(room, ["sqft", "area_sqft", "area_sf"]);
+      const explicitSqft = getFirstNumber(room, ["sqft", "area_sqft", "area_sf", "room_area_sf"]);
       const sqft = explicitSqft
         || (bounds.widthFt && bounds.heightFt ? bounds.widthFt * bounds.heightFt : null)
         || (bounds.width * bounds.height) / (geometry.pxPerFt * geometry.pxPerFt);

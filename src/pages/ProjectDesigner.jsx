@@ -331,28 +331,24 @@ export default function ProjectDesigner() {
     let pass1;
     try {
       pass1 = await base44.integrations.Core.InvokeLLM({
-        prompt: `This is an architectural floor plan blueprint image (${imgW}x${imgH} pixels).
+        prompt: `This is an architectural floor plan image (${imgW}x${imgH} pixels). Establish accurate scale (pixels per foot).
 
-YOUR ONLY JOB: Find the dimension annotation lines printed on the drawing and read the scale.
+STEP A — Graphic scale (preferred when visible): In the title block, notes, or legend, look for a drawn scale bar (tick marks with numbers like 0, 20, 40 ft). Measure the TOTAL length of that bar in pixels from first tick to last labeled span, and the real-world feet that span represents (e.g. bar shows 0–50 ft → feet = 50). If no graphic scale exists, leave scale_bar fields empty.
 
-1. Find the LONGEST horizontal dimension line with a measurement label (e.g. "25'-0\"" or "25'0\""). Report:
-   - The pixel X coordinate of its LEFT arrowhead tip
-   - The pixel X coordinate of its RIGHT arrowhead tip
-   - The feet value written on it (as a decimal, e.g. 25.0)
+STEP B — Dimension strings: Find dimension lines that measure overall building width and depth (prefer strings along OUTERMOST walls or major grids). Do NOT use tiny interior dimensions, door widths, or parking stripes.
+For the best horizontal run: report x1_px/x2_px at the arrow tips or extension-line intersections and feet as decimal (e.g. 62.5 for 62'-6").
+For the best vertical run: same for y1_px/y2_px.
 
-2. Find the LONGEST vertical dimension line with a measurement label. Report:
-   - The pixel Y coordinate of its TOP arrowhead tip
-   - The pixel Y coordinate of its BOTTOM arrowhead tip
-   - The feet value written on it (as a decimal, e.g. 50.0)
+STEP C — Building outline: Report outer walls of the occupied building only (exclude sheet border, North arrow art, title block). left_px, top_px, right_px, bottom_px from image top-left.
 
-3. Find the OUTER WALLS of the building floor plan (ignore title block, notes, legend outside the building):
-   - left_px, top_px, right_px, bottom_px (pixels from image top-left)
-
-If a dimension line cannot be read confidently, return null for that dimension. Be extremely precise about pixel coordinates. Look carefully at where dimension lines START and END.`,
+Rules: Be precise to the pixel on arrow tips. If unsure of a dimension, omit it rather than guessing.`,
         file_urls: [analysisImageUrl],
         response_json_schema: {
           type: "object",
           properties: {
+            scale_bar: { type: "object", properties: {
+              length_px: { type: "number" }, feet: { type: "number" },
+            }},
             horiz_dim: { type: "object", properties: {
               x1_px: { type: "number" }, x2_px: { type: "number" }, feet: { type: "number" }
             }},
@@ -391,31 +387,20 @@ If a dimension line cannot be read confidently, return null for that dimension. 
     let pass2;
     try {
       pass2 = await base44.integrations.Core.InvokeLLM({
-        prompt: `This is an architectural floor plan blueprint image (${imgW}x${imgH} pixels).
+        prompt: `Floor plan image (${imgW}x${imgH} px). Building interior region (clip rooms to this): left=${buildingBounds.left}, top=${buildingBounds.top}, right=${buildingBounds.right}, bottom=${buildingBounds.bottom}. Scale ≈ ${pxPerFt.toFixed(2)} px per foot.
 
-The building's outer walls are at: left=${buildingBounds.left}px, top=${buildingBounds.top}px, right=${buildingBounds.right}px, bottom=${buildingBounds.bottom}px.
-The drawing scale is approximately ${pxPerFt.toFixed(1)} pixels per foot.
+ROOMS — List every separately labeled enclosed space inside the walls: offices, toilets, IT/electrical/data, janitor, storage, MECH, corridors, stairs, elevator, lobby, sales floor, etc. Include small rooms (closets, IDF) if labeled.
 
-YOUR JOB: For every labeled enclosed room/space inside the building walls, report:
-1. The room's TEXT LABEL as written on the plan (e.g. "ELECTRICAL ROOM", "STORAGE ROOM", "RESTROOM", "SALES FLOOR")
-2. The room_type (office|corridor|conference_room|bathroom|storage|lobby|stairwell|mechanical_room|sales_floor|other)
-3. The pixel bounding box of the room: x1_px, y1_px, x2_px, y2_px measured from image top-left
-4. The room's WIDTH in feet — read from dimension callouts inside or adjacent to the room, OR estimate from the scale
-5. The room's HEIGHT (depth) in feet — same
-6. Also report major mercantile/open-plan layout zones inside rooms:
-   - aisles (clear customer/service circulation)
-   - racks/shelving/fixture blocks
-   - checkout lanes
-   - high-piled storage or stock/storage fixture zones
-   - columns/structural obstructions
-   - no-device/exclusion zones where devices should not be placed
+For EACH room:
+- name: exact plan text
+- room_type: office|corridor|conference_room|bathroom|storage|lobby|stairwell|mechanical_room|sales_floor|other
+- x1_px, y1_px, x2_px, y2_px: axis-aligned rectangle on the image (origin top-left). Integers. x1 < x2, y1 < y2. Tight fit to interior wall faces around that label — do not merge two labeled rooms into one box.
+- width_ft, height_ft: from dimension strings on/near the room if present; otherwise from box size ÷ ${pxPerFt.toFixed(2)} px/ft
+- area_sqft: if a schedule or "SF" callout gives area, use it; else omit
 
-For each layout zone, return zone_type (aisle|rack|checkout|storage|column|obstruction|no_device|ceiling_zone|other), label/name, x1_px, y1_px, x2_px, y2_px, confidence 0-1, and a short reason.
+LAYOUT ZONES (large retail/open plans): Inside big open areas, add zones for aisles, racks, checkout, storage stacks, columns, no-device areas — same coordinate rules.
 
-IMPORTANT: Width and height should be the REAL-WORLD feet dimensions readable from the drawing.
-If a room has a dimension callout like "9'-0\"" that is its actual size — use that, don't guess.
-For rooms without callouts, estimate using the ${pxPerFt.toFixed(1)}px/ft scale. Only include enclosed rooms/spaces, not title blocks, notes, legends, or exterior annotations.
-For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR room boundary and separate rack/aisle/checkout/obstruction layout zones inside it.`,
+Do not include title block, sheet border, parking lot, or north arrow. Do not duplicate the same room twice.`,
         file_urls: [analysisImageUrl],
         response_json_schema: {
           type: "object",
@@ -432,7 +417,8 @@ For a large mercantile/Walmart-style open sales floor, return one SALES FLOOR ro
                   x2_px: { type: "number" },
                   y2_px: { type: "number" },
                   width_ft: { type: "number" },
-                  height_ft: { type: "number" }
+                  height_ft: { type: "number" },
+                  area_sqft: { type: "number" }
                 }
               }
             },
