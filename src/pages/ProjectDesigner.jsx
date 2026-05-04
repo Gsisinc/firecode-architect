@@ -27,6 +27,8 @@ import { downloadDXF } from "@/lib/dxfExport";
 import {
   deriveDetectionGeometry,
   normalizeDetectedRooms,
+  expandLayoutZonesFromDetectionPass,
+  remapThumbnailCoordinatesToImageSpace,
 } from "@/lib/floorPlanDetection";
 import { getFloorScale, roomSqft, updateFloorPlanScale } from "@/lib/designScale";
 import { mergeGeneratedDevices } from "@/lib/designValidation";
@@ -306,10 +308,10 @@ export default function ProjectDesigner() {
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
 
-    const applyDetectedRooms = (detectedRooms, detectedLayoutZones, geometry, successMessage) => {
+    const applyDetectedRooms = (detectedRooms, detectedLayoutZones, geometryPatch, successMessage) => {
       const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
       const newLayoutZones = [...layoutZones.filter(z => z.floor !== activeFloor), ...detectedLayoutZones];
-      const updatedFloorPlans = updateFloorPlanScale(floorPlans, activeFloor, geometry);
+      const updatedFloorPlans = updateFloorPlanScale(floorPlans, activeFloor, geometryPatch);
       setLocalRooms(newRooms);
       setLocalLayoutZones(newLayoutZones);
       setLocalFloorPlans(updatedFloorPlans);
@@ -331,33 +333,42 @@ export default function ProjectDesigner() {
     let pass1;
     try {
       pass1 = await base44.integrations.Core.InvokeLLM({
-        prompt: `This is an architectural floor plan image (${imgW}x${imgH} pixels). Establish accurate scale (pixels per foot).
+        prompt: `Architectural floor plan raster image: EXACT pixel size ${imgW} wide × ${imgH} tall.
 
-STEP A — Graphic scale (preferred when visible): In the title block, notes, or legend, look for a drawn scale bar (tick marks with numbers like 0, 20, 40 ft). Measure the TOTAL length of that bar in pixels from first tick to last labeled span, and the real-world feet that span represents (e.g. bar shows 0–50 ft → feet = 50). If no graphic scale exists, leave scale_bar fields empty.
+CRITICAL: The API may resize the image internally. To stay correct, you MUST output **normalized ratios** (0.0–1.0) for every position:
+- x_ratio = (pixel x) / ${imgW}
+- y_ratio = (pixel y) / ${imgH}
+Ratios are authoritative. You may also fill *_px fields for the same points (same meaning as ratios × dimensions).
 
-STEP B — Dimension strings: Find dimension lines that measure overall building width and depth (prefer strings along OUTERMOST walls or major grids). Do NOT use tiny interior dimensions, door widths, or parking stripes.
-For the best horizontal run: report x1_px/x2_px at the arrow tips or extension-line intersections and feet as decimal (e.g. 62.5 for 62'-6").
-For the best vertical run: same for y1_px/y2_px.
+STEP A — Graphic scale in title block / legend: tick bar from first to last major tick. Provide length_ratio = bar_length_px / ${imgW} (horizontal bars) OR use length_px if you measured on the full ${imgW}px-wide image. feet = real-world span.
 
-STEP C — Building outline: Report outer walls of the occupied building only (exclude sheet border, North arrow art, title block). left_px, top_px, right_px, bottom_px from image top-left.
+STEP B — Overall building dimensions (outer walls / major grids only): horiz_dim and vert_dim with x1_ratio,x2_ratio or y1_ratio,y2_ratio at arrow tips, plus feet.
 
-Rules: Be precise to the pixel on arrow tips. If unsure of a dimension, omit it rather than guessing.`,
+STEP C — Building outline: building.left_ratio = left_px/${imgW}, right_ratio, top_ratio, bottom_ratio for occupied footprint only (no sheet border).
+
+Use decimal ratios (e.g. 0.184). Omit a field if unreadable.`,
         file_urls: [analysisImageUrl],
         response_json_schema: {
           type: "object",
           properties: {
             scale_bar: { type: "object", properties: {
-              length_px: { type: "number" }, feet: { type: "number" },
+              length_px: { type: "number" }, length_ratio: { type: "number" }, feet: { type: "number" },
             }},
             horiz_dim: { type: "object", properties: {
-              x1_px: { type: "number" }, x2_px: { type: "number" }, feet: { type: "number" }
+              x1_px: { type: "number" }, x2_px: { type: "number" },
+              x1_ratio: { type: "number" }, x2_ratio: { type: "number" },
+              feet: { type: "number" }
             }},
             vert_dim: { type: "object", properties: {
-              y1_px: { type: "number" }, y2_px: { type: "number" }, feet: { type: "number" }
+              y1_px: { type: "number" }, y2_px: { type: "number" },
+              y1_ratio: { type: "number" }, y2_ratio: { type: "number" },
+              feet: { type: "number" }
             }},
             building: { type: "object", properties: {
               left_px: { type: "number" }, top_px: { type: "number" },
-              right_px: { type: "number" }, bottom_px: { type: "number" }
+              right_px: { type: "number" }, bottom_px: { type: "number" },
+              left_ratio: { type: "number" }, top_ratio: { type: "number" },
+              right_ratio: { type: "number" }, bottom_ratio: { type: "number" },
             }}
           }
         }
@@ -387,20 +398,24 @@ Rules: Be precise to the pixel on arrow tips. If unsure of a dimension, omit it 
     let pass2;
     try {
       pass2 = await base44.integrations.Core.InvokeLLM({
-        prompt: `Floor plan image (${imgW}x${imgH} px). Building interior region (clip rooms to this): left=${buildingBounds.left}, top=${buildingBounds.top}, right=${buildingBounds.right}, bottom=${buildingBounds.bottom}. Scale ≈ ${pxPerFt.toFixed(2)} px per foot.
+        prompt: `Floor plan image is exactly ${imgW} pixels wide by ${imgH} pixels tall.
 
-ROOMS — List every separately labeled enclosed space inside the walls: offices, toilets, IT/electrical/data, janitor, storage, MECH, corridors, stairs, elevator, lobby, sales floor, etc. Include small rooms (closets, IDF) if labeled.
+You MUST give each room box as NORMALIZED RATIOS (primary — required):
+  x1_ratio = left edge pixel x / ${imgW}
+  x2_ratio = right edge pixel x / ${imgW}
+  y1_ratio = top edge pixel y / ${imgH}
+  y2_ratio = bottom edge pixel y / ${imgH}
+Values must stay between 0 and 1. A garage spanning most of the sheet might have x1_ratio≈0.08 and x2_ratio≈0.55 — NOT tiny decimals unless the room is actually tiny.
 
-For EACH room:
-- name: exact plan text
-- room_type: office|corridor|conference_room|bathroom|storage|lobby|stairwell|mechanical_room|sales_floor|other
-- x1_px, y1_px, x2_px, y2_px: axis-aligned rectangle on the image (origin top-left). Integers. x1 < x2, y1 < y2. Tight fit to interior wall faces around that label — do not merge two labeled rooms into one box.
-- width_ft, height_ft: from dimension strings on/near the room if present; otherwise from box size ÷ ${pxPerFt.toFixed(2)} px/ft
-- area_sqft: if a schedule or "SF" callout gives area, use it; else omit
+Reference building interior (ratios): left=${(buildingBounds.left / imgW).toFixed(4)}, top=${(buildingBounds.top / imgH).toFixed(4)}, right=${(buildingBounds.right / imgW).toFixed(4)}, bottom=${(buildingBounds.bottom / imgH).toFixed(4)}. Scale ≈ ${pxPerFt.toFixed(2)} px/ft.
 
-LAYOUT ZONES (large retail/open plans): Inside big open areas, add zones for aisles, racks, checkout, storage stacks, columns, no-device areas — same coordinate rules.
+ROOMS — Every labeled enclosed space (kitchen, garage, bath, closet, etc.). One rectangle per label; walls hugging the room; do not merge two labels.
 
-Do not include title block, sheet border, parking lot, or north arrow. Do not duplicate the same room twice.`,
+Also set x1_px,y1_px,x2_px,y2_px = ratios × image size if you can (integers), for redundancy.
+
+Layout zones: same ratio fields for aisles / racks / obstructions in open plans.
+
+Exclude title block, sheet border, and exterior parking.`,
         file_urls: [analysisImageUrl],
         response_json_schema: {
           type: "object",
@@ -412,6 +427,10 @@ Do not include title block, sheet border, parking lot, or north arrow. Do not du
                 properties: {
                   name: { type: "string" },
                   room_type: { type: "string" },
+                  x1_ratio: { type: "number" },
+                  y1_ratio: { type: "number" },
+                  x2_ratio: { type: "number" },
+                  y2_ratio: { type: "number" },
                   x1_px: { type: "number" },
                   y1_px: { type: "number" },
                   x2_px: { type: "number" },
@@ -429,6 +448,10 @@ Do not include title block, sheet border, parking lot, or north arrow. Do not du
                 properties: {
                   zone_type: { type: "string" },
                   name: { type: "string" },
+                  x1_ratio: { type: "number" },
+                  y1_ratio: { type: "number" },
+                  x2_ratio: { type: "number" },
+                  y2_ratio: { type: "number" },
                   x1_px: { type: "number" },
                   y1_px: { type: "number" },
                   x2_px: { type: "number" },
@@ -449,7 +472,7 @@ Do not include title block, sheet border, parking lot, or north arrow. Do not du
 
     console.log("Pass 2 (rooms):", JSON.stringify(pass2, null, 2));
 
-    const detectedRooms = normalizeDetectedRooms({
+    const detectedRoomsRaw = normalizeDetectedRooms({
       pass2,
       activeFloor,
       project,
@@ -457,7 +480,19 @@ Do not include title block, sheet border, parking lot, or north arrow. Do not du
       imgW,
       imgH,
     });
-    const detectedLayoutZones = normalizeDetectedLayoutZones(pass2?.layout_zones || [], activeFloor);
+    const zonesExpanded = expandLayoutZonesFromDetectionPass(pass2?.layout_zones || [], imgW, imgH);
+    const detectedLayoutZonesRaw = normalizeDetectedLayoutZones(zonesExpanded, activeFloor);
+
+    const remapped = remapThumbnailCoordinatesToImageSpace({
+      rooms: detectedRoomsRaw,
+      layoutZones: detectedLayoutZonesRaw,
+      buildingBounds: geometry.buildingBounds,
+      imgW,
+      imgH,
+    });
+    const detectedRooms = remapped.rooms;
+    const detectedLayoutZones = remapped.layoutZones;
+    const geometryForSave = { ...geometry, buildingBounds: remapped.buildingBounds };
 
     if (detectedRooms.length === 0) {
       toast.error("AI did not return any real rooms. No room overlays were saved.");
@@ -465,8 +500,8 @@ Do not include title block, sheet border, parking lot, or north arrow. Do not du
       applyDetectedRooms(
         detectedRooms,
         detectedLayoutZones,
-        geometry,
-        `Detected ${detectedRooms.length} rooms and ${detectedLayoutZones.length} layout zones at ${pxPerFt.toFixed(1)}px/ft scale (${scaleSource}).`
+        geometryForSave,
+        `Detected ${detectedRooms.length} rooms and ${detectedLayoutZones.length} layout zones at ${pxPerFt.toFixed(1)}px/ft (${scaleSource}).`
       );
     }
     setAnalyzingFloor(false);

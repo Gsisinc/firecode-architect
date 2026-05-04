@@ -587,7 +587,11 @@ function drawFloorPlanScene(ctx, scene) {
     }
   }
 
-  if (floorImg) ctx.drawImage(floorImg, 0, 0, floorImg.width, floorImg.height);
+  if (floorImg) {
+    const iw = floorImg.naturalWidth || floorImg.width;
+    const ih = floorImg.naturalHeight || floorImg.height;
+    ctx.drawImage(floorImg, 0, 0, iw, ih);
+  }
 
   if (layers.grid) {
     ctx.strokeStyle = 'rgba(59,130,246,0.2)';
@@ -952,11 +956,13 @@ export default function FloorPlanCanvas({
             const container = containerRef.current;
             if (!container) return;
             const padding = 40;
-            const fitScale = Math.min((container.clientWidth - padding * 2) / img.width, (container.clientHeight - padding * 2) / img.height, 1);
+            const iw = img.naturalWidth || img.width;
+            const ih = img.naturalHeight || img.height;
+            const fitScale = Math.min((container.clientWidth - padding * 2) / iw, (container.clientHeight - padding * 2) / ih, 1);
             setScale(fitScale);
             setOffset({
-              x: (container.clientWidth - img.width * fitScale) / 2,
-              y: (container.clientHeight - img.height * fitScale) / 2,
+              x: (container.clientWidth - iw * fitScale) / 2,
+              y: (container.clientHeight - ih * fitScale) / 2,
             });
           };
           img.src = renderedPage.dataUrl;
@@ -977,11 +983,13 @@ export default function FloorPlanCanvas({
       const container = containerRef.current;
       if (!container) return;
       const padding = 40;
-      const fitScale = Math.min((container.clientWidth - padding * 2) / img.width, (container.clientHeight - padding * 2) / img.height, 1);
+      const iw = img.naturalWidth || img.width;
+      const ih = img.naturalHeight || img.height;
+      const fitScale = Math.min((container.clientWidth - padding * 2) / iw, (container.clientHeight - padding * 2) / ih, 1);
       setScale(fitScale);
       setOffset({
-        x: (container.clientWidth - img.width * fitScale) / 2,
-        y: (container.clientHeight - img.height * fitScale) / 2,
+        x: (container.clientWidth - iw * fitScale) / 2,
+        y: (container.clientHeight - ih * fitScale) / 2,
       });
     };
     img.src = sourceUrl;
@@ -1003,10 +1011,12 @@ export default function FloorPlanCanvas({
 
   const fitToCanvas = useCallback(() => {
     if (floorImg) {
+      const iw = floorImg.naturalWidth || floorImg.width;
+      const ih = floorImg.naturalHeight || floorImg.height;
       const padding = 40;
-      const fitScale = Math.min((canvasSize.w - padding * 2) / floorImg.width, (canvasSize.h - padding * 2) / floorImg.height, 1);
+      const fitScale = Math.min((canvasSize.w - padding * 2) / iw, (canvasSize.h - padding * 2) / ih, 1);
       setScale(fitScale);
-      setOffset({ x: (canvasSize.w - floorImg.width * fitScale) / 2, y: (canvasSize.h - floorImg.height * fitScale) / 2 });
+      setOffset({ x: (canvasSize.w - iw * fitScale) / 2, y: (canvasSize.h - ih * fitScale) / 2 });
     } else {
       setScale(1);
       setOffset({ x: 0, y: 0 });
