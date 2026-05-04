@@ -40,7 +40,7 @@ export default function DesignerTopBar({
     <div className="h-14 bg-[hsl(222,47%,6%)] border-b border-white/10 flex items-center px-4 gap-3 shrink-0">
       <button
         type="button"
-        onClick={() => navigate(projectId ? `/?project=${encodeURIComponent(projectId)}` : '/')}
+        onClick={() => navigate('/')}
         className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white shrink-0"
         title="All systems"
       >

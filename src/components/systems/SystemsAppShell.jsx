@@ -1,10 +1,6 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useCallback } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard,
-  FolderKanban,
   BookOpen,
-  Settings,
   Bell,
   HelpCircle,
   Search,
@@ -13,6 +9,7 @@ import {
   Video,
   Speaker,
   Cable,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
@@ -26,36 +23,14 @@ const DISCIPLINE_NAV = [
   { id: DISCIPLINE_IDS.LOW_VOLTAGE, icon: Cable },
 ];
 
-function homeSearch(projectId) {
-  return projectId ? `?project=${encodeURIComponent(projectId)}` : '';
-}
-
-const MAIN_NAV = [
-  {
-    label: 'Dashboard',
-    icon: LayoutDashboard,
-    path: (projectId) => `/${homeSearch(projectId)}`,
-    match: (pathname, hash) => pathname === '/' && !hash?.replace('#', ''),
-  },
-  {
-    label: 'Projects',
-    icon: FolderKanban,
-    path: (projectId) => `/${homeSearch(projectId)}#recent-projects`,
-    match: (pathname, hash) => pathname === '/' && hash === '#recent-projects',
-  },
-  {
-    label: 'Code reference',
-    icon: BookOpen,
-    path: () => '/code-reference',
-    match: (pathname) => pathname.startsWith('/code-reference'),
-  },
-  {
-    label: 'Project setup',
-    icon: Settings,
-    path: (projectId) => (projectId ? `/project/${projectId}/setup` : '/'),
-    match: (pathname, projectId) => !!projectId && pathname === `/project/${projectId}/setup`,
-  },
-];
+/** Rich navy (not near-black): matches systems dashboard mockup. */
+const NAVY = {
+  bg: '#2c456d',
+  bgDeep: '#243a5c',
+  border: 'rgba(255,255,255,0.12)',
+  hover: 'rgba(255,255,255,0.08)',
+  muted: 'rgba(255,255,255,0.55)',
+};
 
 function displayFirstName(user) {
   if (!user) return null;
@@ -67,88 +42,105 @@ function displayFirstName(user) {
 }
 
 /**
- * Product shell: dark sidebar, top bar, white workspace (systems dashboard mockup).
+ * Product shell: navy sidebar (projects + disciplines only), top bar, white workspace.
  */
 export default function SystemsAppShell({
-  projectId,
+  projects = [],
+  selectedDisciplineId,
+  onSelectDiscipline,
+  lastProjectId,
+  onOpenProject,
   searchValue = '',
   onSearchChange,
   children,
 }) {
-  const navigate = useNavigate();
-  const { pathname, hash } = useLocation();
+  const { pathname } = useLocation();
   const { user } = useAuth();
   const greetingName = displayFirstName(user) || 'there';
 
-  const openDiscipline = useCallback((disciplineId) => {
-    if (!projectId) return;
-    navigate(`/project/${projectId}/designer/${disciplineId}`);
-  }, [navigate, projectId]);
+  const orderedProjects = [...projects].slice(0, 24);
 
   return (
     <div className="min-h-screen flex bg-slate-100 text-slate-900">
-      <aside className="w-64 shrink-0 bg-[#0c1222] text-slate-200 flex flex-col border-r border-slate-800/80">
-        <div className="p-5 flex items-center gap-3 border-b border-slate-800/80">
+      <aside
+        className="w-64 shrink-0 flex flex-col border-r text-white"
+        style={{ backgroundColor: NAVY.bgDeep, borderColor: NAVY.border }}
+      >
+        <Link
+          to="/"
+          className="p-5 flex items-center gap-3 border-b shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          style={{ borderColor: NAVY.border, backgroundColor: NAVY.bg }}
+        >
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-orange-600 flex items-center justify-center shadow-lg shrink-0">
             <Flame className="w-5 h-5 text-white" />
           </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Systems</p>
-            <p className="text-sm font-bold text-white leading-tight truncate">Designer</p>
+          <div className="min-w-0 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: NAVY.muted }}>
+              Systems
+            </p>
+            <p className="text-sm font-bold leading-tight truncate">Designer</p>
           </div>
-        </div>
+        </Link>
 
-        <nav className="p-3 space-y-0.5 flex-1 overflow-y-auto">
-          <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Menu</p>
-          {MAIN_NAV.map(({ label, icon: Icon, path, match }) => {
-            const to = path(projectId);
-            const active = label === 'Project setup' ? match(pathname, projectId) : match(pathname, hash);
-            const isSetupWithoutProject = label === 'Project setup' && !projectId;
-            if (isSetupWithoutProject) {
-              return (
-                <span
-                  key={label}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 cursor-not-allowed"
-                  title="Select a project from the dashboard first"
+        <nav className="p-3 space-y-1 flex-1 overflow-y-auto min-h-0">
+          <p
+            className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: NAVY.muted }}
+          >
+            Projects
+          </p>
+          <div className="max-h-[220px] overflow-y-auto space-y-0.5 pr-1">
+            {orderedProjects.length === 0 ? (
+              <p className="px-3 py-2 text-xs" style={{ color: NAVY.muted }}>
+                No projects yet — create one from the dashboard.
+              </p>
+            ) : (
+              orderedProjects.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onOpenProject?.(p)}
+                  className="w-full text-left rounded-lg px-3 py-2 text-sm transition-colors hover:bg-white/10 truncate"
+                  style={{ color: 'rgba(255,255,255,0.92)' }}
+                  title={p.name || 'Project'}
                 >
-                  <Icon className="w-4 h-4 shrink-0 opacity-50" />
-                  {label}
-                </span>
-              );
-            }
-            return (
-              <Link
-                key={label}
-                to={to}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  active
-                    ? 'bg-red-600/15 text-white border border-red-500/30'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-red-400' : ''}`} />
-                {label}
-              </Link>
-            );
-          })}
+                  {p.name || 'Untitled project'}
+                </button>
+              ))
+            )}
+          </div>
 
-          <p className="px-3 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Disciplines</p>
+          {lastProjectId && (
+            <Link
+              to={`/project/${lastProjectId}/setup`}
+              className="mt-2 mx-1 flex items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium transition-colors hover:bg-white/10"
+              style={{ color: NAVY.muted }}
+            >
+              <Settings className="w-3.5 h-3.5 shrink-0" />
+              Project setup
+            </Link>
+          )}
+
+          <p
+            className="px-3 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: NAVY.muted }}
+          >
+            Disciplines
+          </p>
           {DISCIPLINE_NAV.map(({ id, icon: Icon }) => {
             const cfg = DISCIPLINES[id];
-            const active = pathname.includes(`/designer/${id}`);
-            const disabled = !projectId;
+            const active = selectedDisciplineId === id;
+            const inDesigner = pathname.includes(`/designer/${id}`);
             return (
               <button
                 key={id}
                 type="button"
-                disabled={disabled}
-                title={disabled ? 'Select a project on the dashboard first' : undefined}
-                onClick={() => openDiscipline(id)}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${
-                  active
-                    ? 'bg-white/10 text-white'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
-                }`}
+                onClick={() => onSelectDiscipline?.(id)}
+                className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left transition-colors"
+                style={{
+                  backgroundColor: active || inDesigner ? 'rgba(255,255,255,0.12)' : 'transparent',
+                  color: active || inDesigner ? '#fff' : 'rgba(255,255,255,0.72)',
+                }}
               >
                 <Icon className="w-4 h-4 shrink-0" style={{ color: cfg.theme.primary }} />
                 <span className="truncate">{cfg.label}</span>
@@ -157,17 +149,21 @@ export default function SystemsAppShell({
           })}
         </nav>
 
-        <div className="p-4 mt-auto border-t border-slate-800/80">
-          <div className="rounded-xl bg-slate-800/50 border border-slate-700/60 p-4">
-            <p className="text-sm font-semibold text-white">Need help getting started?</p>
-            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-              Browse code reference and NFPA context from the menu.
+        <div className="p-4 mt-auto border-t shrink-0" style={{ borderColor: NAVY.border }}>
+          <div
+            className="rounded-xl border p-4"
+            style={{ backgroundColor: 'rgba(0,0,0,0.15)', borderColor: NAVY.border }}
+          >
+            <p className="text-sm font-semibold">Need help?</p>
+            <p className="text-xs mt-1 leading-relaxed" style={{ color: NAVY.muted }}>
+              Code reference and NFPA context.
             </p>
             <Link
               to="/code-reference"
-              className="mt-3 inline-flex text-xs font-semibold text-red-400 hover:text-red-300"
+              className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-sky-300 hover:text-sky-200"
             >
-              Open code reference →
+              <BookOpen className="w-3.5 h-3.5" />
+              Code reference
             </Link>
           </div>
         </div>
@@ -206,7 +202,8 @@ export default function SystemsAppShell({
               <HelpCircle className="w-5 h-5" />
             </Link>
             <div
-              className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-600 to-slate-800 text-white text-xs font-bold flex items-center justify-center ring-2 ring-slate-200"
+              className="w-9 h-9 rounded-full text-white text-xs font-bold flex items-center justify-center ring-2 ring-slate-200"
+              style={{ background: `linear-gradient(145deg, ${NAVY.bg}, ${NAVY.bgDeep})` }}
               title={user?.email || 'Account'}
             >
               {(greetingName && greetingName[0]?.toUpperCase()) || '?'}

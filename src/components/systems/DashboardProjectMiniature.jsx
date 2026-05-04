@@ -9,18 +9,6 @@ function hashSeed(str) {
   return Math.abs(h);
 }
 
-/** Deterministic “discipline flavor” for a project card thumbnail (no extra API). */
-export function thumbnailDisciplineForProject(projectId) {
-  const order = [
-    DISCIPLINE_IDS.FIRE_ALARM,
-    DISCIPLINE_IDS.ACCESS_CONTROL,
-    DISCIPLINE_IDS.VIDEO_SURVEILLANCE,
-    DISCIPLINE_IDS.AUDIO_VISUAL,
-    DISCIPLINE_IDS.LOW_VOLTAGE,
-  ];
-  return order[hashSeed(String(projectId)) % order.length];
-}
-
 function rnd(seed, i) {
   return ((seed >> (i * 5)) & 0x7fff) / 0x7fff;
 }

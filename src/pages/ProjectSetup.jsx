@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
+import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
+import { getProjectPrimaryDiscipline, normalizeDisciplineParam, SYSTEMS_LAST_PROJECT_KEY } from '@/lib/projectDiscipline';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,12 +25,14 @@ export default function ProjectSetup() {
   const { id } = useParams();
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const [form, setForm] = useState({
     name: '',
     address: '',
+    primary_discipline: DISCIPLINE_IDS.FIRE_ALARM,
     owner_name: '',
     installer_name: '',
     occupancy_group: '',
@@ -63,9 +67,17 @@ export default function ProjectSetup() {
   const existingProject = existingProjects[0];
 
   useEffect(() => {
+    if (isNew) {
+      const d = normalizeDisciplineParam(searchParams.get('discipline'));
+      if (d) setForm((f) => ({ ...f, primary_discipline: d }));
+    }
+  }, [isNew, searchParams]);
+
+  useEffect(() => {
     if (existingProject) {
       setForm({
         ...existingProject,
+        primary_discipline: getProjectPrimaryDiscipline(existingProject),
         ceiling_height_confirmed: existingProject.ceiling_height_confirmed ?? true,
       });
       setAnalysisPreview(existingProject.analysis_results || null);
@@ -86,16 +98,17 @@ export default function ProjectSetup() {
       if (isNew) return base44.entities.Project.create(payload);
       return base44.entities.Project.update(id, payload);
     },
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       const projectId = result?.id || id;
+      const disc = getProjectPrimaryDiscipline({ ...variables, ...result });
       toast({ title: 'Project saved', description: 'Code analysis complete.' });
       try {
-        localStorage.setItem('systemsActiveProjectId', projectId);
+        localStorage.setItem(SYSTEMS_LAST_PROJECT_KEY, projectId);
       } catch {
         /* ignore */
       }
-      navigate(`/?project=${encodeURIComponent(projectId)}`);
+      navigate(`/project/${projectId}/designer/${disc}`);
     },
     onError: (error) => {
       toast({
@@ -155,21 +168,21 @@ export default function ProjectSetup() {
 
   if (!isNew && isLoadingProject) {
     return (
-      <div className="min-h-screen bg-[hsl(222,47%,8%)] text-white flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+      <div className="min-h-screen bg-slate-100 text-slate-600 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-red-200 border-t-red-600 rounded-full animate-spin" />
       </div>
     );
   }
 
   if (!isNew && !existingProject) {
     return (
-      <div className="min-h-screen bg-[hsl(222,47%,8%)] text-white flex items-center justify-center px-6">
-        <div className="max-w-md text-center bg-white/5 border border-white/10 rounded-2xl p-8">
-          <AlertTriangle className="w-10 h-10 text-orange-400 mx-auto mb-4" />
-          <h1 className="text-xl font-semibold mb-2">Project not found</h1>
-          <p className="text-sm text-white/50 mb-6">This project may have been deleted or you may not have access to it.</p>
-          <Button onClick={() => navigate('/')} className="bg-orange-500 hover:bg-orange-600 text-white">
-            Back to Projects
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center px-6">
+        <div className="max-w-md text-center bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
+          <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-4" />
+          <h1 className="text-xl font-semibold text-slate-900 mb-2">Project not found</h1>
+          <p className="text-sm text-slate-500 mb-6">This project may have been deleted or you may not have access to it.</p>
+          <Button onClick={() => navigate('/')} className="bg-red-600 hover:bg-red-700 text-white">
+            Back to dashboard
           </Button>
         </div>
       </div>
@@ -177,18 +190,17 @@ export default function ProjectSetup() {
   }
 
   return (
-    <div className="min-h-screen bg-[hsl(222,47%,8%)] text-white">
-      {/* Header */}
-      <div className="border-b border-white/10 bg-[hsl(222,47%,6%)] sticky top-0 z-10">
+    <div className="min-h-screen bg-slate-100 text-slate-900">
+      <div className="border-b border-white/10 bg-[#2c456d] sticky top-0 z-10 text-white">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-4">
-          <button onClick={() => navigate('/')} className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white">
+          <button type="button" onClick={() => navigate('/')} className="p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-white">
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+            <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center shadow">
               <Flame className="w-4 h-4 text-white" />
             </div>
-            <h1 className="font-bold">{isNew ? 'New Project' : 'Edit Project'}</h1>
+            <h1 className="font-bold tracking-tight">{isNew ? 'New project' : 'Edit project'}</h1>
           </div>
         </div>
       </div>
@@ -203,22 +215,36 @@ export default function ProjectSetup() {
               <ComplianceNotice />
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Project Name" required>
-                  <Input value={f.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Oak Creek Office Building" className="input-dark" required />
+                  <Input value={f.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Oak Creek Office Building" className="bg-white border-slate-200" required />
                 </Field>
                 <Field label="Address">
-                  <Input value={f.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} placeholder="123 Main St, City, State" className="input-dark" />
+                  <Input value={f.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} placeholder="123 Main St, City, State" className="bg-white border-slate-200" />
+                </Field>
+                <Field label="Primary discipline" required>
+                  <Select
+                    value={f.primary_discipline || DISCIPLINE_IDS.FIRE_ALARM}
+                    onValueChange={(v) => setForm((p) => ({ ...p, primary_discipline: v }))}
+                  >
+                    <SelectTrigger className="bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.values(DISCIPLINES).map((d) => (
+                        <SelectItem key={d.id} value={d.id}>{d.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-slate-500 mt-1">Used for the dashboard badge and which designer opens first after save.</p>
                 </Field>
                 <Field label="Owner Name">
-                  <Input value={f.owner_name} onChange={e => setForm(p => ({ ...p, owner_name: e.target.value }))} className="input-dark" />
+                  <Input value={f.owner_name} onChange={e => setForm(p => ({ ...p, owner_name: e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
                 <Field label="Installer Name">
-                  <Input value={f.installer_name} onChange={e => setForm(p => ({ ...p, installer_name: e.target.value }))} className="input-dark" />
+                  <Input value={f.installer_name} onChange={e => setForm(p => ({ ...p, installer_name: e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
                 <Field label="AHJ Contact">
-                  <Input value={f.ahj_contact} onChange={e => setForm(p => ({ ...p, ahj_contact: e.target.value }))} className="input-dark" />
+                  <Input value={f.ahj_contact} onChange={e => setForm(p => ({ ...p, ahj_contact: e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
                 <Field label="Adopted Code Edition">
-                  <Input value={f.adopted_code_edition} onChange={e => setForm(p => ({ ...p, adopted_code_edition: e.target.value }))} className="input-dark" />
+                  <Input value={f.adopted_code_edition} onChange={e => setForm(p => ({ ...p, adopted_code_edition: e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
               </div>
             </Section>
@@ -228,14 +254,14 @@ export default function ProjectSetup() {
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Occupancy Group" required>
                   <Select value={f.occupancy_group} onValueChange={v => setForm(p => ({ ...p, occupancy_group: v }))}>
-                    <SelectTrigger className="select-dark"><SelectValue placeholder="Select..." /></SelectTrigger>
-                    <SelectContent className="bg-[hsl(222,47%,11%)] border-white/10 text-white">
+                    <SelectTrigger className="bg-white border-slate-200"><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
                       {OCCUPANCY_GROUPS.map(g => <SelectItem key={g} value={g}>Group {g}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
                 <Field label="Number of Floors" required>
-                  <Input type="number" min={1} max={50} value={f.num_floors} onChange={e => setFloorCount(e.target.value)} className="input-dark" />
+                  <Input type="number" min={1} max={50} value={f.num_floors} onChange={e => setFloorCount(e.target.value)} className="bg-white border-slate-200" />
                 </Field>
                 <Field label="Level of exit discharge (floor #)">
                   <Input
@@ -244,26 +270,26 @@ export default function ProjectSetup() {
                     max={50}
                     value={f.level_of_exit_discharge_floor ?? 1}
                     onChange={e => setForm(p => ({ ...p, level_of_exit_discharge_floor: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
-                    className="input-dark"
+                    className="bg-white border-slate-200"
                   />
-                  <p className="text-[11px] text-white/35 mt-1">Used with per-floor OL for IBC §907.2.7 “{'>'}100 above/below discharge” (Group M, B).</p>
+                  <p className="text-[11px] text-slate-500 mt-1">Used with per-floor OL for IBC §907.2.7 “{'>'}100 above/below discharge” (Group M, B).</p>
                 </Field>
                 <Field label="Total Occupant Load">
-                  <Input type="number" min={0} value={f.total_occupant_load} onChange={e => setForm(p => ({ ...p, total_occupant_load: +e.target.value }))} className="input-dark" />
+                  <Input type="number" min={0} value={f.total_occupant_load} onChange={e => setForm(p => ({ ...p, total_occupant_load: +e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
                 <Field label="Total Sleeping Units (if applicable)">
-                  <Input type="number" min={0} value={f.total_sleeping_units} onChange={e => setForm(p => ({ ...p, total_sleeping_units: +e.target.value }))} className="input-dark" />
+                  <Input type="number" min={0} value={f.total_sleeping_units} onChange={e => setForm(p => ({ ...p, total_sleeping_units: +e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
                 <Field label="Sprinkler Status" required>
                   <Select value={f.sprinkler_status} onValueChange={v => setForm(p => ({ ...p, sprinkler_status: v }))}>
-                    <SelectTrigger className="select-dark"><SelectValue /></SelectTrigger>
-                    <SelectContent className="bg-[hsl(222,47%,11%)] border-white/10 text-white">
+                    <SelectTrigger className="bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                    <SelectContent>
                       {SPRINKLER_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
                 <Field label="Elevator Count">
-                  <Input type="number" min={0} value={f.elevator_count} onChange={e => setForm(p => ({ ...p, elevator_count: +e.target.value }))} className="input-dark" />
+                  <Input type="number" min={0} value={f.elevator_count} onChange={e => setForm(p => ({ ...p, elevator_count: +e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
                 <Field label="Air handlers (RTU/AHU)">
                   <Input
@@ -275,24 +301,24 @@ export default function ProjectSetup() {
                       ...p,
                       air_handling_units: e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value, 10) || 1),
                     }))}
-                    className="input-dark"
+                    className="bg-white border-slate-200"
                   />
-                  <p className="text-[11px] text-white/35 mt-1.5 leading-snug">
+                  <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">
                     Used for duct smoke detector placeholders on auto-place (IBC Ch.9 system scope + IMC / NFPA 72 coordination). Leave blank to assume one unit (supply + return pair).
                   </p>
                 </Field>
                 <div
                   className={`col-span-2 rounded-xl border p-4 space-y-3 transition-colors ${
                     ceilingNeedsDesigner
-                      ? 'border-red-500/70 bg-red-500/10 shadow-[0_0_0_1px_rgba(239,68,68,0.35)]'
-                      : 'border-white/10 bg-white/[0.03]'
+                      ? 'border-red-300 bg-red-50 shadow-sm'
+                      : 'border-slate-200 bg-slate-50'
                   }`}
                 >
                   <div className="flex items-start gap-2">
-                    <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${ceilingNeedsDesigner ? 'text-red-400' : 'text-white/25'}`} />
+                    <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${ceilingNeedsDesigner ? 'text-red-600' : 'text-slate-400'}`} />
                     <div>
-                      <p className="text-sm font-medium text-white">Ceiling height &amp; type (NFPA 72 spacing)</p>
-                      <p className="text-[11px] text-white/45 mt-1 leading-snug">
+                      <p className="text-sm font-medium text-slate-900">Ceiling height &amp; type (NFPA 72 spacing)</p>
+                      <p className="text-[11px] text-slate-600 mt-1 leading-snug">
                         When a fire alarm system applies, enter the real default deck-to-deck or finish ceiling height and confirm below. Plans rarely embed this — it must come from the designer or field verification.
                       </p>
                     </div>
@@ -311,7 +337,7 @@ export default function ProjectSetup() {
                             ceiling_height_confirmed: true,
                           }))
                         }
-                        className={`input-dark ${ceilingInvalid && liveCodeAnalysis.fireAlarmRequired ? 'ring-2 ring-red-500/50' : ''}`}
+                        className={`bg-white border-slate-200 ${ceilingInvalid && liveCodeAnalysis.fireAlarmRequired ? 'ring-2 ring-red-400' : ''}`}
                       />
                     </Field>
                     <Field label="Default Ceiling Type">
@@ -319,8 +345,8 @@ export default function ProjectSetup() {
                         value={f.default_ceiling_type}
                         onValueChange={(v) => setForm((p) => ({ ...p, default_ceiling_type: v, ceiling_height_confirmed: true }))}
                       >
-                        <SelectTrigger className="select-dark"><SelectValue /></SelectTrigger>
-                        <SelectContent className="bg-[hsl(222,47%,11%)] border-white/10 text-white">
+                        <SelectTrigger className="bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                        <SelectContent>
                           {CEILING_TYPES.map((t) => (
                             <SelectItem key={t} value={t}>
                               {CEILING_TYPE_LABELS[t]}
@@ -330,10 +356,10 @@ export default function ProjectSetup() {
                       </Select>
                     </Field>
                   </div>
-                  <label className="flex items-start gap-2.5 cursor-pointer text-sm text-white/85">
+                  <label className="flex items-start gap-2.5 cursor-pointer text-sm text-slate-700">
                     <input
                       type="checkbox"
-                      className="mt-1 rounded border-white/20"
+                      className="mt-1 rounded border-slate-300"
                       checked={!!f.ceiling_height_confirmed}
                       onChange={(e) => setForm((p) => ({ ...p, ceiling_height_confirmed: e.target.checked }))}
                     />
@@ -344,8 +370,8 @@ export default function ProjectSetup() {
                 </div>
                 <Field label="Communication Pathway">
                   <Select value={f.communication_pathway} onValueChange={v => setForm(p => ({ ...p, communication_pathway: v }))}>
-                    <SelectTrigger className="select-dark"><SelectValue /></SelectTrigger>
-                    <SelectContent className="bg-[hsl(222,47%,11%)] border-white/10 text-white">
+                    <SelectTrigger className="bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                    <SelectContent>
                       {COMM_PATHWAYS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -357,8 +383,8 @@ export default function ProjectSetup() {
             <Section title="Per-Floor Data">
               <div className="space-y-3">
                 {Array.from({ length: f.num_floors }).map((_, i) => (
-                  <div key={i} className="grid grid-cols-3 gap-3 items-center p-3 bg-white/5 rounded-lg">
-                    <div className="text-sm font-medium text-white/60">Floor {i + 1}</div>
+                  <div key={i} className="grid grid-cols-3 gap-3 items-center p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                    <div className="text-sm font-medium text-slate-600">Floor {i + 1}</div>
                     <Field label="Occupant Load">
                       <Input
                         type="number" min={0}
@@ -368,7 +394,7 @@ export default function ProjectSetup() {
                           arr[i] = { ...arr[i], floor: i + 1, load: +e.target.value };
                           setForm(p => ({ ...p, occupant_load_per_floor: arr }));
                         }}
-                        className="input-dark h-8 text-sm"
+                        className="bg-white border-slate-200 h-8 text-sm"
                       />
                     </Field>
                     <Field label="Gross Sq Ft">
@@ -380,7 +406,7 @@ export default function ProjectSetup() {
                           arr[i] = { ...arr[i], floor: i + 1, sqft: +e.target.value };
                           setForm(p => ({ ...p, gross_sqft_per_floor: arr }));
                         }}
-                        className="input-dark h-8 text-sm"
+                        className="bg-white border-slate-200 h-8 text-sm"
                       />
                     </Field>
                   </div>
@@ -390,15 +416,15 @@ export default function ProjectSetup() {
 
             {/* Floor Plan Uploads */}
             <Section title="Floor Plan Uploads">
-              <p className="text-xs text-white/40 mb-3">Upload blank floor plans (PNG, JPG) — devices will be overlaid during design</p>
+              <p className="text-xs text-slate-500 mb-3">Upload blank floor plans (PNG, JPG) — devices will be overlaid during design</p>
               <div className="space-y-3">
                 {Array.from({ length: f.num_floors }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
-                    <span className="text-sm text-white/60 w-16">Floor {i + 1}</span>
+                  <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                    <span className="text-sm text-slate-600 w-16">Floor {i + 1}</span>
                     {f.floor_plans[i]?.image_url ? (
                       <div className="flex items-center gap-2 flex-1">
-                        <img src={f.floor_plans[i].image_url} alt="" className="w-12 h-8 object-cover rounded border border-white/10" />
-                        <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Uploaded</span>
+                        <img src={f.floor_plans[i].image_url} alt="" className="w-12 h-8 object-cover rounded border border-slate-200" />
+                        <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Uploaded</span>
                         <button
                           type="button"
                           onClick={() => {
@@ -406,18 +432,18 @@ export default function ProjectSetup() {
                             plans[i] = { ...plans[i], image_url: '' };
                             setForm(p => ({ ...p, floor_plans: plans }));
                           }}
-                          className="ml-auto text-xs text-white/30 hover:text-red-400"
+                          className="ml-auto text-xs text-slate-500 hover:text-red-600"
                         >Remove</button>
                       </div>
                     ) : (
                       <label className="flex-1 cursor-pointer">
-                        <div className="flex items-center gap-2 px-3 py-2 border border-dashed border-white/20 rounded-lg hover:border-orange-500/40 transition-colors">
+                        <div className="flex items-center gap-2 px-3 py-2 border border-dashed border-slate-300 rounded-lg hover:border-red-400 hover:bg-white transition-colors">
                           {uploading[i] ? (
-                            <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                            <div className="w-4 h-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
                           ) : (
-                            <Upload className="w-4 h-4 text-white/30" />
+                            <Upload className="w-4 h-4 text-slate-400" />
                           )}
-                          <span className="text-sm text-white/30">{uploading[i] ? 'Uploading...' : 'Upload floor plan'}</span>
+                          <span className="text-sm text-slate-500">{uploading[i] ? 'Uploading...' : 'Upload floor plan'}</span>
                         </div>
                         <input
                           type="file"
@@ -437,14 +463,14 @@ export default function ProjectSetup() {
                 type="button"
                 variant="outline"
                 onClick={runAnalysisPreview}
-                className="border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
+                className="border-slate-200 text-slate-700 hover:bg-slate-50"
               >
                 Preview Code Analysis
               </Button>
               <Button
                 type="submit"
                 disabled={saveMutation.isPending || !f.name || !f.occupancy_group}
-                className="bg-orange-500 hover:bg-orange-600 text-white gap-2 flex-1"
+                className="bg-red-600 hover:bg-red-700 text-white gap-2 flex-1"
               >
                 {saveMutation.isPending ? 'Saving...' : 'Save & Open Designer'}
                 <ChevronRight className="w-4 h-4" />
@@ -454,12 +480,12 @@ export default function ProjectSetup() {
 
           {/* Right: Analysis Preview */}
           <div className="space-y-4">
-            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sticky top-20">
-              <h3 className="font-medium text-white mb-3 flex items-center gap-2">
-                <Info className="w-4 h-4 text-orange-400" />
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm sticky top-24">
+              <h3 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
+                <Info className="w-4 h-4 text-red-600" />
                 Code Analysis Preview
               </h3>
-              <div className="mb-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-2 text-xs text-yellow-100/80">
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
                 Preliminary guidance only. Confirm final requirements with the AHJ and a licensed fire alarm professional.
               </div>
               {analysisPreview ? (
@@ -472,57 +498,50 @@ export default function ProjectSetup() {
                   <ResultRow label="Elevator Recall" value={analysisPreview.elevatorRecallRequired} />
                   <ResultRow label="Mini Horns" value={analysisPreview.miniHornsInSleepingRooms} />
                   {analysisPreview.handicappedRoomsRequired > 0 && (
-                    <div className="text-xs text-orange-300 mt-2 p-2 bg-orange-500/10 rounded">
+                    <div className="text-xs text-orange-800 mt-2 p-2 bg-orange-50 border border-orange-200 rounded">
                       Accessible rooms required: {analysisPreview.handicappedRoomsRequired}
                     </div>
                   )}
                   {analysisPreview.pullStationException && (
-                    <div className="text-xs text-blue-300 mt-2 p-2 bg-blue-500/10 rounded">
+                    <div className="text-xs text-sky-800 mt-2 p-2 bg-sky-50 border border-sky-200 rounded">
                       {analysisPreview.pullStationException}
                     </div>
                   )}
-                  <div className="mt-3 pt-3 border-t border-white/10">
-                    <p className="text-xs text-white/40 font-medium mb-2">Code References:</p>
+                  <div className="mt-3 pt-3 border-t border-slate-200">
+                    <p className="text-xs text-slate-500 font-medium mb-2">Code References:</p>
                     {analysisPreview.codeReferences.map((ref, i) => (
-                      <span key={i} className="block text-xs text-white/30">{ref}</span>
+                      <span key={i} className="block text-xs text-slate-600">{ref}</span>
                     ))}
                   </div>
                   {analysisPreview.specialNotes.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-white/10 space-y-1.5">
-                      <p className="text-xs text-white/40 font-medium">Notes:</p>
+                    <div className="mt-3 pt-3 border-t border-slate-200 space-y-1.5">
+                      <p className="text-xs text-slate-500 font-medium">Notes:</p>
                       {analysisPreview.specialNotes.map((note, i) => (
                         <div key={i} className="flex items-start gap-1.5">
-                          <AlertTriangle className="w-3 h-3 text-yellow-400 mt-0.5 shrink-0" />
-                          <p className="text-xs text-white/50">{note}</p>
+                          <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
+                          <p className="text-xs text-slate-600">{note}</p>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
               ) : (
-                <p className="text-sm text-white/30 text-center py-6">
-                  Fill out the form and click<br />"Preview Code Analysis"
+                <p className="text-sm text-slate-500 text-center py-6">
+                  Fill out the form and click<br />&quot;Preview Code Analysis&quot;
                 </p>
               )}
             </div>
           </div>
         </div>
       </form>
-
-      <style>{`
-        .input-dark { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); color: white; }
-        .input-dark::placeholder { color: rgba(255,255,255,0.25); }
-        .input-dark:focus { border-color: rgba(249,115,22,0.5); }
-        .select-dark { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); color: white; }
-      `}</style>
     </div>
   );
 }
 
 function Section({ title, children }) {
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-5">
-      <h2 className="font-semibold text-white mb-4 text-sm tracking-wide uppercase text-white/60">{title}</h2>
+    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+      <h2 className="font-semibold text-slate-500 mb-4 text-sm tracking-wide uppercase">{title}</h2>
       {children}
     </div>
   );
@@ -530,9 +549,9 @@ function Section({ title, children }) {
 
 function ComplianceNotice() {
   return (
-    <div className="mb-4 rounded-lg border border-amber-400/20 bg-amber-500/10 p-3 text-xs text-amber-100">
+    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
       <div className="flex gap-2">
-        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
         <p>{CODE_SAFETY_DISCLAIMER}</p>
       </div>
     </div>
@@ -542,7 +561,7 @@ function ComplianceNotice() {
 function Field({ label, required, children }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs text-white/50">{label}{required && <span className="text-orange-400 ml-0.5">*</span>}</Label>
+      <Label className="text-xs text-slate-600">{label}{required && <span className="text-red-600 ml-0.5">*</span>}</Label>
       {children}
     </div>
   );
@@ -551,13 +570,13 @@ function Field({ label, required, children }) {
 function ResultRow({ label, value }) {
   return (
     <div className="flex items-center justify-between py-1">
-      <span className="text-xs text-white/50">{label}</span>
+      <span className="text-xs text-slate-600">{label}</span>
       {typeof value === 'boolean' ? (
         value
-          ? <span className="text-xs font-medium text-green-400">Yes</span>
-          : <span className="text-xs text-white/25">No</span>
+          ? <span className="text-xs font-medium text-emerald-600">Yes</span>
+          : <span className="text-xs text-slate-400">No</span>
       ) : (
-        <span className="text-xs font-medium text-white">{value}</span>
+        <span className="text-xs font-medium text-slate-900">{value}</span>
       )}
     </div>
   );
