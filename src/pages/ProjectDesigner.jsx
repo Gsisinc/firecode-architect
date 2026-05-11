@@ -224,7 +224,7 @@ export default function ProjectDesigner() {
       projectPlanCategories: project?.plan_categories, projectDocumentWorkspace: project?.document_workspace,
       projectWires: project?.wires, projectId: project?.id,
     };
-  });
+  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, localPlanSheets, localDocumentWorkspace, analysisResults, project]);
 
   useEffect(() => {
     const hasLocalChanges =
@@ -241,6 +241,10 @@ export default function ProjectDesigner() {
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
       const l = latestRef.current;
+      // Only save if there are actual local changes to avoid clearing data
+      const hasLocalChanges = l.localDevices || l.localRooms || l.localWires || l.localMarkups || l.localLayoutZones || l.localFloorPlans || l.localPlanSheets || l.localDocumentWorkspace;
+      if (!hasLocalChanges) return;
+      
       saveMutation.mutate({
         rooms: l.localRooms ?? l.projectRooms ?? [],
         devices: l.localDevices ?? l.projectDevices ?? [],
