@@ -119,55 +119,9 @@ export default function ProjectDesigner() {
   const [selectedSheetId, setSelectedSheetId] = useState(null);
   const [showScaleVerify, setShowScaleVerify] = useState(false);
 
-  // ── Auto-save: debounce 2s after any local state change ──
+  // ── Auto-save refs (initialized here, effect runs after query below) ──
   const autoSaveTimerRef = useRef(null);
-  // Keep a ref to always-current values so the setTimeout closure doesn't capture stale state
   const latestRef = useRef({});
-  useEffect(() => {
-    latestRef.current = {
-      localDevices, localRooms, localWires, localMarkups, localLayoutZones,
-      localFloorPlans, localPlanSheets, localDocumentWorkspace, analysisResults,
-      projectRooms: project?.rooms, projectDevices: project?.devices,
-      projectMarkups: project?.markups, projectLayoutZones: project?.layout_zones,
-      projectFloorPlans: project?.floor_plans, projectPlanSheets: project?.plan_sheets,
-      projectPlanCategories: project?.plan_categories, projectDocumentWorkspace: project?.document_workspace,
-      projectWires: project?.wires, projectId: project?.id,
-    };
-  });
-
-  useEffect(() => {
-    // Only auto-save if we have local overrides (i.e. unsaved changes)
-    const hasLocalChanges =
-      localDevices !== null ||
-      localRooms !== null ||
-      localWires !== null ||
-      localMarkups !== null ||
-      localLayoutZones !== null ||
-      localFloorPlans !== null;
-
-    // Never auto-save until project has loaded from server — prevents overwriting DB with stale data on app reload
-    if (!hasLocalChanges || !project?.id || isLoading) return;
-
-    clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(() => {
-      const l = latestRef.current;
-      saveMutation.mutate({
-        rooms: l.localRooms ?? l.projectRooms ?? [],
-        devices: l.localDevices ?? l.projectDevices ?? [],
-        markups: l.localMarkups ?? l.projectMarkups ?? [],
-        layout_zones: l.localLayoutZones ?? l.projectLayoutZones ?? [],
-        floor_plans: l.localFloorPlans ?? l.projectFloorPlans ?? [],
-        plan_sheets: l.localPlanSheets ?? l.projectPlanSheets ?? [],
-        plan_categories: l.projectPlanCategories ?? [],
-        document_workspace: l.localDocumentWorkspace ?? l.projectDocumentWorkspace ?? null,
-        wires: l.localWires ?? l.projectWires ?? [],
-        analysis_results: l.analysisResults,
-        status: (l.localDevices ?? l.projectDevices ?? []).length > 0 ? "in_progress" : "draft",
-      });
-    }, 2000);
-
-    return () => clearTimeout(autoSaveTimerRef.current);
-  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, isLoading]);
 
   useEffect(() => {
     const t = disciplineConfig.circuitTypes[0]?.value || 'SLC';
@@ -248,6 +202,53 @@ export default function ProjectDesigner() {
     },
     [disciplineId, storedWires]
   );
+
+  // ── Auto-save: debounce 2s after any local state change ──
+  // Keep a ref to always-current values so the setTimeout closure doesn't capture stale state
+  useEffect(() => {
+    latestRef.current = {
+      localDevices, localRooms, localWires, localMarkups, localLayoutZones,
+      localFloorPlans, localPlanSheets, localDocumentWorkspace, analysisResults,
+      projectRooms: project?.rooms, projectDevices: project?.devices,
+      projectMarkups: project?.markups, projectLayoutZones: project?.layout_zones,
+      projectFloorPlans: project?.floor_plans, projectPlanSheets: project?.plan_sheets,
+      projectPlanCategories: project?.plan_categories, projectDocumentWorkspace: project?.document_workspace,
+      projectWires: project?.wires, projectId: project?.id,
+    };
+  });
+
+  useEffect(() => {
+    const hasLocalChanges =
+      localDevices !== null ||
+      localRooms !== null ||
+      localWires !== null ||
+      localMarkups !== null ||
+      localLayoutZones !== null ||
+      localFloorPlans !== null;
+
+    // Never auto-save until project has loaded from server
+    if (!hasLocalChanges || !project?.id || isLoading) return;
+
+    clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      const l = latestRef.current;
+      saveMutation.mutate({
+        rooms: l.localRooms ?? l.projectRooms ?? [],
+        devices: l.localDevices ?? l.projectDevices ?? [],
+        markups: l.localMarkups ?? l.projectMarkups ?? [],
+        layout_zones: l.localLayoutZones ?? l.projectLayoutZones ?? [],
+        floor_plans: l.localFloorPlans ?? l.projectFloorPlans ?? [],
+        plan_sheets: l.localPlanSheets ?? l.projectPlanSheets ?? [],
+        plan_categories: l.projectPlanCategories ?? [],
+        document_workspace: l.localDocumentWorkspace ?? l.projectDocumentWorkspace ?? null,
+        wires: l.localWires ?? l.projectWires ?? [],
+        analysis_results: l.analysisResults,
+        status: (l.localDevices ?? l.projectDevices ?? []).length > 0 ? "in_progress" : "draft",
+      });
+    }, 2000);
+
+    return () => clearTimeout(autoSaveTimerRef.current);
+  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, isLoading]);
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
