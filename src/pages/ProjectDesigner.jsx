@@ -1842,14 +1842,29 @@ function mergePlanSheets(existing = [], incoming = []) {
 /** Sidebar floors are numeric; API may store floor_number as string. Multiple plan types per floor are supported — pick the best one for the canvas. */
 function pickFloorPlanForCanvas(floorPlans, activeFloor) {
   const n = Number(activeFloor);
-  const onFloor = (floorPlans || []).filter((fp) => Number(fp.floor_number) === n);
+  const onFloor = (floorPlans || []).filter((fp) => Number(fp.floor_number) === n && (fp.image_url || fp.file_url));
   if (onFloor.length === 0) return undefined;
+  if (onFloor.length === 1) return onFloor[0];
+
+  // Prefer user-assigned sheets (have sheet_id) over auto-derived entries
+  const assigned = onFloor.filter((fp) => fp.sheet_id);
+  const pool = assigned.length > 0 ? assigned : onFloor;
+
+  // Among the pool, prefer by plan type priority — but skip types that look like legend/notes sheets
+  const LEGEND_KEYWORDS = /legend|notes|fa0|abbreviation|general|index|cover/i;
   const priority = ['Floor Plan', 'Architectural', 'Fire Alarm', 'floor_plan'];
   for (const pt of priority) {
-    const hit = onFloor.find((fp) => (fp.plan_type || 'floor_plan') === pt && (fp.image_url || fp.file_url));
+    // First try non-legend entries
+    const hit = pool.find((fp) => (fp.plan_type || 'floor_plan') === pt && !LEGEND_KEYWORDS.test(fp.file_name || fp.title || fp.sheet_text?.slice(0, 100) || ''));
     if (hit) return hit;
   }
-  return onFloor.find((fp) => fp.image_url || fp.file_url) || onFloor[0];
+  // Fallback: any matching type including legend
+  for (const pt of priority) {
+    const hit = pool.find((fp) => (fp.plan_type || 'floor_plan') === pt);
+    if (hit) return hit;
+  }
+  // Last resort: highest page number (floor plan drawing is usually later in the PDF than legend)
+  return pool.sort((a, b) => Number(b.page_number || 0) - Number(a.page_number || 0))[0];
 }
 
 function upsertFloorPlan(floorPlans = [], plan) {
