@@ -35,6 +35,7 @@ export const DISCIPLINES = {
       { value: 'NAC', label: 'NAC', description: 'Notification Appliance Circuit', color: '#ea580c' },
       { value: 'IDC', label: 'IDC', description: 'Initiating Device Circuit', color: '#16a34a' },
       { value: 'AUX', label: 'AUX', description: 'Auxiliary / Control Circuit', color: '#64748b' },
+      { value: 'PANEL', label: 'PANEL', description: 'Panel / Head-End (all circuits originate here)', color: '#dc2626' },
     ],
     devicePalette: [
       { type: 'smoke_detector', symbol: 'S', prefix: 'SD', label: 'Smoke Detector', color: '#2563eb', shape: 'circle', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm symbol / NFPA 72 §17.7' },
@@ -52,8 +53,12 @@ export const DISCIPLINES = {
       { type: 'control_module', symbol: 'CM', prefix: 'CM', label: 'Control / Relay Module', color: '#475569', shape: 'square', defaultCircuitType: 'SLC', nfpa: 'NFPA 72 — door release, elevator, fan interface modules' },
       { type: 'co_detector', symbol: 'CO', prefix: 'CO', label: 'CO Detector', color: '#65a30d', shape: 'circle', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 gas detector family / IBC §915' },
       { type: 'door_holder', symbol: 'DH', prefix: 'DH', label: 'Door Holdback', color: '#dc2626', shape: 'square', defaultCircuitType: 'AUX', nfpa: 'NFPA 170 door release/hold-open interface' },
-      { type: 'annunciator', symbol: 'ANN', prefix: 'ANN', label: 'Remote Annunciator', color: '#dc2626', shape: 'panel', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 fire alarm annunciator' },
-      { type: 'facp', symbol: 'FACP', prefix: 'FACP', label: 'FACP', color: '#dc2626', shape: 'panel', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 control equipment / NFPA 72 §10.4' },
+      { type: 'annunciator', symbol: 'ANN', prefix: 'ANN', label: 'Remote Annunciator', color: '#dc2626', shape: 'panel', defaultCircuitType: 'AUX', nfpa: 'NFPA 170 fire alarm annunciator' },
+      { type: 'facp', symbol: 'FACP', prefix: 'FACP', label: 'FACP', color: '#dc2626', shape: 'panel', defaultCircuitType: 'PANEL', nfpa: 'NFPA 170 control equipment / NFPA 72 §10.4' },
+      { type: 'nac_booster', symbol: 'NBP', prefix: 'NBP', label: 'NAC Booster Panel', color: '#b91c1c', shape: 'panel', defaultCircuitType: 'NAC', nfpa: 'NFPA 72 §10.14 — auxiliary power supply / NAC expander panel' },
+      { type: 'audio_amplifier', symbol: 'AMP', prefix: 'AMP', label: 'Audio Amplifier / ECS', color: '#7c3aed', shape: 'panel', defaultCircuitType: 'NAC', nfpa: 'NFPA 72 §24 — emergency voice/alarm communications amplifier' },
+      { type: 'power_supply', symbol: 'PS', prefix: 'PS', label: 'Auxiliary Power Supply', color: '#1d4ed8', shape: 'panel', defaultCircuitType: 'AUX', nfpa: 'NFPA 72 §10.6 — listed auxiliary power supply' },
+      { type: 'gateway_module', symbol: 'GW', prefix: 'GW', label: 'Network / Gateway Module', color: '#0f766e', shape: 'panel', defaultCircuitType: 'SLC', nfpa: 'NFPA 72 §23.17 — networked FA system node' },
       { type: 'elevator_recall', symbol: 'ER', prefix: 'ER', label: 'Elevator Recall', color: '#7c3aed', shape: 'circle', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 elevator recall detector / IBC §3006' },
     ],
     legend: [

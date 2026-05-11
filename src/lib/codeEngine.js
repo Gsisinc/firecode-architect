@@ -1208,6 +1208,16 @@ function formatDeviceType(type) {
     duct_detector: 'Duct Smoke Detector',
     facp: 'Fire Alarm Control Panel',
     co_detector: 'Carbon Monoxide Detector',
+    annunciator: 'Remote Annunciator Panel',
+    nac_booster: 'NAC Booster Panel',
+    audio_amplifier: 'Audio Amplifier / ECS',
+    power_supply: 'Auxiliary Power Supply',
+    gateway_module: 'Network / Gateway Module',
+    monitor_module: 'Monitor Module',
+    control_module: 'Control / Relay Module',
+    door_holder: 'Door Hold-open Device',
+    elevator_recall: 'Elevator Recall Detector',
+    beam_detector: 'Projected Beam Smoke Detector',
   };
   return types[type] || type;
 }
@@ -1323,9 +1333,12 @@ export function generateRiserDiagram(projectData = {}, devicesByFloor = {}) {
       location: 'Floor 1 - Main Electrical Room',
       type: 'Addressable Fire Alarm Control Panel',
       symbol: 'FACP',
+      note: 'All SLC, NAC, IDC, and AUX circuits originate at the FACP. NAC Booster Panels and Audio Amplifiers are powered from the FACP auxiliary output and supervised via SLC.',
       circuits: {
         slc: 1,
         nac: num_floors,
+        idc: 0,
+        aux: 1,
         supervisory: isFullySprinklered ? 1 : 0,
       },
     },
@@ -1348,6 +1361,10 @@ export function generateRiserDiagram(projectData = {}, devicesByFloor = {}) {
     const controlModules = floorDevices.filter(d => d.type === 'control_module');
     const doorHolders = floorDevices.filter(d => d.type === 'door_holder');
     const annunciators = floorDevices.filter(d => d.type === 'annunciator');
+    const nacBoosters = floorDevices.filter(d => d.type === 'nac_booster');
+    const audioAmplifiers = floorDevices.filter(d => d.type === 'audio_amplifier');
+    const powerSupplies = floorDevices.filter(d => d.type === 'power_supply');
+    const gatewayModules = floorDevices.filter(d => d.type === 'gateway_module');
     const facpDevices = floorDevices.filter(d => d.type === 'facp');
 
     riser.floors.push({
@@ -1379,8 +1396,22 @@ export function generateRiserDiagram(projectData = {}, devicesByFloor = {}) {
           devices: [
             ...hornStrobes.map(d => ({ label: d.label, type: 'Horn/Strobe' })),
             ...speakers.map(d => ({ label: d.label, type: 'Speaker' })),
+            ...nacBoosters.map(d => ({ label: d.label, type: 'NAC Booster Panel' })),
+            ...audioAmplifiers.map(d => ({ label: d.label, type: 'Audio Amplifier / ECS' })),
           ],
         },
+        ...(annunciators.length || powerSupplies.length || gatewayModules.length ? [{
+          id: `AUX-${floor}`,
+          type: 'AUX',
+          label: `Auxiliary / Control Circuit (AUX) - Floor ${floor}`,
+          class: 'Class B',
+          wire: 'FPL 18 AWG 2C',
+          devices: [
+            ...annunciators.map(d => ({ label: d.label, type: 'Remote Annunciator' })),
+            ...powerSupplies.map(d => ({ label: d.label, type: 'Auxiliary Power Supply' })),
+            ...gatewayModules.map(d => ({ label: d.label, type: 'Network / Gateway Module' })),
+          ],
+        }] : []),
       ],
       deviceCount: {
         smoke_detectors: smokeDetectors.length,
@@ -1397,6 +1428,10 @@ export function generateRiserDiagram(projectData = {}, devicesByFloor = {}) {
         control_modules: controlModules.length,
         door_holders: doorHolders.length,
         annunciators: annunciators.length,
+        nac_boosters: nacBoosters.length,
+        audio_amplifiers: audioAmplifiers.length,
+        power_supplies: powerSupplies.length,
+        gateway_modules: gatewayModules.length,
         facp: facpDevices.length,
       },
     });

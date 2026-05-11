@@ -155,6 +155,52 @@ const NFPA_SYMBOLS = {
     ctx.stroke();
   }),
   annunciator: rectSymbol('ANN', '#dc2626', 3, 1.8),
+  nac_booster: {
+    color: '#b91c1c',
+    draw: (ctx, x, y, r, selected) => {
+      const w = r * 3.2; const h = r * 1.9;
+      ctx.beginPath(); ctx.rect(x - w / 2, y - h / 2, w, h);
+      paintSymbol(ctx, '#b91c1c', selected, '#fff5f5', '#fee2e2');
+      // Double border stripe to distinguish from FACP
+      ctx.beginPath(); ctx.rect(x - w / 2 + 3, y - h / 2 + 3, w - 6, h - 6);
+      ctx.strokeStyle = '#b91c1c'; ctx.lineWidth = 0.8; ctx.stroke();
+      drawSymbolText(ctx, 'NBP', x, y, r, '#b91c1c');
+    },
+  },
+  audio_amplifier: {
+    color: '#7c3aed',
+    draw: (ctx, x, y, r, selected) => {
+      const w = r * 3.2; const h = r * 1.9;
+      ctx.beginPath(); ctx.rect(x - w / 2, y - h / 2, w, h);
+      paintSymbol(ctx, '#7c3aed', selected, '#faf5ff', '#ede9fe');
+      // Triangle "amp" symbol inside
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.6, y - r * 0.55);
+      ctx.lineTo(x - r * 0.6, y + r * 0.55);
+      ctx.lineTo(x + r * 0.4, y);
+      ctx.closePath();
+      ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 1; ctx.stroke();
+      drawSymbolText(ctx, 'AMP', x + r * 0.5, y, r * 0.7, '#7c3aed');
+    },
+  },
+  power_supply: {
+    color: '#1d4ed8',
+    draw: (ctx, x, y, r, selected) => {
+      const w = r * 2.8; const h = r * 1.7;
+      ctx.beginPath(); ctx.rect(x - w / 2, y - h / 2, w, h);
+      paintSymbol(ctx, '#1d4ed8', selected, '#eff6ff', '#dbeafe');
+      drawSymbolText(ctx, 'PS', x, y, r, '#1d4ed8');
+    },
+  },
+  gateway_module: {
+    color: '#0f766e',
+    draw: (ctx, x, y, r, selected) => {
+      const w = r * 2.8; const h = r * 1.7;
+      ctx.beginPath(); ctx.rect(x - w / 2, y - h / 2, w, h);
+      paintSymbol(ctx, '#0f766e', selected, '#f0fdfa', '#ccfbf1');
+      drawSymbolText(ctx, 'GW', x, y, r, '#0f766e');
+    },
+  },
 };
 
 /** Access, video, AV, and structured-cabling plan symbols (merged with NFPA set for canvas lookup). */
