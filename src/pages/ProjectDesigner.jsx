@@ -43,6 +43,7 @@ import { mergeGeneratedDevices } from "@/lib/designValidation";
 import { renderPdfPageToDataUrl } from "@/lib/documentEngine";
 import { analyzeUploadedSheet, classifyPlanFromText } from "@/lib/planVision";
 import { nudgeDevicesOutOfBlockedZones, normalizeDetectedLayoutZones, mergeLayoutZones, suggestFacpPlacementPx } from "@/lib/layoutZones";
+import { readProjectBackup, writeProjectBackup, applyProjectBackup } from "@/lib/projectBackup";
 
 import {
   determineSystemRequirements,
@@ -142,12 +143,14 @@ export default function ProjectDesigner() {
   });
 
   // ── Local backup safety net ──
-  // The Base44 entity layer can occasionally strip fields it does not yet have in
-  // its schema or fail a save silently. To make sure a user never has to re-upload
-  // drawings after a code-base refresh, mirror the latest server payload into
-  // localStorage and graft anything the server lost back onto the loaded project.
+  // The Base44 entity layer can occasionally strip nested fields (the failure
+  // mode that wipes per-sheet `assigned_floor` / `plan_type` and dropped
+  // `floor_plans` metadata) or fail a save silently. To prevent users from
+  // having to redo page assignments on every refresh, we mirror save payloads
+  // to localStorage and identity-merge missing per-sheet/per-floor fields
+  // back onto the server-loaded project.
   const projectBackup = useMemo(() => readProjectBackup(projectId), [projectId]);
-  const mergedProject = useMemo(
+  const { project: mergedProject, restored: backupRestoredAssignments } = useMemo(
     () => applyProjectBackup(project, projectBackup),
     [project, projectBackup]
   );
@@ -287,6 +290,34 @@ export default function ProjectDesigner() {
 
     return () => clearTimeout(autoSaveTimerRef.current);
   }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, localPlanSheets, localDocumentWorkspace, isLoading]);
+
+  // ── One-shot resync when localStorage backup restored anything ──
+  // The merge above grafts missing per-sheet / per-floor fields onto the
+  // server payload at render time (so the UI is correct immediately). To
+  // make sure the server eventually catches up, push the merged values into
+  // the `local*` state slots once — that flips the auto-save effect and
+  // the server gets the restored assignments on the next debounce.
+  const resyncDoneForRef = useRef(null);
+  useEffect(() => {
+    if (!project?.id) return;
+    if (!backupRestoredAssignments) return;
+    if (resyncDoneForRef.current === project.id) return;
+    resyncDoneForRef.current = project.id;
+
+    if (mergedProject?.plan_sheets && Array.isArray(mergedProject.plan_sheets)) {
+      setLocalPlanSheets(mergedProject.plan_sheets);
+    }
+    if (mergedProject?.floor_plans && Array.isArray(mergedProject.floor_plans)) {
+      setLocalFloorPlans(mergedProject.floor_plans);
+    }
+    if (mergedProject?.layout_zones && Array.isArray(mergedProject.layout_zones) && mergedProject.layout_zones.length > 0) {
+      setLocalLayoutZones(mergedProject.layout_zones);
+    }
+    if (mergedProject?.document_workspace && Object.keys(mergedProject.document_workspace || {}).length > 0) {
+      setLocalDocumentWorkspace(mergedProject.document_workspace);
+    }
+    toast.info('Restored your page assignments from local backup. Re-syncing to server…');
+  }, [project?.id, backupRestoredAssignments, mergedProject]);
 
   // ── Flush any pending saves before unmount (e.g., during publish) ──
   useEffect(() => {
@@ -1941,91 +1972,6 @@ function upsertFloorPlan(floorPlans = [], plan) {
   if (idx >= 0) next[idx] = { ...next[idx], ...plan };
   else next.push(plan);
   return next;
-}
-
-// ── Local backup of the project payload ──
-// Why: the Base44 entity layer can drop fields it does not yet have in its schema
-// (and any save can fail). To make sure a user never loses uploaded drawings,
-// imported plan sheets, layout zones, etc. after a code-base refresh, we mirror
-// every save attempt into localStorage and graft missing fields back onto the
-// server-loaded project the next time it mounts.
-const BACKUP_KEYS = [
-  'rooms', 'devices', 'wires', 'markups', 'layout_zones',
-  'floor_plans', 'plan_sheets', 'plan_categories',
-  'document_workspace', 'analysis_results',
-];
-const BACKUP_STORAGE_KEY = (projectId) => `firecode_project_backup_${projectId || ''}`;
-
-function readProjectBackup(projectId) {
-  if (!projectId || typeof window === 'undefined' || !window.localStorage) return null;
-  try {
-    const raw = window.localStorage.getItem(BACKUP_STORAGE_KEY(projectId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed;
-  } catch (error) {
-    console.warn('[ProjectDesigner] failed to read project backup', error);
-    return null;
-  }
-}
-
-function writeProjectBackup(projectId, payload) {
-  if (!projectId || typeof window === 'undefined' || !window.localStorage) return;
-  try {
-    const subset = {};
-    BACKUP_KEYS.forEach((key) => {
-      if (payload[key] !== undefined) subset[key] = payload[key];
-    });
-    subset.__updatedAt = new Date().toISOString();
-    window.localStorage.setItem(BACKUP_STORAGE_KEY(projectId), JSON.stringify(subset));
-  } catch (error) {
-    // localStorage can throw on quota exceeded (e.g. base64 PDF blob in floor_plans).
-    // Strip the largest fields and try a slim backup before giving up.
-    try {
-      const slim = {};
-      BACKUP_KEYS.forEach((key) => {
-        if (payload[key] === undefined) return;
-        if (key === 'plan_sheets' || key === 'floor_plans') {
-          slim[key] = (payload[key] || []).map((entry) => {
-            const copy = { ...entry };
-            // Drop oversize data-url previews; the canvas can re-render PDF pages on demand.
-            if (typeof copy.preview_url === 'string' && copy.preview_url.startsWith('data:')) copy.preview_url = '';
-            if (typeof copy.rendered_image_url === 'string' && copy.rendered_image_url.startsWith('data:')) copy.rendered_image_url = '';
-            return copy;
-          });
-        } else {
-          slim[key] = payload[key];
-        }
-      });
-      slim.__updatedAt = new Date().toISOString();
-      window.localStorage.setItem(BACKUP_STORAGE_KEY(projectId), JSON.stringify(slim));
-    } catch (secondary) {
-      console.warn('[ProjectDesigner] failed to write project backup', secondary);
-    }
-  }
-}
-
-function isMissing(value) {
-  if (value == null) return true;
-  if (Array.isArray(value)) return value.length === 0;
-  if (typeof value === 'object') return Object.keys(value).length === 0;
-  return false;
-}
-
-function applyProjectBackup(project, backup) {
-  if (!project || !backup) return project;
-  const merged = { ...project };
-  BACKUP_KEYS.forEach((key) => {
-    // Only graft from the backup when the server has nothing for that field.
-    // This lets a fresh server load win whenever it actually has data, but
-    // restores anything the server dropped (typically schema-stripped fields
-    // like plan_sheets / layout_zones / document_workspace).
-    if (isMissing(merged[key]) && !isMissing(backup[key])) {
-      merged[key] = backup[key];
-    }
-  });
-  return merged;
 }
 
 function DocumentWorkspaceLoading() {
