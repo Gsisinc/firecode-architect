@@ -92,13 +92,14 @@ function SchematicRiser({ project, devices }) {
     return map;
   }, [devices, numFloors]);
 
-  // Group devices on each floor into SLC and NAC
+  // Group devices on each floor into SLC (all initiating/monitoring) and NAC (notification)
   const floorData = useMemo(() => {
     return Array.from({ length: numFloors }, (_, i) => {
       const floor = numFloors - i; // draw top floor first
       const devs = byFloor[floor] || [];
-      const slc = devs.filter(d => ['smoke_detector','heat_detector','pull_station','duct_detector','waterflow_switch','valve_tamper','co_detector','elevator_recall','monitor_module','control_module','door_holder'].includes(d.type));
+      // SLC = all devices except NAC types
       const nac = devs.filter(d => ['horn_strobe','strobe','speaker','horn'].includes(d.type));
+      const slc = devs.filter(d => !['horn_strobe','strobe','speaker','horn'].includes(d.type));
       return { floor, slc, nac, y: (i * FLOOR_H) + 40 };
     });
   }, [byFloor, numFloors, FLOOR_H]);
