@@ -122,6 +122,7 @@ export default function ProjectDesigner() {
   // ── Auto-save refs (initialized here, effect runs after saveMutation below) ──
   const autoSaveTimerRef = useRef(null);
   const latestRef = useRef({});
+  const flushPendingSaveRef = useRef(null);
 
   useEffect(() => {
     const t = disciplineConfig.circuitTypes[0]?.value || 'SLC';
@@ -257,6 +258,33 @@ export default function ProjectDesigner() {
 
     return () => clearTimeout(autoSaveTimerRef.current);
   }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, isLoading]);
+
+  // ── Flush any pending saves before unmount (e.g., during publish) ──
+  useEffect(() => {
+    flushPendingSaveRef.current = () => {
+      const l = latestRef.current;
+      if (!l.projectId || !project?.id) return Promise.resolve();
+      return saveMutation.mutateAsync({
+        rooms: l.localRooms ?? l.projectRooms ?? [],
+        devices: l.localDevices ?? l.projectDevices ?? [],
+        markups: l.localMarkups ?? l.projectMarkups ?? [],
+        layout_zones: l.localLayoutZones ?? l.projectLayoutZones ?? [],
+        floor_plans: l.localFloorPlans ?? l.projectFloorPlans ?? [],
+        plan_sheets: l.localPlanSheets ?? l.projectPlanSheets ?? [],
+        plan_categories: l.projectPlanCategories ?? [],
+        document_workspace: l.localDocumentWorkspace ?? l.projectDocumentWorkspace ?? null,
+        wires: l.localWires ?? l.projectWires ?? [],
+        analysis_results: l.analysisResults,
+        status: (l.localDevices ?? l.projectDevices ?? []).length > 0 ? "in_progress" : "draft",
+      });
+    };
+
+    return () => {
+      clearTimeout(autoSaveTimerRef.current);
+      flushPendingSaveRef.current?.();
+    };
+  }, [project?.id]);
+
 
   const saveProjectPatch = (patch) => {
     const devs = patch.devices ?? storedDevices;
