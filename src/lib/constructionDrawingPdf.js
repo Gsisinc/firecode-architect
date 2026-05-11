@@ -1,1069 +1,948 @@
 /**
- * Construction Drawing PDF Generator
- * Produces professional 36"×24" construction drawing sheets matching industry standard format:
- *   FA0.01 — Legend, Abbreviations, General Notes, Drawing Index (right-side title block)
- *   FA5.01  — Floor Plan with devices, markups, right-side title block
- *   FA5.10  — Fire Alarm System One-Line Riser Diagram
+ * constructionDrawingPdf.js
  *
- * All sheets use the same right-side vertical title block (like the reference images).
+ * Generates professional construction-drawing–style PDF sheets in jsPDF.
+ * Each sheet: 36"×24" landscape with a right-side title block (stamp / logo column),
+ * matching the reference examples (FA0.01 legend sheet, FA5.01 floor-plan sheet, FA5.10 diagrams sheet).
+ *
+ * Sheets produced:
+ *   FA-0.01  – Legend · Abbreviations · General Notes · Drawing Index
+ *   FA-5.01  – Floor Plan (vector drawing of rooms + device symbols + markups)
+ *   FA-5.10  – System One-Line Riser + FACP I/O Matrix + Sequence of Operations
  */
 
 import jsPDF from 'jspdf';
-import { calculateBatterySizing, calculateNacLoading, generateRiserDiagram, generateSequenceOfOperations } from '@/lib/codeEngine';
-import { calculateWireLengthSummary } from '@/lib/designValidation';
-import { dataUrlImageFormat } from '@/lib/submittalBranding';
-import { loadDataUrlImageSize } from '@/lib/ahjSubmittalPdf';
+import {
+  calculateBatterySizing,
+  calculateNacLoading,
+} from '@/lib/codeEngine';
+import { dataUrlImageFormat, fitLogoSizeMm } from '@/lib/submittalBranding';
 
-// 36" × 24" in mm (landscape)
-export const SHEET_W = 914.4;
-export const SHEET_H = 609.6;
+// ─── Sheet dimensions (mm) ───────────────────────────────────────────────────
+const SHEET_W = 914.4;  // 36"
+const SHEET_H = 609.6;  // 24"
 
-// Right-side title block width
-const TB_W = 56;
-const MARGIN = 6;
+// Right title-block column width
+const TB_W = 72;
+const TB_X = SHEET_W - TB_W;
 
-// ─────────────────────────────────────────────────────────────────
-// Colour palette (matches reference drawings)
-// ─────────────────────────────────────────────────────────────────
-const C = {
-  black: [0, 0, 0],
-  darkGray: [40, 40, 40],
-  medGray: [100, 116, 139],
-  lightGray: [203, 213, 225],
-  veryLightGray: [241, 245, 249],
-  white: [255, 255, 255],
-  red: [185, 28, 28],
-  blue: [30, 64, 175],
-  orange: [194, 65, 12],
-  amber: [146, 64, 14],
-  green: [22, 101, 52],
-};
+// Drawing area (left of title block)
+const DRAW_X = 8;
+const DRAW_Y = 8;
+const DRAW_W = TB_X - DRAW_X - 4;
+const DRAW_H = SHEET_H - 16;
 
-// ─────────────────────────────────────────────────────────────────
-// Right-side title block (vertical strip) — same on every sheet
-// ─────────────────────────────────────────────────────────────────
-function drawRightTitleBlock(doc, meta = {}, sheetInfo = {}) {
-  const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
-  const tbX = W - TB_W - MARGIN;
+// Colors
+const C_BLACK   = [20, 20, 20];
+const C_DARK    = [40, 40, 40];
+const C_GRAY    = [100, 116, 139];
+const C_LGRAY   = [203, 213, 225];
+const C_WHITE   = [255, 255, 255];
+const C_RED     = [185, 28, 28];
+const C_BLUE    = [37, 99, 235];
+const C_ORANGE  = [234, 88, 12];
+const C_GOLD    = [180, 130, 20];
+const C_LTBLUE  = [239, 246, 255];
+const C_LTORANGE = [255, 247, 237];
 
-  // Outer border
-  doc.setDrawColor(...C.black);
-  doc.setLineWidth(0.5);
-  doc.rect(tbX, MARGIN, TB_W, H - MARGIN * 2);
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-  // Inner horizontal dividers
-  const sections = [
-    { label: 'COMPANY / LOGO', height: 38 },
-    { label: '', height: 28 },   // Project title
-    { label: '', height: 28 },   // Project address
-    { label: '', height: 16 },   // Client / owner
-    { label: '', height: 12 },   // Drawn by
-    { label: '', height: 12 },   // Checked by
-    { label: '', height: 12 },   // Date
-    { label: '', height: 12 },   // Scale
-    { label: '', height: 12 },   // Project no
-    { label: '', height: 24 },   // AHJ stamp area
-    { label: '', height: 24 },   // Revision area
-    { label: 'SHEET', height: 0 }, // remaining = sheet number
-  ];
+function setFont(doc, size, style = 'normal', color = C_DARK) {
+  doc.setFont('helvetica', style);
+  doc.setFontSize(size);
+  doc.setTextColor(...color);
+}
 
-  let y = MARGIN;
-  doc.setLineWidth(0.25);
+function line(doc, x1, y1, x2, y2, w = 0.25, color = C_DARK) {
+  doc.setDrawColor(...color);
+  doc.setLineWidth(w);
+  doc.line(x1, y1, x2, y2);
+}
+
+function rect(doc, x, y, w, h, fill = null, strokeColor = C_DARK, lineW = 0.25) {
+  if (fill) { doc.setFillColor(...fill); }
+  doc.setDrawColor(...strokeColor);
+  doc.setLineWidth(lineW);
+  if (fill) doc.rect(x, y, w, h, 'FD');
+  else doc.rect(x, y, w, h, 'S');
+}
+
+function cell(doc, x, y, w, h, text, opts = {}) {
+  const { fill, bold, fontSize = 6, align = 'left', color = C_DARK, pad = 1.5 } = opts;
+  if (fill) { doc.setFillColor(...fill); doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.15); doc.rect(x, y, w, h, 'FD'); }
+  setFont(doc, fontSize, bold ? 'bold' : 'normal', color);
+  const tx = align === 'center' ? x + w / 2 : align === 'right' ? x + w - pad : x + pad;
+  const ty = y + h / 2 + fontSize * 0.35;
+  doc.text(String(text || ''), tx, ty, { align });
+}
+
+/** Draw the right-side title block (vertical band). */
+function drawTitleBlock(doc, project, meta, logoDataUrl, sheetNo, sheetTitle, sheetScale = 'NTS') {
+  const x = TB_X;
+  const y = 0;
+  const w = TB_W;
+  const h = SHEET_H;
+
+  // Background
+  doc.setFillColor(250, 251, 252);
+  doc.rect(x, y, w, h, 'F');
+  doc.setDrawColor(...C_DARK);
+  doc.setLineWidth(0.6);
+  doc.line(x, y, x, h);        // left border
+  doc.setLineWidth(0.4);
+  doc.line(x, y + 0.3, x + w, y + 0.3);   // top
+  doc.line(x, h - 0.3, x + w, h - 0.3);   // bottom
+  doc.line(x + w - 0.3, y, x + w - 0.3, h); // right
+
+  let ty = y + 6;
 
   // Logo area
-  const logoH = 38;
-  if (meta.logo_data_url) {
+  const logoH = 22;
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(...C_LGRAY);
+  doc.setLineWidth(0.2);
+  doc.rect(x + 2, ty, w - 4, logoH, 'FD');
+  if (logoDataUrl) {
     try {
-      const fmt = dataUrlImageFormat(meta.logo_data_url);
-      doc.addImage(meta.logo_data_url, fmt, tbX + 2, y + 2, TB_W - 4, logoH - 4);
-    } catch {
-      _drawPlaceholderLogoBox(doc, tbX, y, TB_W, logoH, meta.company_name || 'COMPANY LOGO');
-    }
+      const aspect = 2;
+      const { lw, lh } = { lw: Math.min(w - 8, logoH * aspect), lh: logoH - 4 };
+      const fx = x + 2 + (w - 4 - lw) / 2;
+      doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), fx, ty + 2, lw, lh);
+    } catch { /* fallback */ }
   } else {
-    _drawPlaceholderLogoBox(doc, tbX, y, TB_W, logoH, meta.company_name || 'COMPANY LOGO');
+    setFont(doc, 7, 'bold', C_GOLD);
+    doc.text(meta?.company_name || 'COMPANY NAME', x + w / 2, ty + logoH / 2 + 1, { align: 'center' });
+    setFont(doc, 5, 'normal', C_GRAY);
+    doc.text('Upload logo in submittal dialog', x + w / 2, ty + logoH / 2 + 5, { align: 'center' });
   }
-  y += logoH;
-  doc.line(tbX, y, tbX + TB_W, y);
+  ty += logoH + 2;
 
-  // Stamp area
-  const stampH = 34;
-  if (meta.stamp_data_url) {
-    try {
-      doc.addImage(meta.stamp_data_url, dataUrlImageFormat(meta.stamp_data_url), tbX + 2, y + 2, TB_W - 4, stampH - 4);
-    } catch {
-      _drawStampBox(doc, tbX, y, TB_W, stampH);
-    }
-  } else {
-    _drawStampBox(doc, tbX, y, TB_W, stampH);
-  }
-  y += stampH;
-  doc.line(tbX, y, tbX + TB_W, y);
+  // Divider + company info
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty);
+  ty += 3;
+  setFont(doc, 5.5, 'bold', C_DARK);
+  doc.text(meta?.company_name || '—', x + w / 2, ty, { align: 'center' }); ty += 4;
+  setFont(doc, 5, 'normal', C_GRAY);
+  if (meta?.company_address) { doc.text(meta.company_address, x + w / 2, ty, { align: 'center' }); ty += 3.5; }
+  if (meta?.company_phone)   { doc.text(meta.company_phone,   x + w / 2, ty, { align: 'center' }); ty += 3.5; }
+  if (meta?.company_license) { doc.text(`Lic: ${meta.company_license}`, x + w / 2, ty, { align: 'center' }); ty += 3.5; }
+  ty += 2;
 
-  // Project title
-  const projTitleH = 34;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6);
-  doc.setTextColor(...C.medGray);
-  doc.text('PROJECT TITLE', tbX + 2, y + 4);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(...C.darkGray);
-  const titleLines = doc.splitTextToSize(meta.project_title || meta.project_name || '—', TB_W - 4);
-  titleLines.slice(0, 3).forEach((ln, i) => doc.text(ln, tbX + 2, y + 10 + i * 6));
-  y += projTitleH;
-  doc.line(tbX, y, tbX + TB_W, y);
-
-  // Project address
-  const addrH = 24;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.5);
-  doc.setTextColor(...C.medGray);
-  doc.text('PROJECT ADDRESS', tbX + 2, y + 4);
-  doc.setTextColor(...C.darkGray);
-  const addrLines = doc.splitTextToSize(meta.project_address || '—', TB_W - 4);
-  addrLines.slice(0, 3).forEach((ln, i) => doc.text(ln, tbX + 2, y + 9 + i * 4.5));
-  y += addrH;
-  doc.line(tbX, y, tbX + TB_W, y);
-
-  // Owner
-  const ownerH = 12;
-  doc.setFontSize(5);
-  doc.setTextColor(...C.medGray);
-  doc.text('CLIENT / OWNER', tbX + 2, y + 4);
-  doc.setTextColor(...C.darkGray);
-  doc.text((meta.owner_name || '—').slice(0, 28), tbX + 2, y + 9);
-  y += ownerH;
-  doc.line(tbX, y, tbX + TB_W, y);
-
-  // Drawn by / Checked by / Date / Scale / Proj # in compact rows
-  const rowH = 9;
-  const rows = [
-    ['DRAWN BY', meta.drawn_by || meta.prepared_by || '—'],
-    ['CHECKED BY', meta.checked_by || '—'],
-    ['DATE', meta.submittal_date || new Date().toLocaleDateString()],
-    ['SCALE', sheetInfo.scale || 'AS NOTED'],
-    ['PROJECT NO.', meta.project_number || '—'],
+  // Project info block
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
+  const infoRows = [
+    ['PROJECT', project?.name || '—'],
+    ['OWNER',   project?.owner_name || '—'],
+    ['ADDRESS', project?.address || '—'],
+    ['AHJ',     project?.ahj_contact || '—'],
+    ['OCC. GRP',`Group ${project?.occupancy_group || '—'}`],
+    ['FLOORS',  String(project?.num_floors || '—')],
+    ['SPRINKLER', project?.sprinkler_status || 'None'],
   ];
-  rows.forEach(([label, value]) => {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(4.8);
-    doc.setTextColor(...C.medGray);
-    doc.text(label, tbX + 2, y + 4);
-    doc.setTextColor(...C.darkGray);
-    doc.setFontSize(6);
-    doc.text(String(value).slice(0, 20), tbX + 2, y + 8.5);
-    y += rowH;
-    doc.line(tbX, y, tbX + TB_W, y);
+  infoRows.forEach(([label, value]) => {
+    setFont(doc, 5, 'bold', C_GRAY);
+    doc.text(label, x + 3, ty + 3);
+    setFont(doc, 5, 'normal', C_DARK);
+    const val = doc.splitTextToSize(value, w - 22);
+    doc.text(val[0] || '', x + 20, ty + 3);
+    ty += 4.5;
   });
+  ty += 1;
 
   // Revision block
-  const revH = 22;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5);
-  doc.setTextColor(...C.medGray);
-  doc.text('REVISIONS', tbX + 2, y + 4);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5);
-  doc.setTextColor(...C.darkGray);
-  const revs = meta.revisions || [];
-  revs.slice(0, 3).forEach((r, i) => {
-    if (r && (r.date || r.text)) {
-      doc.text(`${r.date || ''}  ${(r.text || '').slice(0, 22)}`, tbX + 2, y + 9 + i * 5);
-    }
-  });
-  y += revH;
-  doc.line(tbX, y, tbX + TB_W, y);
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
+  setFont(doc, 5.5, 'bold', C_DARK);
+  doc.text('REVISIONS', x + w / 2, ty + 3, { align: 'center' }); ty += 5;
+  // Header
+  doc.setFillColor(230, 235, 242);
+  doc.rect(x + 2, ty - 1, w - 4, 5, 'F');
+  setFont(doc, 4.5, 'bold', C_DARK);
+  doc.text('NO', x + 4, ty + 2.5);
+  doc.text('DATE', x + 11, ty + 2.5);
+  doc.text('BY', x + 30, ty + 2.5);
+  doc.text('DESCRIPTION', x + 40, ty + 2.5);
+  ty += 5;
+  const revs = meta?.revisions || [];
+  for (let i = 0; i < 5; i++) {
+    const r = revs[i] || {};
+    doc.setFillColor(i % 2 === 0 ? 248 : 243, 248, 252);
+    doc.rect(x + 2, ty - 1, w - 4, 5, 'F');
+    setFont(doc, 4.5, 'normal', C_DARK);
+    doc.text(r.no || String(i + 1), x + 4, ty + 2.5);
+    doc.text(r.date || '', x + 11, ty + 2.5);
+    doc.text(r.by || '', x + 30, ty + 2.5);
+    const desc = (r.text || '').slice(0, 14);
+    doc.text(desc, x + 40, ty + 2.5);
+    ty += 5;
+  }
+  ty += 2;
 
-  // Sheet title
-  const sheetTitleH = 22;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5.5);
-  doc.setTextColor(...C.medGray);
-  doc.text('SHEET TITLE', tbX + 2, y + 5);
-  doc.setFontSize(6.5);
-  doc.setTextColor(...C.darkGray);
-  const stLines = doc.splitTextToSize(sheetInfo.title || 'FIRE ALARM PLAN', TB_W - 4);
-  stLines.slice(0, 3).forEach((ln, i) => doc.text(ln, tbX + 2, y + 11 + i * 5));
-  y += sheetTitleH;
-  doc.line(tbX, y, tbX + TB_W, y);
+  // Stamp box
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
+  setFont(doc, 5.5, 'bold', C_DARK);
+  doc.text('ENGINEER / DESIGNER STAMP', x + w / 2, ty + 3, { align: 'center' }); ty += 5;
+  doc.setDrawColor(...C_RED); doc.setLineWidth(0.3);
+  doc.rect(x + 4, ty, w - 8, 28, 'S');
+  setFont(doc, 5, 'normal', C_GRAY);
+  doc.text('Stamp / Seal', x + w / 2, ty + 10, { align: 'center' });
+  doc.text('(NICET / EOR / AHJ)', x + w / 2, ty + 15, { align: 'center' });
+  if (meta?.designer_name)  { setFont(doc, 5, 'bold', C_DARK); doc.text(meta.designer_name, x + w / 2, ty + 21, { align: 'center' }); }
+  if (meta?.designer_nicet) { setFont(doc, 4.5, 'normal', C_GRAY); doc.text(`NICET ${meta.designer_nicet}`, x + w / 2, ty + 25, { align: 'center' }); }
+  ty += 30;
 
-  // Sheet number — large at bottom
-  const remaining = (H - MARGIN) - y;
-  doc.setFillColor(30, 41, 59);
-  doc.rect(tbX, y, TB_W, remaining, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(Math.min(28, remaining * 0.7));
-  doc.setTextColor(...C.white);
-  doc.text(sheetInfo.number || 'FA', tbX + TB_W / 2, y + remaining * 0.65, { align: 'center' });
-  doc.setFontSize(5.5);
-  doc.text('100% BID SET', tbX + TB_W / 2, y + remaining * 0.88, { align: 'center' });
+  // Bottom title panel
+  const bottomH = SHEET_H - ty - 4;
+  const bottomY = ty;
+  doc.setFillColor(15, 23, 42);
+  doc.rect(x + 2, bottomY, w - 4, bottomH, 'F');
+  setFont(doc, 5, 'normal', [150, 160, 180]);
+  doc.text('PROJECT TITLE', x + w / 2, bottomY + 5, { align: 'center' });
+  setFont(doc, 6.5, 'bold', [255, 255, 255]);
+  const titleLines = doc.splitTextToSize((project?.name || '').toUpperCase(), w - 10);
+  titleLines.slice(0, 2).forEach((ln, i) => doc.text(ln, x + w / 2, bottomY + 10 + i * 5, { align: 'center' }));
+  const subtitleY = bottomY + 10 + Math.min(titleLines.length, 2) * 5 + 2;
+  setFont(doc, 5, 'normal', [150, 160, 180]);
+  if (project?.address) { doc.text(project.address.slice(0, 30), x + w / 2, subtitleY, { align: 'center' }); }
+
+  // Sheet number / title at very bottom
+  const snY = SHEET_H - 18;
+  doc.setFillColor(37, 99, 235);
+  doc.rect(x + 2, snY, w - 4, 14, 'F');
+  setFont(doc, 5.5, 'bold', C_WHITE);
+  doc.text(sheetTitle.toUpperCase(), x + w / 2, snY + 5, { align: 'center' });
+  setFont(doc, 5, 'normal', [180, 200, 240]);
+  doc.text(`SHEET SCALE: ${sheetScale}`, x + w / 2, snY + 9, { align: 'center' });
+  setFont(doc, 12, 'bold', C_WHITE);
+  doc.text(sheetNo, x + w / 2, snY + 13.5, { align: 'center' });
+
+  // Draw border around full drawing area
+  doc.setDrawColor(...C_DARK);
+  doc.setLineWidth(0.6);
+  doc.rect(DRAW_X, DRAW_Y, DRAW_W, DRAW_H, 'S');
 }
 
-function _drawPlaceholderLogoBox(doc, x, y, w, h, text) {
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.25);
-  doc.rect(x, y, w, h, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6);
-  doc.setTextColor(148, 163, 184);
-  doc.text(text, x + w / 2, y + h / 2, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(4.5);
-  doc.text('Upload logo in submittal dialog', x + w / 2, y + h / 2 + 5, { align: 'center' });
-}
-
-function _drawStampBox(doc, x, y, w, h) {
-  doc.setFillColor(255, 252, 240);
-  doc.setDrawColor(180, 170, 100);
-  doc.setLineWidth(0.3);
-  doc.rect(x, y, w, h, 'FD');
-  // Stamp circle
-  doc.setDrawColor(150, 130, 60);
-  doc.circle(x + w / 2, y + h / 2, Math.min(w, h) / 2 - 3, 'S');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5);
-  doc.setTextColor(150, 130, 60);
-  doc.text('ENGINEER / INSPECTOR', x + w / 2, y + h / 2 - 2, { align: 'center' });
-  doc.text('STAMP', x + w / 2, y + h / 2 + 4, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(4);
-  doc.text('Upload stamp in submittal dialog', x + w / 2, y + h - 5, { align: 'center' });
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Drawing border (outer frame)
-// ─────────────────────────────────────────────────────────────────
-function drawBorder(doc) {
-  const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
-  doc.setDrawColor(...C.black);
+/** Border / outer frame of the sheet */
+function drawSheetBorder(doc, meta) {
+  doc.setDrawColor(...C_DARK);
   doc.setLineWidth(1.0);
-  doc.rect(MARGIN, MARGIN, W - MARGIN * 2, H - MARGIN * 2);
+  doc.rect(4, 4, SHEET_W - 8, SHEET_H - 8, 'S');
   doc.setLineWidth(0.3);
-  doc.rect(MARGIN + 3, MARGIN + 3, W - (MARGIN + 3) * 2, H - (MARGIN + 3) * 2);
+  doc.rect(6, 6, SHEET_W - 12, SHEET_H - 12, 'S');
+  // Date bottom-left
+  setFont(doc, 5, 'normal', C_GRAY);
+  doc.text(`DATE: ${meta?.submittal_date || new Date().toLocaleDateString()}`, 10, SHEET_H - 4);
+  if (meta?.project_number) doc.text(`PROJECT NO: ${meta.project_number}`, 70, SHEET_H - 4);
+  setFont(doc, 5, 'normal', C_GRAY);
+  doc.text('100% BID SET', SHEET_W / 2, SHEET_H - 4, { align: 'center' });
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Sheet FA0.01 — Legend + Abbreviations + General Notes + Drawing Index
-// ─────────────────────────────────────────────────────────────────
-function drawLegendSheet(doc, devices, meta, reqs) {
-  const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
-  const drawingW = W - TB_W - MARGIN * 3 - 3;
-  const drawingX = MARGIN + 3;
-  const drawingY = MARGIN + 3;
-  const drawingH = H - MARGIN * 2 - 6;
+// ─── FA-0.01: Legend · Abbreviations · General Notes · Drawing Index ─────────
 
-  drawBorder(doc);
+const LEGEND_ROWS = [
+  { sym: '——',   desc: 'Lighting or Power Panel' },
+  { sym: '—·—',  desc: 'Conduit Exposed' },
+  { sym: '—c—',  desc: 'Conduit in Wall / Ceiling Space Only' },
+  { sym: '~ ~',  desc: 'Conduit Under Ground or Floor' },
+  { sym: '/////', desc: 'Existing Conduit' },
+  { sym: '↑',    desc: 'Conduit Up' },
+  { sym: '↓',    desc: 'Conduit Down' },
+  { sym: '—B—',  desc: 'Conduit Stub Out with Plastic Bushing' },
+  { sym: '##',   desc: 'Branch Circuit Home Run #12 Conductors & #12 Ground UNG' },
+  { sym: '⏚⏚',  desc: 'Grounding Electrode Per Codes' },
+  { sym: '——',   desc: 'Flexible Conduit' },
+  { sym: '⊡',    desc: 'Code Feed Junction Box with Cover Plate' },
+  { sym: '⊟',    desc: 'Duplex Receptacle GFI Type' },
+  { sym: 'FACP', desc: 'Fire Alarm Control Panel' },
+  { sym: 'ANN',  desc: 'Fire Alarm Annunciator' },
+  { sym: 'ANN',  desc: 'Fire Alarm Notification Appliance Panel' },
+  { sym: 'S',    desc: 'Fire Alarm Smoke Detector, S-Sounder Base' },
+  { sym: 'D',    desc: 'Fire Alarm Duct Smoke Detector' },
+  { sym: 'H',    desc: 'Fire Alarm Fixed Heat Detector' },
+  { sym: 'MM',   desc: 'Fire Alarm Monitor Module' },
+  { sym: 'CM',   desc: 'Fire Alarm Control Module / Relay Module' },
+  { sym: 'H/S',  desc: 'Horn/Strobe, Wall Mounted' },
+  { sym: 'MPS',  desc: 'Fire Alarm Manual Pull Station, Dual Action' },
+  { sym: 'WF',   desc: 'Sprinkler Waterflow Switch / Preview Point Module' },
+  { sym: 'VS',   desc: 'Sprinkler Valve Supervisory / Preview Point Module' },
+  { sym: 'ER',   desc: 'Elevator Recall Detector' },
+  { sym: 'CO',   desc: 'Carbon Monoxide Detector' },
+  { sym: 'DH',   desc: 'Door Holder' },
+];
 
-  // Three columns: Legend | Abbreviations | General Notes
-  const colW = (drawingW - TB_W - 6) / 3;
-  const col1X = drawingX;
-  const col2X = col1X + colW + 3;
-  const col3X = col2X + colW + 3;
+const ABBREV_ROWS = [
+  ['ACP','Accessible Card Path'],  ['MBP','Main Breaker Panel'],
+  ['AFF','Above Finished Floor'],  ['MCB','Main Circuit Breaker'],
+  ['ATC','Available Fault Current'],['MCR','Mechanical Contractor'],
+  ['ATS','Automatic Transfer Switch'],['MLO','Main Lug Only'],
+  ['ALM','Alarm'],                 ['MRS','Manual Reset Switch'],
+  ['BKR','Breaker'],               ['NAC','Notification App. Circuit'],
+  ['BUS','Busway'],                ['NEC','National Electrical Code'],
+  ['CND','Conduit'],               ['NFB','Non-Fused Breaker'],
+  ['C.C.','Conduit and Full Wire Only'],['NTS','Not to Scale'],
+  ['CIRC','Circuit'],              ['O.C.','Owner Contractor'],
+  ['CO','Carbon Monoxide / Conduit'],['OCI','Owner-Contractor-Installed'],
+  ['COMM','Communication'],        ['CI', 'Contractor Installed'],
+  ['CTRL','Control'],              ['PNL','Panel'],
+  ['DEMO','Demolish'],             ['PROJ','Projection Screen'],
+  ['DW','Dishwasher'],             ['R/R','Remove & Replace Existing Device'],
+  ['EC','Electrical Contractor'],  ['RGD','Rigid Conduit'],
+  ['EGRESS','Egress Lighting'],    ['RMT','Remote Indication'],
+  ['EQP','Equipment'],             ['SLC','Signal Line Circuit'],
+  ['EXST','Existing'],             ['SPV','Supervisory'],
+  ['FACP','Fire Alarm Control Panel'],['STB','Short Trip Breaker'],
+  ['FIRE','Fire Protection'],      ['THRU','Through'],
+  ['FLR','Floor'],                 ['TO','Telecom Outlet'],
+  ['FUTURE','Future'],             ['TR','Tamper Resistant'],
+  ['G.C.','General Contractor'],   ['ULD','Unlisted Device'],
+  ['GFCI','Ground Fault Circuit Interrupter'],['W','Wire'],
+  ['GFP','Ground Fault Protection'],['WP','Weatherproof'],
+  ['HNDL','Handrail'],             ['XFMR','Transformer'],
+  ['IDF','Intermediate Distribution Frame'],['LV','Low Voltage'],
+  ['LTG','Lighting'],              ['LVC','Low-Voltage Control Center'],
+];
 
-  // ── LEGEND ──
-  _drawSectionHeader(doc, col1X, drawingY, colW, 'LEGEND', 7);
-  let ly = drawingY + 9;
+const GENERAL_NOTES_FA0 = [
+  'Provide all material and labor related to the installation of electrical wiring penetrating into or through fire-rated walls, floors, or ceilings, such that the fire rating of the wall is maintained.',
+  'Take measurements from plans for device locations. Field verify exact device and equipment locations and mounting heights with owner\'s representative for proper installation.',
+  'Provide all branch circuit connections and accessories as required for complete operation of all devices and equipment indicated.',
+  'Refer to equipment schedules for wiring requirements not indicated on power plans.',
+  'Provide all new wiring to panels and power distribution equipment. Coordinate with owner\'s representative for work not shown on power plans.',
+  'Conduit on other electrical components shall not be installed in stud walls or ceilings unless clearly indicated on the drawings or as approved by structural engineer.',
+  'Provide separate neutral for each circuit. No shared neutral.',
+  'Wiring duct systems shall be concealed except in electrical rooms, mechanical rooms, and utility areas, or as otherwise noted.',
+  'Exterior mounted electrical devices (door as disconnect switch, speakers, fire alarm mark, etc.) shall be NEMA 4X weather-resistant rated.',
+  'All one-line diagrams and conduit routing are schematic and do not show exact physical arrangement of equipment. Where indicated on drawings all junction and conduit boxes are minimum adequate size. Provide all fittings and pull-boxes of adequate size in the raceway system wherever necessary or required by NEC. Coordinate all conduit routing, pullback, and equipment locations with other trades. Empty conduits for completion.',
+  'During pre-bid site walk, contractor shall examine existing conditions and provide all costs for patching and core drilling required to install conduit and other wiring methods through existing walls, floors, and other building elements not shown on drawings.',
+  'Installations shall comply with all applications / accessibility codes.',
+  'All penetrations in walls shall be sealed to the original rating.',
+  'Provide all fire watch as required during construction if needed. Coordinate access with owner.',
+];
 
-  const legendSymbols = [
-    { sym: '—', desc: 'Lighting or power panel' },
-    { sym: '- -', desc: 'Conduit exposed' },
-    { sym: '···', desc: 'Conduit in wall or ceiling space only' },
-    { sym: '—·—', desc: 'Conduit under ground or floor' },
-    { sym: 'EC', desc: 'Existing conduit' },
-    { sym: 'CU', desc: 'Conduit up' },
-    { sym: 'CD', desc: 'Conduit down' },
-    { sym: 'CB', desc: 'Conduit stub out with plastic bushing' },
-    { sym: '⊕', desc: 'Grounding electrode per codes' },
-    { sym: '⌀', desc: 'Code feed junction box with cover plate' },
-  ];
-  const deviceSymbols = [
-    { sym: 'S', shape: 'circle', color: '#2563eb', desc: 'Fire alarm smoke detector, S-sounder base' },
-    { sym: 'H', shape: 'circle', color: '#d97706', desc: 'Fire alarm heat detector' },
-    { sym: 'D', shape: 'rect', color: '#4f46e5', desc: 'Fire alarm duct smoke detector' },
-    { sym: 'MPS', shape: 'square', color: '#dc2626', desc: 'Fire alarm manual pull station, dual action' },
-    { sym: 'H/S', shape: 'hex', color: '#ea580c', desc: 'Horn/strobe or audio/visual alarm device' },
-    { sym: 'CD', shape: 'circle', color: '#7c3aed', desc: 'Strobe, ceiling mounted' },
-    { sym: 'SP', shape: 'speaker', color: '#0891b2', desc: 'Speaker / voice evacuation device' },
-    { sym: 'WF', shape: 'diamond', color: '#059669', desc: 'Sprinkler waterflow switch preview point module' },
-    { sym: 'VS', shape: 'diamond', color: '#0d9488', desc: 'Sprinkler tamper switch point module' },
-    { sym: 'MM', shape: 'diamond', color: '#0f766e', desc: 'Fire alarm monitor module' },
-    { sym: 'CM', shape: 'rect', color: '#475569', desc: 'Fire alarm control / relay module' },
-    { sym: 'DH', shape: 'square', color: '#dc2626', desc: 'Door holder / magnetic hold-open device' },
-    { sym: 'FACP', shape: 'rect', color: '#dc2626', desc: 'Fire alarm control panel' },
-    { sym: 'ER', shape: 'circle', color: '#7c3aed', desc: 'Elevator recall detector' },
-  ];
+const GENERAL_NOTES_SOW = [
+  'Coordinate all work with the fire alarm management prior to work.',
+  'The following is an overview of measures affecting the alarm system operational functions. Refer to the approved fire alarm plan for additional details.',
+  'Provide and tag all specifications.',
+  'Fire alarm contractor is responsible to notify occupants and provide access to all full-range fire alarm equipment. Submit submittals for all existing, including approved fire alarm drawings for all systems at this site.',
+  'Contractor to be responsible to provide 42-48 h ATC test & access to test measurements as required per drawings: note all fire alarm circuits and be responsible for all programming.',
+  'All alarm and notification devices shall be clean installed. Contractor to provide all connecting wiring from fire alarm, code and programmed functions, NAC relay panels, new fa panels and all fire alarm details for testing.',
+  'Retain and retain: fire alarm contractor shall replace fire alarm control panel as per specification. Provide fire alarm control panel panels for complete details. Refer to project specification for complete details.',
+  'Fire alarm contractor shall verify type and class of all fire alarm equipment (existing and new). Verify all wiring, terminations, relay connection cards and installation points to fire alarm systems, all fire alarm systems, all devices shall all be tested to final acceptance per NFPA 72.',
+];
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.2);
-  doc.setDrawColor(...C.lightGray);
-  doc.setLineWidth(0.15);
+export async function generateLegendSheet(doc, project, devices, meta, logoDataUrl) {
+  const W = DRAW_W;
+  const baseX = DRAW_X + 2;
 
-  // Symbol header row
-  doc.setFillColor(220, 228, 240);
-  doc.rect(col1X, ly - 3, colW, 6, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5.5);
-  doc.setTextColor(...C.darkGray);
-  doc.text('SYMBOL', col1X + 2, ly + 1);
-  doc.text('DESCRIPTION', col1X + 16, ly + 1);
-  ly += 7;
+  drawSheetBorder(doc, meta);
+  drawTitleBlock(doc, project, meta, logoDataUrl, 'FA0.01', 'FIRE ALARM LEGEND AND GENERAL REQUIREMENTS');
 
-  // Wire/conduit symbols
-  legendSymbols.forEach((s, i) => {
-    doc.setFillColor(i % 2 === 0 ? 255 : 248, 250, 252);
-    doc.rect(col1X, ly - 3, colW, 5.5, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(5);
-    doc.setTextColor(...C.black);
-    doc.text(s.sym.slice(0, 8), col1X + 3, ly);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...C.darkGray);
-    doc.text(s.desc.slice(0, 44), col1X + 16, ly);
-    ly += 5.5;
-  });
+  // ── Three-column layout: Legend | Abbreviations | General Notes ──────────
+  const colW1 = W * 0.27;
+  const colW2 = W * 0.36;
+  const colW3 = W - colW1 - colW2 - 8;
+  const col1X = baseX;
+  const col2X = col1X + colW1 + 4;
+  const col3X = col2X + colW2 + 4;
+  const rowH = 5.6;
+  const headerH = 7;
 
-  ly += 3;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5.5);
-  doc.setTextColor(...C.darkGray);
-  doc.text('DEVICE SYMBOLS', col1X + 2, ly);
-  ly += 5;
+  // ── LEGEND ──────────────────────────────────────────────────────────────
+  let y = DRAW_Y + 4;
+  doc.setFillColor(30, 41, 59); doc.rect(col1X, y, colW1, headerH, 'F');
+  setFont(doc, 8, 'bold', C_WHITE);
+  doc.text('LEGEND', col1X + colW1 / 2, y + 5, { align: 'center' });
+  y += headerH;
 
-  deviceSymbols.forEach((s, i) => {
-    if (ly > drawingY + drawingH - 20) return;
-    doc.setFillColor(i % 2 === 0 ? 255 : 248, 250, 252);
-    doc.rect(col1X, ly - 3, colW, 5.5, 'F');
-    // Draw mini SVG-like symbol using jsPDF primitives
-    _drawMiniSymbol(doc, col1X + 6, ly - 0.5, s.shape, s.color, s.sym);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5);
-    doc.setTextColor(...C.darkGray);
-    doc.text(s.desc.slice(0, 44), col1X + 14, ly);
-    ly += 5.5;
-  });
+  // Sub-header row
+  doc.setFillColor(200, 210, 220); doc.rect(col1X, y, colW1, 5, 'F');
+  setFont(doc, 5, 'bold', C_DARK);
+  doc.text('SYMBOL', col1X + 2, y + 3.5);
+  doc.text('DESCRIPTION', col1X + 18, y + 3.5);
+  y += 5;
 
-  // Drawing index at bottom of col 1
-  const diH = 32;
-  const diY = drawingY + drawingH - diH;
-  _drawSectionHeader(doc, col1X, diY - 4, colW, 'DRAWING INDEX', 6);
-  const diLines = (meta.drawing_index_lines || [
-    'FA0.01 — Legend, Abbreviations, General Notes & Drawing Index',
-    'FA5.01 — Fire Alarm 1st Floor Plan',
-    'FA5.10 — Fire Alarm System One-Line Riser Diagram',
-  ]);
-  const diArr = Array.isArray(diLines) ? diLines : String(diLines).split('\n');
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.5);
-  doc.setTextColor(...C.darkGray);
-  diArr.slice(0, 8).forEach((ln, i) => {
-    doc.setDrawColor(...C.lightGray);
-    doc.setLineWidth(0.1);
-    doc.line(col1X, diY + 2 + i * 5.5, col1X + colW, diY + 2 + i * 5.5);
-    doc.text(String(ln).slice(0, 52), col1X + 2, diY + 6 + i * 5.5);
-  });
-
-  // ── ABBREVIATIONS ──
-  _drawSectionHeader(doc, col2X, drawingY, colW, 'ABBREVIATIONS', 7);
-  let ay = drawingY + 9;
-  const abbrevPairs = [
-    ['ACP', 'ACCESSIBLE CARD PATH'], ['AC', 'AIR CONDITIONER'], ['AFF', 'ABOVE FINISHED FLOOR'],
-    ['ATC', 'AVAILABLE FAULT CURRENT'], ['ATS', 'AUTOMATIC TRANSFER SWITCH'], ['AL', 'ALARM'],
-    ['ATTN', 'ATTENTION'], ['BDA', 'BROADBAND'], ['BRK', 'BREAKER'], ['C', 'CONDUIT'],
-    ['CB', 'CIRCUIT BREAKER'], ['CKT', 'CIRCUIT'], ['C.C.', 'CONDUIT AND PULL WIRE ONLY'],
-    ['COMM', 'COMMUNICATIONS'], ['COMP', 'COMPUTER'], ['CTRL', 'CONTROL'],
-    ['DEMO', 'DEMOLISH/DEMOLITION'], ['D/W', 'DISHWASHER'], ['EL', 'ELECTRICAL CONTRACTOR'],
-    ['ECB', 'ENCLOSED CIRCUIT BREAKER'], ['EQUIP', 'EQUIPMENT'], ['FACP', 'FIRE ALARM CONTROL PANEL'],
-    ['FA', 'FIRE ALARM'], ['EXIST', 'EXISTING'], ['FL', 'FLOOR'], ['FTR', 'FUTURE'],
-    ['G', 'GROUND'], ['GFI', 'GROUND FAULT INTERRUPTER'], ['GFC', 'GROUND FAULT CIRCUIT INTERRUPTER'],
-    ['THRU', 'THROUGH'], ['GFP', 'GROUND FAULT PROTECTION'], ['HH', 'HANDHOLE'],
-    ['IDF', 'INTERMEDIATE DISTRIBUTION FRAME'], ['L', 'LIGHTING'], ['LTG', 'LIGHTING'],
-    ['LV', 'LOW VOLTAGE'], ['M', 'MANUAL'], ['MDP', 'MAIN DISTRIBUTION FRAME'],
-    ['BDP', 'BRANCH DISTRIBUTION PANEL'], ['NEC', 'NATIONAL ELECTRICAL CODE'], ['N/F', 'NOT FOR'],
-    ['CU', 'COPPER'], ['OWNR-INST', 'OWNER-FURNISHED, CONTRACTOR-INSTALLED'], ['O/I', 'OWNER INSTALLED'],
-    ['PNL', 'PANEL'], ['PRO', 'PROJECTION SCREEN'], ['RCPT', 'RECEPTACLE'], ['R/R', 'REMOVE AND REPLACE EXISTING DEVICE'],
-    ['RGD', 'RIGID'], ['RQI', 'REQUEST TO EXIT'], ['RISER', 'RISER EQUIPMENT'],
-    ['RNG', 'RANGE'], ['REF', 'REFRIGERATOR'], ['FLR', 'FLOOR'], ['SCP', 'SECONDARY DISTRIBUTION PNL'],
-    ['SPEC', 'SPECIFICATIONS'], ['SW', 'SWITCH'], ['STB', 'SHORT-TRIP BREAKER'], ['SB', 'SAFETY'],
-    ['T', 'TELEPHONE COMMUNICATION'], ['TD', 'TRANSFORMER'], ['TGB', 'UNKNOWN-NTRO-OTHERS'],
-    ['W', 'WIRE'], ['WHR', 'WATER HEATER'], ['WP', 'WEATHER PROOF'], ['XFMR', 'TRANSFORMER'],
-  ];
-  const colAH = colW / 2 - 2;
-  abbrevPairs.forEach(([abbr, desc], i) => {
-    if (ay > drawingY + drawingH - 10) return;
-    const col = i % 2;
-    const row = Math.floor(i / 2);
-    const ax = col2X + col * colAH;
-    const ry = ay + row * 4.8 - (Math.floor(i / 2) > 0 && col === 0 ? 4.8 * Math.floor((i - 1) / 2) - 4.8 * Math.floor((i - 1) / 2) : 0);
-    if (col === 0 && i > 1) {
-      // We compute y linearly
-    }
-    doc.setFillColor(i % 4 < 2 ? 255 : 248, 250, 252);
-  });
-
-  // Simpler abbreviations rendering — two sub-columns
-  const half = Math.ceil(abbrevPairs.length / 2);
-  const abbrevColW = (colW - 4) / 2;
-  [[0, half], [half, abbrevPairs.length]].forEach((range, ci) => {
-    const ax = col2X + ci * (abbrevColW + 2);
-    // header
-    doc.setFillColor(220, 228, 240);
-    doc.rect(ax, ay - 3, abbrevColW, 6, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(5);
-    doc.setTextColor(...C.darkGray);
-    doc.text('ABBR', ax + 1, ay + 1);
-    doc.text('DESCRIPTION', ax + abbrevColW * 0.32, ay + 1);
-    let ry2 = ay + 7;
-    abbrevPairs.slice(range[0], range[1]).forEach(([abbr, desc], i) => {
-      if (ry2 > drawingY + drawingH - 10) return;
-      doc.setFillColor(i % 2 === 0 ? 255 : 248, 250, 252);
-      doc.rect(ax, ry2 - 3, abbrevColW, 4.8, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(4.8);
-      doc.setTextColor(...C.blue);
-      doc.text(abbr.slice(0, 10), ax + 1, ry2);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...C.darkGray);
-      doc.text(desc.slice(0, 24), ax + abbrevColW * 0.32, ry2);
-      ry2 += 4.8;
-    });
-  });
-
-  // ── GENERAL NOTES ──
-  _drawSectionHeader(doc, col3X, drawingY, colW, 'GENERAL NOTES', 7);
-  let gny = drawingY + 9;
-  const generalNotes = _buildGeneralNotes(reqs);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.2);
-  doc.setTextColor(...C.darkGray);
-  generalNotes.forEach((note, i) => {
-    if (gny > drawingY + drawingH - 10) return;
-    const lines = doc.splitTextToSize(`${i + 1}. ${note}`, colW - 6);
-    lines.forEach((ln) => {
-      if (gny > drawingY + drawingH - 10) return;
-      doc.text(ln, col3X + 3, gny);
-      gny += 4.6;
-    });
-    gny += 2;
-  });
-}
-
-function _drawSectionHeader(doc, x, y, w, title, fontSize = 6) {
-  doc.setFillColor(30, 41, 59);
-  doc.rect(x, y, w, fontSize + 3, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(fontSize);
-  doc.setTextColor(255, 255, 255);
-  doc.text(title, x + w / 2, y + fontSize * 0.85 + 1.5, { align: 'center' });
-}
-
-function _drawMiniSymbol(doc, cx, cy, shape, color, label) {
-  const rgb = _hexToRgb(color);
-  if (!rgb) return;
-  doc.setDrawColor(...rgb);
-  doc.setLineWidth(0.5);
-  const r = 3;
-  if (shape === 'circle') {
-    doc.setFillColor(rgb[0], rgb[1], rgb[2], 0.1);
-    doc.circle(cx, cy, r, 'S');
-  } else if (shape === 'square') {
-    doc.setFillColor(255, 255, 255);
-    doc.rect(cx - r, cy - r, r * 2, r * 2, 'S');
-  } else if (shape === 'diamond') {
-    doc.setFillColor(255, 255, 255);
-    doc.lines([[r, r], [r, -r], [-r, -r], [-r, r]], cx - r, cy, [1, 1], 'S', true);
-  } else if (shape === 'hex') {
-    doc.setFillColor(255, 255, 255);
-    doc.lines([[r * 0.55, -r], [r * 0.55, r], [0, r * 0.45], [-r * 0.55, r], [-r * 0.55, -r], [0, -r * 0.45]], cx - r * 0.55, cy - r, [1, 1], 'S', true);
-  } else if (shape === 'rect') {
-    doc.setFillColor(255, 255, 255);
-    doc.rect(cx - r * 1.5, cy - r * 0.65, r * 3, r * 1.3, 'S');
-  } else if (shape === 'speaker') {
-    doc.lines([[r * 0.6, r * 0.6], [0, r * 0.4], [0, -r * 0.4], [-r * 0.6, -r * 0.6]], cx - r * 0.3, cy, [1, 1], 'S', true);
-  }
-}
-
-function _hexToRgb(hex) {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)] : null;
-}
-
-function _buildGeneralNotes(reqs = {}) {
-  return [
-    'ALL WORK SHALL COMPLY WITH THE LATEST NEC AND LOCAL CODE AND EXCEED DESIGN REQUIREMENTS AS CALLED OUT BY LOCAL PLANS AND SPECIFICATIONS.',
-    'PROVIDE AND INSTALL ALL LABOR, MATERIALS, TOOLS, APPLIANCES AND EQUIPMENT REQUIRED FOR THE COMPLETE INSTALLATION OF FIRE ALARM SYSTEM AS SHOWN ON THESE PLANS.',
-    'ALL EMPTY CONDUITS SHALL INCLUDE PULL STRING. UNLESS NOTED OTHERWISE ALL CONDUIT SHALL BE IN GALVANIZED RIGID STEEL OR EMT CONDUIT WITH MINIMUM TRADE SIZE OF 3/4".',
-    'COORDINATE ALL WORK WITH OWNER REPRESENTATIVE FOR WORK SCHEDULES DETAILS PRIOR TO DECOMMISSIONING, DEMOLITION, RELOCATION OR SHUTDOWN OF FIRE ALARM PANELS AND PANELS. PROVIDE PATCH AND PAINT AS REQUIRED FOR ALL NEW EQUIPMENT, DEVICES AND CONDUIT INSTALLED.',
-    'PROVIDE ELECTRICAL AND FIRE ALARM WORK ACCORDING TO CONSTRUCTION PHASING SCHEDULE AT THE END OF EACH AREA OF CONSTRUCTION PER PHASING PLANNING SCHEDULE. PROVIDE ELECTRICAL AND FIRE ALARM TESTING TO INSURE COMPLETION OF WORK IS SATISFACTORY FOR ACCEPTANCE.',
-    'ALL DEVICES SHALL BE INSTALLED IN AN ACCESSIBLE SPACE AND AT THE ELEVATION PER NFPA 72, ADA AND AHJ CODES.',
-    'ALL FIELD WIRING SHALL USE FPLP OR FPLR LISTED WIRING AS REQUIRED BY LOCAL AHJ.',
-    'REFER TO EQUIPMENT SCHEDULES FOR WIRING REQUIREMENTS NOT INDICATED ON POWER PLANS.',
-    'PROVIDE ALL NEW WIRING TO PANELS AND POWER DISTRIBUTION EQUIPMENT WITH BRANCH CIRCUIT CONDUCTORS AS REQUIRED FOR COMPLETE OPERATION OF ALL DEVICES AND EQUIPMENT INSTALLED.',
-    'SET ALL AUDIO DEVICES TO TEMPORAL 3 CODE PATTERN UNLESS NOTED OTHERWISE.',
-    'ALL ONE-LINE DIAGRAMS AND CONDUIT ROUTING ARE SCHEMATIC AND DO NOT SHOW EXACT PHYSICAL LOCATIONS OF EQUIPMENT WHERE INDICATED ON DRAWINGS. ALL JUNCTION AND CONDUIT BOXES ARE MINIMUM REQUIREMENTS. PROVIDE FITTINGS AND PULL-BOXES OF ADEQUATE SIZE IN THE RACEWAY SYSTEM.',
-    reqs.voiceEvacRequired ? 'VOICE EVACUATION SYSTEM SHALL MEET REQUIREMENTS OF NFPA 72 CHAPTER 24 AND LOCAL AHJ.' : null,
-    reqs.elevatorRecallRequired ? 'PROVIDE ELEVATOR RECALL PER NFPA 72 AND LOCAL CODES. COORDINATE WITH ELEVATOR CONTRACTOR.' : null,
-    'PROVIDE BYPASS SWITCHES AS REQUIRED MAINTAINING FIRE ALARM SYSTEM DURING MAINTENANCE AND ANNUAL INSPECTION.',
-  ].filter(Boolean);
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Sheet FA5.01 — Floor Plan sheet with right-side title block
-// ─────────────────────────────────────────────────────────────────
-export function drawFloorPlanSheet(doc, opts) {
-  const { imgData, imgWidth = 4, imgHeight = 3, project, meta = {}, activeFloor = 1, sheetNumber = 'FA5.01', reqs = {} } = opts;
-  const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
-
-  doc.setFillColor(...C.white);
-  doc.rect(0, 0, W, H, 'F');
-
-  drawBorder(doc);
-  drawRightTitleBlock(doc, meta, {
-    title: `FIRE ALARM ${activeFloor > 1 ? activeFloor + getOrdinal(activeFloor) + ' ' : '1ST '}FLOOR PLAN`,
-    number: sheetNumber,
-    scale: '1/8" = 1\'-0" (as noted)',
-  });
-
-  // Drawing area: full width minus right title block, with a thin notes strip on right
-  const notesW = 68;
-  const tbX = W - TB_W - MARGIN * 3 - 3;
-  const drawLeft = MARGIN + 6;
-  const drawTop = MARGIN + 6;
-  const drawBottom = H - MARGIN - 6;
-  const drawH = drawBottom - drawTop;
-  const planRight = tbX - notesW - 4;
-  const planW = planRight - drawLeft;
-
-  // General requirement notes (right strip before title block)
-  const notesX = planRight + 4;
-  _drawSectionHeader(doc, notesX, drawTop, notesW, 'GENERAL REQUIREMENT NOTES', 5.5);
-  let ny = drawTop + 10;
-  const gnotes = _buildGeneralNotes(reqs);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(4.8);
-  doc.setTextColor(...C.darkGray);
-  gnotes.slice(0, 12).forEach((note, i) => {
-    if (ny > drawBottom - 10) return;
-    const lines = doc.splitTextToSize(`${i + 1}. ${note}`, notesW - 4);
-    lines.forEach((ln) => {
-      if (ny > drawBottom - 10) return;
-      doc.text(ln, notesX + 2, ny);
-      ny += 4.2;
-    });
-    ny += 1.5;
-  });
-
-  // Floor plan image area
-  doc.setDrawColor(...C.lightGray);
-  doc.setLineWidth(0.25);
-  doc.rect(drawLeft, drawTop, planW, drawH, 'S');
-
-  if (imgData) {
-    const iw = Math.max(1, imgWidth);
-    const ih = Math.max(1, imgHeight);
-    const scale = Math.min(planW / iw, drawH / ih);
-    const dw = iw * scale;
-    const dh = ih * scale;
-    const dx = drawLeft + (planW - dw) / 2;
-    const dy = drawTop + (drawH - dh) / 2;
-    try {
-      doc.addImage(imgData, dataUrlImageFormat(imgData), dx, dy, dw, dh);
-    } catch {
-      _drawNoImagePlaceholder(doc, drawLeft, drawTop, planW, drawH);
-    }
-  } else {
-    _drawNoImagePlaceholder(doc, drawLeft, drawTop, planW, drawH);
-  }
-
-  // Sheet title below plan
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(...C.black);
-  const floorLabel = `FIRE ALARM ${activeFloor > 1 ? activeFloor + getOrdinal(activeFloor) + ' ' : '1ST '}FLOOR PLAN`;
-  doc.text(`△  ${floorLabel}`, drawLeft + planW / 2, drawBottom - 2, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.5);
-  doc.setTextColor(...C.medGray);
-  doc.text(`SCALE: 1/8" = 1'-0" (REFER TO DRAWING FOR SCALE BAR)`, drawLeft + planW / 2, drawBottom + 2, { align: 'center' });
-}
-
-function _drawNoImagePlaceholder(doc, x, y, w, h) {
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(...C.medGray);
-  const msg = [
-    'No floor plan image captured.',
-    '',
-    'Open the Floor Plan tab, ensure devices are visible,',
-    'then generate the submittal again.',
-  ];
-  msg.forEach((ln, i) => {
-    doc.text(ln, x + w / 2, y + h / 2 - 12 + i * 6, { align: 'center' });
-  });
-}
-
-function getOrdinal(n) {
-  if (n === 1) return 'ST';
-  if (n === 2) return 'ND';
-  if (n === 3) return 'RD';
-  return 'TH';
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Sheet FA5.10 — One-Line Riser Diagram (vector)
-// Modelled after the reference construction drawing
-// ─────────────────────────────────────────────────────────────────
-export function drawRiserDiagramSheet(doc, devices, project, meta, analysisResults) {
-  const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
-
-  doc.setFillColor(...C.white);
-  doc.rect(0, 0, W, H, 'F');
-
-  drawBorder(doc);
-  drawRightTitleBlock(doc, meta, {
-    title: 'FIRE ALARM SYSTEM\nONE-LINE DIAGRAMS PLAN',
-    number: 'FA5.10',
-    scale: 'NTS',
-  });
-
-  const tbX = W - TB_W - MARGIN * 3 - 3;
-  const drawLeft = MARGIN + 6;
-  const drawTop = MARGIN + 6;
-  const drawBottom = H - MARGIN - 6;
-  const drawH = drawBottom - drawTop;
-
-  // Two columns: left = FACP I/O Matrix, right = One-Line Riser
-  const matrixW = Math.min(190, tbX * 0.35);
-  const riserX = drawLeft + matrixW + 6;
-  const riserW = tbX - riserX - 4;
-
-  // ── LEFT: FACP Input/Output Matrix ──
-  _drawFacpMatrix(doc, drawLeft, drawTop, matrixW, drawH * 0.55, devices, project, meta);
-
-  // ── RIGHT: One-Line Riser ──
-  _drawOneLineRiser(doc, riserX, drawTop, riserW, drawH - 40, devices, project);
-
-  // ── RISER NOTES (bottom) ──
-  _drawRiserNotes(doc, drawLeft, drawTop + drawH * 0.58, matrixW, drawH * 0.38, analysisResults);
-
-  // ── SEQUENCE OF OPERATIONS (bottom right) ──
-  _drawSooBlock(doc, riserX, drawTop + drawH - 38, riserW, 38, analysisResults, project);
-}
-
-function _drawFacpMatrix(doc, x, y, w, h, devices, project) {
-  _drawSectionHeader(doc, x, y, w, `${project?.name || 'PROJECT'} — FIRE ALARM CONTROL PANEL — INPUT AND OUTPUT MATRIX`, 5.5);
-  y += 8;
-
-  // Device types that appear as rows
-  const inputTypes = [
-    { type: 'smoke_detector', label: 'SMOKE DETECTORS' },
-    { type: 'duct_detector', label: 'DUCT SMOKE DETECTORS' },
-    { type: 'heat_detector', label: 'HEAT DETECTORS' },
-    { type: 'pull_station', label: 'MANUAL PULL STATIONS' },
-    { type: 'waterflow_switch', label: 'SPRINKLER WATERFLOW SWITCH' },
-    { type: 'valve_tamper', label: 'VALVE TAMPER SWITCH' },
-    { type: 'elevator_recall', label: 'ELEVATOR LOBBY RECALL DETECTORS' },
-    { type: 'monitor_module', label: 'MONITOR MODULES' },
-    { type: 'control_module', label: 'CONTROL / RELAY MODULES' },
-  ];
-
-  // Output columns
-  const outputs = ['GENERAL ALARM', 'NOTIFICATION', 'ELEVATOR RECALL', 'HVAC SHUTDOWN', 'DOOR RELEASE', 'SUPERVISORY'];
-  const numFloors = project?.num_floors || 1;
-
-  const rowH = 5.2;
-  const colW = (w - 60) / outputs.length;
-  const labelW = 58;
-
-  // Header: output column titles (vertical text)
-  doc.setFillColor(220, 228, 240);
-  doc.rect(x, y, w, 18, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(4.5);
-  doc.setTextColor(...C.darkGray);
-  doc.text('SYSTEM INPUTS', x + 2, y + 6);
-  outputs.forEach((output, i) => {
-    const cx = x + labelW + i * colW + colW / 2;
-    doc.text(output.slice(0, 12), cx, y + 5, { align: 'center' });
-    doc.setLineWidth(0.15);
-    doc.setDrawColor(...C.lightGray);
-    doc.line(x + labelW + i * colW, y, x + labelW + i * colW, y + 18);
-  });
-  y += 18;
-
-  // Device rows
-  const deviceCounts = {};
-  devices.forEach(d => { deviceCounts[d.type] = (deviceCounts[d.type] || 0) + 1; });
-
-  inputTypes.forEach((row, ri) => {
-    const count = deviceCounts[row.type] || 0;
-    doc.setFillColor(ri % 2 === 0 ? 255 : 248, 250, 252);
-    doc.rect(x, y, w, rowH, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(4.5);
-    doc.setTextColor(...C.darkGray);
-    doc.text(`${row.label}${count > 0 ? ` (${count})` : ''}`, x + 2, y + rowH * 0.72);
-    // Mark with X for relevant outputs
-    const marks = _getMatrixMarks(row.type);
-    outputs.forEach((_, oi) => {
-      if (marks[oi]) {
-        const cx = x + labelW + oi * colW + colW / 2;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(5.5);
-        doc.setTextColor(...C.red);
-        doc.text('X', cx, y + rowH * 0.72, { align: 'center' });
-      }
-      doc.setDrawColor(...C.lightGray);
-      doc.setLineWidth(0.1);
-      doc.line(x + labelW + oi * colW, y, x + labelW + oi * colW, y + rowH);
-    });
-    doc.setDrawColor(...C.lightGray);
-    doc.line(x, y + rowH, x + w, y + rowH);
+  LEGEND_ROWS.forEach((row, i) => {
+    doc.setFillColor(i % 2 === 0 ? 252 : 246, 249, 253);
+    doc.rect(col1X, y, colW1, rowH, 'F');
+    doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.1);
+    doc.line(col1X, y + rowH, col1X + colW1, y + rowH);
+    setFont(doc, 5, 'bold', C_BLUE);
+    doc.text(row.sym.slice(0, 8), col1X + 2, y + rowH - 1.5);
+    setFont(doc, 5, 'normal', C_DARK);
+    doc.text(row.desc.slice(0, 32), col1X + 18, y + rowH - 1.5);
     y += rowH;
   });
+
+  // ── ABBREVIATIONS ─────────────────────────────────────────────────────
+  let ay = DRAW_Y + 4;
+  doc.setFillColor(30, 41, 59); doc.rect(col2X, ay, colW2, headerH, 'F');
+  setFont(doc, 8, 'bold', C_WHITE);
+  doc.text('ABBREVIATIONS', col2X + colW2 / 2, ay + 5, { align: 'center' });
+  ay += headerH;
+
+  // Two sub-columns within ABBREV block
+  const abW = colW2 / 2 - 1;
+  // Headers
+  doc.setFillColor(200, 210, 220);
+  doc.rect(col2X, ay, colW2, 5, 'F');
+  setFont(doc, 5, 'bold', C_DARK);
+  doc.text('ABBR', col2X + 2, ay + 3.5);
+  doc.text('DESCRIPTION', col2X + 16, ay + 3.5);
+  doc.text('ABBR', col2X + abW + 4, ay + 3.5);
+  doc.text('DESCRIPTION', col2X + abW + 18, ay + 3.5);
+  ay += 5;
+
+  const half = Math.ceil(ABBREV_ROWS.length / 2);
+  for (let i = 0; i < half; i++) {
+    doc.setFillColor(i % 2 === 0 ? 252 : 246, 249, 253);
+    doc.rect(col2X, ay, colW2, rowH, 'F');
+    doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.1);
+    doc.line(col2X, ay + rowH, col2X + colW2, ay + rowH);
+
+    const left = ABBREV_ROWS[i] || [];
+    setFont(doc, 5, 'bold', C_BLUE);
+    doc.text(left[0] || '', col2X + 2, ay + rowH - 1.5);
+    setFont(doc, 5, 'normal', C_DARK);
+    doc.text((left[1] || '').slice(0, 24), col2X + 16, ay + rowH - 1.5);
+
+    const right = ABBREV_ROWS[i + half] || [];
+    setFont(doc, 5, 'bold', C_BLUE);
+    doc.text(right[0] || '', col2X + abW + 4, ay + rowH - 1.5);
+    setFont(doc, 5, 'normal', C_DARK);
+    doc.text((right[1] || '').slice(0, 24), col2X + abW + 18, ay + rowH - 1.5);
+    ay += rowH;
+  }
+
+  // ── GENERAL NOTES ────────────────────────────────────────────────────
+  let gy = DRAW_Y + 4;
+  doc.setFillColor(30, 41, 59); doc.rect(col3X, gy, colW3, headerH, 'F');
+  setFont(doc, 8, 'bold', C_WHITE);
+  doc.text('GENERAL NOTES', col3X + colW3 / 2, gy + 5, { align: 'center' });
+  gy += headerH + 1;
+
+  GENERAL_NOTES_FA0.forEach((note, i) => {
+    const numStr = String(i + 1) + '.';
+    const lines = doc.splitTextToSize(note, colW3 - 10);
+    setFont(doc, 5.5, 'bold', C_DARK);
+    doc.text(numStr, col3X + 2, gy + 3.5);
+    setFont(doc, 5.5, 'normal', C_DARK);
+    lines.forEach((ln, li) => {
+      doc.text(ln, col3X + 8, gy + 3.5 + li * 3.8);
+    });
+    gy += lines.length * 3.8 + 3;
+    if (gy > DRAW_Y + DRAW_H - 20) return;
+  });
+
+  // General sequence notes
+  gy += 2;
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(col3X, gy, col3X + colW3, gy); gy += 3;
+  doc.setFillColor(255, 251, 235); doc.rect(col3X, gy - 1, colW3, 6, 'F');
+  setFont(doc, 6.5, 'bold', [146, 64, 14]);
+  doc.text('GENERAL SEQUENCE NOTES', col3X + 2, gy + 4); gy += 7;
+  GENERAL_NOTES_SOW.slice(0, 6).forEach((note, i) => {
+    if (gy > DRAW_Y + DRAW_H - 10) return;
+    const lines = doc.splitTextToSize(`${i + 1}. ${note}`, colW3 - 8);
+    setFont(doc, 5, 'normal', C_DARK);
+    lines.slice(0, 3).forEach((ln, li) => { doc.text(ln, col3X + 2, gy + li * 3.5); });
+    gy += Math.min(lines.length, 3) * 3.5 + 2;
+  });
+
+  // ── Drawing Index ── (below legend column)
+  const diY = y + 6;
+  if (diY < DRAW_Y + DRAW_H - 40) {
+    doc.setFillColor(30, 41, 59); doc.rect(col1X, diY, colW1, headerH, 'F');
+    setFont(doc, 7, 'bold', C_WHITE);
+    doc.text('DRAWING INDEX', col1X + colW1 / 2, diY + 5, { align: 'center' });
+    let diy2 = diY + headerH + 1;
+    const idxLines = Array.isArray(meta?.drawing_index_lines)
+      ? meta.drawing_index_lines
+      : (meta?.drawing_index_lines || '').split(/\r?\n/).filter(Boolean);
+    const defaultIdx = [
+      'FA0.01 — Legend & General Requirements',
+      'FA5.01 — Fire Alarm 1st Floor Plan',
+      'FA5.10 — Fire Alarm System One-Line Diagram',
+    ];
+    const rows = idxLines.length ? idxLines : defaultIdx;
+    rows.forEach((ln, i) => {
+      doc.setFillColor(i % 2 === 0 ? 252 : 246, 249, 253); doc.rect(col1X, diy2, colW1, 6, 'F');
+      setFont(doc, 5.5, 'normal', C_DARK);
+      doc.text(String(ln).slice(0, 38), col1X + 2, diy2 + 4);
+      diy2 += 6;
+    });
+  }
 }
 
-function _getMatrixMarks(type) {
-  // Returns bool array for [GENERAL ALARM, NOTIFICATION, ELEVATOR RECALL, HVAC SHUTDOWN, DOOR RELEASE, SUPERVISORY]
-  const m = {
-    smoke_detector: [true, true, false, true, true, false],
-    duct_detector: [false, false, false, true, true, false],
-    heat_detector: [true, true, false, false, false, false],
-    pull_station: [true, true, false, false, false, false],
-    waterflow_switch: [true, true, false, false, false, false],
-    valve_tamper: [false, false, false, false, false, true],
-    elevator_recall: [false, false, true, false, false, false],
-    monitor_module: [true, false, false, false, false, false],
-    control_module: [false, false, false, false, true, false],
-  };
-  return m[type] || [false, false, false, false, false, false];
+// ─── FA-5.01: Floor Plan Sheet ───────────────────────────────────────────────
+
+export async function generateFloorPlanSheet(doc, project, rooms, devices, layoutZones, floorImg, floorImgW, floorImgH, activeFloor, meta, logoDataUrl, markups) {
+  drawSheetBorder(doc, meta);
+  drawTitleBlock(doc, project, meta, logoDataUrl, `FA5.0${activeFloor}`, `FIRE ALARM ${activeFloor === 1 ? '1ST' : activeFloor === 2 ? '2ND' : `${activeFloor}TH`} FLOOR PLAN`);
+
+  // Reserve right portion for general notes
+  const notesW = 90;
+  const planW = DRAW_W - notesW - 4;
+  const planX = DRAW_X + 2;
+  const planY = DRAW_Y + 2;
+  const planH = DRAW_H - 4;
+
+  // Plan area border
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.25);
+  doc.rect(planX, planY, planW, planH, 'S');
+
+  // Embed the floor plan drawing
+  if (floorImg) {
+    const iw = Math.max(1, floorImgW);
+    const ih = Math.max(1, floorImgH);
+    const scale = Math.min((planW - 4) / iw, (planH - 4) / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    const dx = planX + (planW - dw) / 2;
+    const dy = planY + (planH - dh) / 2;
+    try { doc.addImage(floorImg, dataUrlImageFormat(floorImg), dx, dy, dw, dh); } catch { /* fallback */ }
+  } else {
+    setFont(doc, 9, 'normal', C_GRAY);
+    doc.text('Open the Floor Plan tab with devices visible, then regenerate.', planX + planW / 2, planY + planH / 2, { align: 'center' });
+  }
+
+  // Floor plan title below
+  const fpLabelY = planY + planH + 3;
+  if (fpLabelY < DRAW_Y + DRAW_H) {
+    setFont(doc, 8, 'bold', C_DARK);
+    const floorLabel = activeFloor === 1 ? '1ST' : activeFloor === 2 ? '2ND' : `${activeFloor}TH`;
+    doc.text(`\u25b3 FIRE ALARM ${floorLabel} FLOOR PLAN`, planX + planW / 2, fpLabelY, { align: 'center' });
+    setFont(doc, 6, 'normal', C_GRAY);
+    doc.text('SCALE: 3/32"=1\'-0" (verify)', planX + planW / 2, fpLabelY + 4, { align: 'center' });
+  }
+
+  // ── Right notes panel ──
+  const nX = planX + planW + 4;
+  const nY = planY;
+  const nH = planH;
+
+  doc.setFillColor(252, 252, 253); doc.rect(nX, nY, notesW, nH, 'F');
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.rect(nX, nY, notesW, nH, 'S');
+
+  doc.setFillColor(30, 41, 59); doc.rect(nX, nY, notesW, 7, 'F');
+  setFont(doc, 7, 'bold', C_WHITE);
+  doc.text('GENERAL REQUIREMENT NOTES', nX + notesW / 2, nY + 5, { align: 'center' });
+  let ny = nY + 9;
+  GENERAL_NOTES_FA0.slice(0, 8).forEach((note, i) => {
+    if (ny > nY + nH - 40) return;
+    const lines = doc.splitTextToSize(`${i + 1}. ${note}`, notesW - 6);
+    setFont(doc, 5, i < 3 ? 'bold' : 'normal', C_DARK);
+    lines.slice(0, 4).forEach((ln, li) => { doc.text(ln, nX + 3, ny + li * 3.5); });
+    ny += Math.min(lines.length, 4) * 3.5 + 2;
+  });
+
+  // Plan notes
+  ny += 2;
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.15); doc.line(nX + 2, ny, nX + notesW - 2, ny); ny += 3;
+  doc.setFillColor(255, 251, 235); doc.rect(nX + 2, ny - 1, notesW - 4, 6, 'F');
+  setFont(doc, 6, 'bold', [146, 64, 14]);
+  doc.text('PLAN NOTES', nX + 3, ny + 4); ny += 8;
+
+  const planNotes = [
+    'Provide fire alarm monitor devices on plate as required by code for the sprinkler riser. Connect to nearest existing fire alarm device.',
+    'Refer to typical for all dwelling units layout floor plan sheets.',
+    'Replace existing fire alarm device with same or different type of device as shown.',
+    'Provide elevator controller, relays and monitor modules as required per AHJ codes.',
+    'Provide cluster/general cabinet above existing fire alarm panel to do cut over from existing panel and NAC panels on floor.',
+  ];
+  planNotes.forEach((note, i) => {
+    if (ny > nY + nH - 30) return;
+    const lines = doc.splitTextToSize(`${(i + 1).toString().padStart(3, '0')}  ${note}`, notesW - 8);
+    setFont(doc, 5.5, 'normal', C_DARK);
+    lines.slice(0, 3).forEach((ln, li) => { doc.text(ln, nX + 3, ny + li * 3.8); });
+    ny += Math.min(lines.length, 3) * 3.8 + 3;
+  });
 }
 
-function _drawOneLineRiser(doc, x, y, w, h, devices, project) {
-  _drawSectionHeader(doc, x, y, w, 'FIRE ALARM SYSTEM ONE-LINE DIAGRAM', 6);
-  y += 9;
+// ─── FA-5.10: System One-Line Riser + FACP I/O Matrix + Sequence ─────────────
+
+export async function generateRiserSheet(doc, project, devices, analysisResults, meta, logoDataUrl) {
+  drawSheetBorder(doc, meta);
+  drawTitleBlock(doc, project, meta, logoDataUrl, 'FA5.10', 'FIRE ALARM DIAGRAMS PLAN');
+
+  const baseX = DRAW_X + 2;
+  const baseY = DRAW_Y + 2;
+  const W = DRAW_W - 4;
+  const H = DRAW_H - 4;
+
+  // Split into left (I/O matrix) and right (one-line riser)
+  const leftW = W * 0.37;
+  const rightX = baseX + leftW + 5;
+  const rightW = W - leftW - 5;
+
+  // ── LEFT: FACP I/O Matrix ─────────────────────────────────────────────────
+  drawFacpIOMatrix(doc, baseX, baseY, leftW, H * 0.55, project, devices, meta);
+
+  // ── LEFT BELOW: Battery + Code-3 notes ───────────────────────────────────
+  const battY = baseY + H * 0.55 + 4;
+  const battH = H - H * 0.55 - 6;
+  drawBatteryCalcBlock(doc, baseX, battY, leftW, battH, devices, meta);
+
+  // ── RIGHT: System One-Line Riser ──────────────────────────────────────────
+  const riserH = H * 0.7;
+  drawOneLineRiser(doc, rightX, baseY, rightW, riserH, project, devices);
+
+  // ── RIGHT BELOW: General Requirement Notes ───────────────────────────────
+  const gnY = baseY + riserH + 4;
+  const gnH = H - riserH - 6;
+  drawGeneralNotesSide(doc, rightX, gnY, rightW, gnH);
+}
+
+function drawFacpIOMatrix(doc, x, y, w, h, project, devices, meta) {
+  // Title
+  doc.setFillColor(15, 23, 42); doc.rect(x, y, w, 8, 'F');
+  setFont(doc, 8, 'bold', C_WHITE);
+  doc.text('FIRE ALARM CONTROL PANEL — INPUT / OUTPUT MATRIX', x + w / 2, y + 5.5, { align: 'center' });
+
+  // Project info sub-header
+  let sy = y + 10;
+  doc.setFillColor(248, 250, 252); doc.rect(x, sy, w, 20, 'FD');
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.rect(x, sy, w, 20, 'S');
+  setFont(doc, 6, 'bold', C_DARK);
+  const infoLeft = [
+    [project?.owner_name || '—', 'Building'],
+    [project?.name || '—', 'System'],
+    ['FACP', 'Panel'],
+    ['General', 'Type'],
+    ['Input and Output Matrix', 'Sheet'],
+  ];
+  infoLeft.forEach(([val, lbl], i) => {
+    setFont(doc, 5, 'bold', C_GRAY); doc.text(lbl, x + 3, sy + 4 + i * 3.5);
+    setFont(doc, 5.5, 'bold', C_DARK); doc.text(val.slice(0, 35), x + 30, sy + 4 + i * 3.5);
+  });
+  sy += 22;
+
+  // Matrix table
+  const INPUTS = [
+    'PULL STATIONS',
+    'SMOKE DETECTORS',
+    'DUCT SMOKE DETECTORS (NMR)',
+    'HEAT DETECTORS',
+    'ELEVATOR LOBBY SMOKE DETECTORS',
+    'ELEVATOR MACHINE ROOM SMOKE',
+    'SPRINKLER TAMPER SWITCHES',
+    'FLOW SWITCHES',
+  ];
+  const OUTPUTS = [
+    'ALARM SIGNAL (AUDIO/VISUAL)',
+    'AUXILIARY RELAY OUTPUT',
+    'ELEVATOR RECALL',
+    'ELECTRICAL MECHANICAL',
+    'DOOR RELEASE',
+    'HVAC SHUTDOWN',
+    'SUPERVISORY SIGNAL',
+    'CENTRAL STATION MONITOR',
+  ];
+
+  const colW = (w - 50) / OUTPUTS.length;
+  const rowH = 5;
+
+  // Column headers (rotated text simulation — just small text)
+  doc.setFillColor(30, 41, 59); doc.rect(x, sy, w, 10, 'F');
+  setFont(doc, 3.8, 'bold', C_WHITE);
+  doc.text('SYSTEM INPUTS', x + 2, sy + 6);
+  OUTPUTS.forEach((out, oi) => {
+    const ox = x + 50 + oi * colW + colW / 2;
+    // Rotated label: draw vertical using splitTextToSize trick
+    out.split(' ').forEach((word, wi) => {
+      doc.text(word.slice(0, 8), ox, sy + 2 + wi * 2.5, { align: 'center' });
+    });
+  });
+  sy += 10;
+
+  // Group header
+  doc.setFillColor(200, 210, 220); doc.rect(x, sy, w, rowH, 'F');
+  setFont(doc, 5, 'bold', C_DARK);
+  doc.text('SYSTEM INPUTS ↓', x + 2, sy + 3.5);
+  doc.text('SYSTEM OUTPUTS →', x + 50, sy + 3.5);
+  sy += rowH;
+
+  // Data rows — derive from actual devices
+  const devCountByType = {};
+  (devices || []).forEach(d => { devCountByType[d.type] = (devCountByType[d.type] || 0) + 1; });
+
+  INPUTS.forEach((input, ii) => {
+    doc.setFillColor(ii % 2 === 0 ? 252 : 246, 249, 253); doc.rect(x, sy, w, rowH, 'F');
+    doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.1);
+    doc.line(x, sy + rowH, x + w, sy + rowH);
+    setFont(doc, 4.5, 'normal', C_DARK);
+    doc.text(input.slice(0, 28), x + 2, sy + 3.5);
+
+    // Mark appropriate output columns with X
+    OUTPUTS.forEach((out, oi) => {
+      const ox = x + 50 + oi * colW + colW / 2;
+      doc.setDrawColor(...C_LGRAY); doc.line(ox, sy, ox, sy + rowH);
+      // Simple logic: Alarm → audio/visual for pull+smoke+heat; elevator → recall
+      let mark = '';
+      if (oi === 0 && (input.includes('PULL') || input.includes('SMOKE') || input.includes('HEAT') || input.includes('FLOW'))) mark = 'X';
+      if (oi === 7) mark = 'X'; // Always central station
+      if (oi === 2 && input.includes('ELEVATOR')) mark = 'X';
+      if (oi === 3 && input.includes('TAMPER')) mark = 'X';
+      if (oi === 1 && input.includes('FLOW')) mark = 'X';
+      if (oi === 5 && input.includes('DUCT')) mark = 'X';
+      if (oi === 4 && (input.includes('SMOKE') || input.includes('PULL'))) mark = 'X';
+      if (mark) { setFont(doc, 5, 'bold', [185, 28, 28]); doc.text(mark, ox, sy + 3.5, { align: 'center' }); }
+    });
+    sy += rowH;
+  });
+  sy += 2;
+
+  // Notes below matrix
+  setFont(doc, 4.5, 'italic', C_GRAY);
+  doc.text('PROVIDE BYPASS SWITCHES AS REQUIRED MAINTAINING FIRE ALARM SYSTEM DURING MAINTENANCE AND ANNUAL INSPECTION.', x + 2, sy + 3, { maxWidth: w - 4 });
+}
+
+function drawBatteryCalcBlock(doc, x, y, w, h, devices, meta) {
+  const batt = calculateBatterySizing(devices.length);
+  const nac = calculateNacLoading(devices);
+
+  doc.setFillColor(30, 41, 59); doc.rect(x, y, w, 7, 'F');
+  setFont(doc, 7, 'bold', C_WHITE);
+  doc.text('SECONDARY POWER / BATTERY CALCULATION', x + w / 2, y + 5, { align: 'center' });
+
+  let by = y + 9;
+  const rows = [
+    ['Total Addressable Devices', String(devices.length)],
+    ['System Standby Current (mA)', String(batt.standby_current_mA)],
+    ['System Alarm Current (mA)', String(batt.alarm_current_mA)],
+    ['Standby Requirement (24 hr)', `${batt.standby_Ah} Ah`],
+    ['Alarm Requirement (5 min)', `${batt.alarm_Ah} Ah`],
+    ['Subtotal Raw Ah', `${batt.raw_Ah} Ah`],
+    ['× 1.20 Derating (NFPA 72 §10.6.7)', `${batt.required_Ah} Ah`],
+    ['SELECTED BATTERY SIZE', batt.recommended_batteries],
+  ];
+  rows.forEach(([lbl, val], i) => {
+    const isFinal = i === rows.length - 1;
+    doc.setFillColor(isFinal ? 254 : (i % 2 === 0 ? 252 : 248), isFinal ? 243 : 250, isFinal ? 199 : 252);
+    doc.rect(x, by, w, 5.5, 'F');
+    doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.1); doc.line(x, by + 5.5, x + w, by + 5.5);
+    setFont(doc, 5, 'normal', C_GRAY); doc.text(lbl, x + 2, by + 3.8);
+    setFont(doc, 5, isFinal ? 'bold' : 'normal', isFinal ? [22, 163, 74] : C_DARK);
+    doc.text(String(val), x + w - 2, by + 3.8, { align: 'right' });
+    by += 5.5;
+  });
+
+  by += 3;
+  if (by < y + h - 15) {
+    doc.setFillColor(254, 243, 199); doc.rect(x, by, w, 7, 'FD'); doc.setDrawColor(217, 119, 6); doc.rect(x, by, w, 7, 'S');
+    setFont(doc, 6, 'bold', [146, 64, 14]);
+    doc.text('AUDIBLE — TEMPORAL CODE-3', x + 2, by + 4.5);
+    by += 9;
+    setFont(doc, 5, 'normal', C_DARK);
+    doc.splitTextToSize('Emergency Evacuation Signal (Temporal Code 3) per NFPA 72 §18.4.2 unless alternate listing applies.', w - 4)
+      .forEach(ln => { doc.text(ln, x + 2, by + 3); by += 3.5; });
+  }
+
+  // NAC summary
+  by += 3;
+  if (by < y + h - 8) {
+    setFont(doc, 5.5, 'bold', C_DARK);
+    doc.text('NAC LOADING SUMMARY:', x + 2, by + 3); by += 5;
+    nac.slice(0, 4).forEach(c => {
+      setFont(doc, 4.5, 'normal', C_DARK);
+      doc.text(`${c.circuit}: ${c.device_count} devices, ${c.total_current_mA} mA (${c.percent_of_rating}% of ${c.rated_current_A * 1000} mA rated) — ${c.compliant ? 'OK' : 'SPLIT'}`, x + 2, by + 3);
+      by += 4;
+    });
+  }
+}
+
+function drawOneLineRiser(doc, x, y, w, h, project, devices) {
+  doc.setFillColor(15, 23, 42); doc.rect(x, y, w, 8, 'F');
+  setFont(doc, 8, 'bold', C_WHITE);
+  doc.text('FIRE ALARM SYSTEM ONE-LINE DIAGRAM', x + w / 2, y + 5.5, { align: 'center' });
 
   const numFloors = project?.num_floors || 1;
-  const FACP_Y = y + h - 40;
-  const riserX = x + 22;
-  const floorSpacing = Math.min(60, (FACP_Y - y - 20) / numFloors);
+  const byFloor = {};
+  for (let f = 1; f <= numFloors; f++) byFloor[f] = [];
+  (devices || []).forEach(d => { const f = Number(d.floor) || 1; if (!byFloor[f]) byFloor[f] = []; byFloor[f].push(d); });
 
-  // Vertical riser line
-  doc.setDrawColor(...C.black);
-  doc.setLineWidth(1.0);
-  doc.line(riserX, y + 5, riserX, FACP_Y);
+  const drawArea = { x: x + 4, y: y + 10, w: w - 8, h: h - 12 };
+  const riserX = drawArea.x + 18;
+  const facpY = drawArea.y + drawArea.h - 22;
+  const topY = drawArea.y + 8;
 
   // FACP box
-  doc.setFillColor(254, 226, 226);
-  doc.setDrawColor(...C.red);
-  doc.setLineWidth(0.5);
-  doc.rect(riserX - 22, FACP_Y, 44, 16, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
-  doc.setTextColor(...C.red);
-  doc.text('FACP', riserX, FACP_Y + 9, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(4.8);
-  doc.setTextColor(...C.darkGray);
-  doc.text('NEW F.A. CONTROL PANEL', riserX, FACP_Y + 13.5, { align: 'center' });
+  doc.setFillColor(185, 28, 28); doc.rect(riserX - 18, facpY, 36, 14, 'F');
+  doc.setDrawColor(127, 29, 29); doc.setLineWidth(0.4); doc.rect(riserX - 18, facpY, 36, 14, 'S');
+  setFont(doc, 7, 'bold', C_WHITE);
+  doc.text('FACP', riserX, facpY + 7, { align: 'center' });
+  setFont(doc, 5, 'normal', [200, 220, 255]);
+  doc.text(project?.name ? project.name.slice(0, 20) : 'Fire Alarm Control Panel', riserX, facpY + 11, { align: 'center' });
 
-  // Power feed to FACP
-  doc.setDrawColor(...C.black);
-  doc.setLineWidth(0.35);
-  doc.line(riserX, FACP_Y + 16, riserX, FACP_Y + 22);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(4.5);
-  doc.setTextColor(...C.darkGray);
-  doc.text('DEDICATED 120V CIRCUIT', riserX + 3, FACP_Y + 20);
+  // Main riser trunk
+  doc.setDrawColor(...C_DARK); doc.setLineWidth(1.2);
+  doc.line(riserX, facpY, riserX, topY);
 
-  // Floor branches
-  const byFloor = {};
-  devices.forEach(d => {
-    const f = Number(d.floor) || 1;
-    if (!byFloor[f]) byFloor[f] = [];
-    byFloor[f].push(d);
-  });
-
-  for (let fl = numFloors; fl >= 1; fl--) {
-    const idx = numFloors - fl;
-    const fy = y + 10 + idx * floorSpacing;
-    const devs = byFloor[fl] || [];
-    const slcDevs = devs.filter(d => ['smoke_detector', 'heat_detector', 'pull_station', 'duct_detector', 'waterflow_switch', 'valve_tamper', 'co_detector', 'monitor_module', 'control_module', 'door_holder', 'elevator_recall'].includes(d.type));
-    const nacDevs = devs.filter(d => ['horn_strobe', 'strobe', 'speaker', 'horn'].includes(d.type));
+  // Per-floor branches
+  const floorH = (facpY - topY - 8) / Math.max(numFloors, 1);
+  for (let f = 1; f <= numFloors; f++) {
+    const floorIdx = numFloors - f; // bottom = floor 1
+    const fy = topY + floorIdx * floorH + 4;
+    const devs = byFloor[f] || [];
+    const slcDevs = devs.filter(d => !['horn_strobe','horn','strobe','speaker'].includes(d.type));
+    const nacDevs = devs.filter(d => ['horn_strobe','horn','strobe','speaker'].includes(d.type));
 
     // Floor label box
-    doc.setFillColor(30, 41, 59);
-    doc.setDrawColor(30, 41, 59);
-    doc.rect(riserX - 8, fy - 5, 16, 10, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6);
-    doc.setTextColor(...C.white);
-    doc.text(String(fl), riserX, fy + 2, { align: 'center' });
+    doc.setFillColor(30, 41, 59); doc.rect(riserX - 10, fy - 5, 20, 10, 'F');
+    setFont(doc, 6, 'bold', C_WHITE);
+    doc.text(String(f), riserX, fy + 1.5, { align: 'center' });
 
-    // SLC branch
+    const branchX = riserX + 12;
+
+    // SLC branch (up)
     if (slcDevs.length > 0) {
-      const branchY = fy - 8;
-      doc.setDrawColor(37, 99, 235);
-      doc.setLineWidth(0.5);
-      doc.line(riserX, fy, riserX + 12, fy);
-      doc.line(riserX + 12, fy, riserX + 12, branchY);
-      doc.line(riserX + 12, branchY, riserX + w * 0.7, branchY);
+      const slcY = fy - 14;
+      doc.setDrawColor(...C_BLUE); doc.setLineWidth(0.5);
+      doc.line(riserX, fy - 5, branchX, fy - 5);
+      doc.line(branchX, fy - 5, branchX, slcY);
 
-      // Device symbols on SLC branch
-      const step = Math.min(18, (w * 0.7 - riserX - 16) / Math.max(slcDevs.length, 1));
-      slcDevs.slice(0, 12).forEach((d, i) => {
-        const dx = riserX + 18 + i * step;
-        _drawRiserDeviceSymbol(doc, dx, branchY, d.type, d.label);
-      });
+      // Device groups
+      const slcText = formatDeviceSummary(slcDevs);
+      doc.setFillColor(...C_LTBLUE); doc.rect(branchX + 2, slcY - 4, w * 0.55, 8, 'F');
+      doc.setDrawColor(...C_BLUE); doc.setLineWidth(0.2); doc.rect(branchX + 2, slcY - 4, w * 0.55, 8, 'S');
+      setFont(doc, 5, 'bold', C_BLUE);
+      doc.text(`SLC-${f} · INITIATING DEVICES`, branchX + 4, slcY - 1);
+      setFont(doc, 4.5, 'normal', C_DARK);
+      doc.text(slcText.slice(0, 80), branchX + 4, slcY + 2.5);
 
-      // EOL resistor
-      const eolX = riserX + 18 + Math.min(slcDevs.length, 12) * step + 4;
-      if (eolX < x + w - 20) {
-        doc.setDrawColor(37, 99, 235);
-        doc.setLineWidth(0.3);
-        doc.rect(eolX - 3, branchY - 3, 6, 6, 'S');
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(3.8);
-        doc.setTextColor(37, 99, 235);
-        doc.text('EOL', eolX, branchY + 1, { align: 'center' });
-      }
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(4.8);
-      doc.setTextColor(37, 99, 235);
-      doc.text(`SLC-${fl} (${slcDevs.length} devices)`, riserX + 14, branchY - 3);
+      // EOL box
+      const eolX = branchX + 2 + w * 0.55 + 2;
+      doc.setDrawColor(...C_BLUE); doc.setLineWidth(0.3);
+      doc.rect(eolX, slcY - 2, 12, 6, 'S');
+      setFont(doc, 4, 'bold', C_BLUE);
+      doc.text('EOL', eolX + 6, slcY + 2, { align: 'center' });
     }
 
-    // NAC branch
+    // NAC branch (down)
     if (nacDevs.length > 0) {
-      const nacY = fy + 8;
-      doc.setDrawColor(234, 88, 12);
-      doc.setLineWidth(0.5);
-      doc.line(riserX, fy, riserX + 12, fy);
-      doc.line(riserX + 12, fy, riserX + 12, nacY);
-      doc.line(riserX + 12, nacY, riserX + w * 0.7, nacY);
+      const nacY = fy + 12;
+      doc.setDrawColor(...C_ORANGE); doc.setLineWidth(0.5);
+      doc.line(riserX, fy + 5, branchX, fy + 5);
+      doc.line(branchX, fy + 5, branchX, nacY);
 
-      const step = Math.min(18, (w * 0.7 - riserX - 16) / Math.max(nacDevs.length, 1));
-      nacDevs.slice(0, 10).forEach((d, i) => {
-        const dx = riserX + 18 + i * step;
-        _drawRiserDeviceSymbol(doc, dx, nacY, d.type, d.label);
-      });
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(4.8);
-      doc.setTextColor(234, 88, 12);
-      doc.text(`NAC-${fl} (${nacDevs.length} devices)`, riserX + 14, nacY + 7);
+      const nacText = formatDeviceSummary(nacDevs);
+      doc.setFillColor(...C_LTORANGE); doc.rect(branchX + 2, nacY - 1, w * 0.55, 8, 'F');
+      doc.setDrawColor(...C_ORANGE); doc.setLineWidth(0.2); doc.rect(branchX + 2, nacY - 1, w * 0.55, 8, 'S');
+      setFont(doc, 5, 'bold', C_ORANGE);
+      doc.text(`NAC-${f} · NOTIFICATION DEVICES`, branchX + 4, nacY + 2);
+      setFont(doc, 4.5, 'normal', C_DARK);
+      doc.text(nacText.slice(0, 80), branchX + 4, nacY + 5.5);
     }
 
-    // Floor divider
-    doc.setDrawColor(...C.lightGray);
-    doc.setLineWidth(0.15);
-    doc.line(x + 2, fy + floorSpacing - 4, x + w - 2, fy + floorSpacing - 4);
+    // Horizontal divider
+    doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.15);
+    doc.line(drawArea.x, fy + floorH - 2, drawArea.x + drawArea.w, fy + floorH - 2);
   }
 
-  // Riser legend
-  const legX = x + w - 55;
-  const legY = y + 5;
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(...C.lightGray);
-  doc.setLineWidth(0.2);
-  doc.rect(legX, legY, 53, 38, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5);
-  doc.setTextColor(...C.darkGray);
-  doc.text('RISER LEGEND', legX + 26.5, legY + 5, { align: 'center' });
-  const legendItems = [
-    { color: [37, 99, 235], label: 'SLC — Addressable Initiating' },
-    { color: [234, 88, 12], label: 'NAC — Notification Appliance' },
-    { color: [185, 28, 28], label: 'FACP — Main Control Panel' },
-    { color: [30, 41, 59], label: 'Riser — Main signal conduit' },
-  ];
-  legendItems.forEach((item, i) => {
-    doc.setDrawColor(...item.color);
-    doc.setLineWidth(0.8);
-    doc.line(legX + 3, legY + 11 + i * 6, legX + 14, legY + 11 + i * 6);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(4.5);
-    doc.setTextColor(...C.darkGray);
-    doc.text(item.label, legX + 17, legY + 12 + i * 6);
-  });
+  // Riser diagram title label
+  const lblY = drawArea.y + drawArea.h + 3;
+  setFont(doc, 7, 'bold', C_DARK);
+  doc.text('\u25b3 FIRE ALARM SYSTEM ONE-LINE DIAGRAM', x + w / 2, lblY, { align: 'center' });
+  setFont(doc, 5.5, 'normal', C_GRAY);
+  doc.text(`NFPA 72 §7.3.1 · ${devices.length} devices total`, x + w / 2, lblY + 4, { align: 'center' });
 }
 
-function _drawRiserDeviceSymbol(doc, cx, cy, type, label) {
-  const symbolMap = {
-    smoke_detector: { color: [37, 99, 235], sym: 'S', shape: 'circle' },
-    heat_detector: { color: [217, 119, 6], sym: 'H', shape: 'circle' },
-    pull_station: { color: [220, 38, 38], sym: 'PS', shape: 'square' },
-    horn_strobe: { color: [234, 88, 12], sym: 'H/S', shape: 'hex' },
-    strobe: { color: [124, 58, 237], sym: 'CD', shape: 'circle' },
-    speaker: { color: [8, 145, 178], sym: 'SP', shape: 'circle' },
-    duct_detector: { color: [79, 70, 229], sym: 'D', shape: 'rect' },
-    waterflow_switch: { color: [5, 150, 105], sym: 'WF', shape: 'diamond' },
-    valve_tamper: { color: [13, 148, 136], sym: 'VS', shape: 'diamond' },
-    monitor_module: { color: [15, 118, 110], sym: 'MM', shape: 'diamond' },
-    control_module: { color: [71, 85, 105], sym: 'CM', shape: 'rect' },
-    door_holder: { color: [220, 38, 38], sym: 'DH', shape: 'square' },
-    elevator_recall: { color: [124, 58, 237], sym: 'ER', shape: 'circle' },
+function formatDeviceSummary(devs) {
+  const counts = {};
+  devs.forEach(d => {
+    const lbl = deviceShortLabel(d.type);
+    counts[lbl] = (counts[lbl] || 0) + 1;
+  });
+  return Object.entries(counts).map(([k, v]) => `${v}× ${k}`).join('  ');
+}
+
+function deviceShortLabel(type) {
+  const m = {
+    smoke_detector: 'SD', heat_detector: 'HD', pull_station: 'MPS',
+    duct_detector: 'DD', horn_strobe: 'H/S', strobe: 'STR', speaker: 'SP',
+    horn: 'H', waterflow_switch: 'WF', valve_tamper: 'VS', co_detector: 'CO',
+    elevator_recall: 'ER', monitor_module: 'MM', control_module: 'CM',
+    door_holder: 'DH', facp: 'FACP',
   };
-  const s = symbolMap[type] || { color: [100, 116, 139], sym: '?', shape: 'circle' };
-  const r = 4.5;
-  doc.setDrawColor(...s.color);
-  doc.setFillColor(255, 255, 255);
-  doc.setLineWidth(0.5);
-  if (s.shape === 'circle') doc.circle(cx, cy, r, 'SD');
-  else if (s.shape === 'square') doc.rect(cx - r, cy - r, r * 2, r * 2, 'SD');
-  else if (s.shape === 'rect') doc.rect(cx - r * 1.5, cy - r * 0.7, r * 3, r * 1.4, 'SD');
-  else doc.circle(cx, cy, r, 'SD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(s.sym.length > 2 ? 3.5 : 4.5);
-  doc.setTextColor(...s.color);
-  doc.text(s.sym, cx, cy + 1.5, { align: 'center' });
-  // Label below
-  if (label) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(3.5);
-    doc.setTextColor(...C.medGray);
-    doc.text(String(label).slice(0, 8), cx, cy + r + 4, { align: 'center' });
-  }
+  return m[type] || type.slice(0, 4).toUpperCase();
 }
 
-function _drawRiserNotes(doc, x, y, w, h, analysisResults) {
-  _drawSectionHeader(doc, x, y, w, 'DIAGRAM NOTES', 5.5);
-  y += 8;
-  const notes = [
-    'CONTRACTOR TO PROVIDE ADDRESSABLE DEVICES TO FIRE ALARM BACKBONE WIRING AND CONNECTIONS TO ALARM PANEL FOR PROPER FIRE ALARM SYSTEM OPERATION. PROVIDE JUNCTION BOXES AND CONNECTIONS AS REQUIRED FOR COMPLETE OPERATIONAL SYSTEM.',
-    'PROVIDE TO PROVIDE DUAL RATED HIGH / LOW SENSITIVITY SETTINGS FOR ELEVATOR SHAFT TRIP CONTROL. FA-TO PROVIDES ADDRESSABLE MONITORING DEVICE TO FIRE ALARM CONTROL, CONTROL RELAY MODULE FOR ELEVATOR RECALL.',
-    'CONTRACTOR TO COORDINATE CONNECTION REQUIREMENTS WITH ELEVATOR SUPPLIER/CONTRACTOR PRIOR TO WORK.',
-    'CONTRACTOR TO PROVIDE CONDUIT WIRING AND CONNECTIONS TO ELEVATOR SYSTEM FOR COMPLETE OPERATION PER THE MANUFACTURER\'S INSTALLATION DOCUMENTS, ONLY THE SHAFT-TOP DEVICE CODES FOR MONITORING.',
-    'CONTRACTOR TO PROVIDE ADDRESSABLE MONITORING MODULE FOR EXISTING ELEVATOR SHAFT FIRE SPRINKLER TAMPER SWITCH.',
-  ];
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(4.8);
-  doc.setTextColor(...C.darkGray);
-  notes.forEach((note, i) => {
-    const lines = doc.splitTextToSize(`${i + 1}. ${note}`, w - 6);
-    lines.forEach(ln => { doc.text(ln, x + 3, y); y += 4.2; });
-    y += 1;
+function drawGeneralNotesSide(doc, x, y, w, h) {
+  doc.setFillColor(30, 41, 59); doc.rect(x, y, w, 7, 'F');
+  setFont(doc, 7, 'bold', C_WHITE);
+  doc.text('GENERAL REQUIREMENT NOTES', x + w / 2, y + 5, { align: 'center' });
+
+  let ny = y + 9;
+  GENERAL_NOTES_FA0.slice(0, 8).forEach((note, i) => {
+    if (ny > y + h - 6) return;
+    const lines = doc.splitTextToSize(`${i + 1}.  ${note}`, w - 6);
+    setFont(doc, 5, 'normal', C_DARK);
+    lines.slice(0, 3).forEach((ln, li) => { doc.text(ln, x + 3, ny + li * 3.5); });
+    ny += Math.min(lines.length, 3) * 3.5 + 2;
   });
 }
 
-function _drawSooBlock(doc, x, y, w, h, analysisResults, project) {
-  _drawSectionHeader(doc, x, y, w, 'SEQUENCE OF OPERATIONS (SUMMARY)', 5.5);
-  y += 8;
-  const rows = [
-    ['Smoke detector activation', 'General alarm, Evacuate, HVAC shutdown, Door release, Notify central station'],
-    ['Manual pull station activation', 'General alarm, Evacuate, Notify central station'],
-    ['Waterflow switch activation', 'General alarm, Notify central station'],
-    ['Valve tamper activation', 'Supervisory signal, Notify central station'],
-    ['Duct smoke detector activation', 'HVAC shutdown, supervisory, Notify'],
-    ['Elevator lobby smoke detector', 'Elevator recall to ground floor / alternate floor'],
-    ['All clear / system reset', 'Silence, reset devices, restore HVAC / elevators'],
-  ];
-  doc.setFillColor(220, 228, 240);
-  doc.rect(x, y, w, 5.5, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(4.8);
-  doc.setTextColor(...C.darkGray);
-  doc.text('INITIATING EVENT', x + 2, y + 4);
-  doc.text('SYSTEM RESPONSE', x + w * 0.45 + 2, y + 4);
-  y += 5.5;
-  rows.forEach((row, i) => {
-    const rh = 5.5;
-    doc.setFillColor(i % 2 === 0 ? 255 : 248, 250, 252);
-    doc.rect(x, y, w, rh, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(4.5);
-    doc.setTextColor(...C.darkGray);
-    doc.text(row[0].slice(0, 38), x + 2, y + rh * 0.72);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(30, 64, 175);
-    doc.text(row[1].slice(0, 60), x + w * 0.45 + 2, y + rh * 0.72);
-    y += rh;
-  });
-}
+// ─── Main entry point ────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────
-// Main entry: generate full construction drawing package
-// ─────────────────────────────────────────────────────────────────
-export export async function generateConstructionDrawingPdf({
+export async function runConstructionDrawingPdf({
   project,
-  devices,
+  devices = [],
   rooms = [],
+  layoutZones = [],
   wires = [],
   floorPlans = [],
   analysisResults,
   captureRef,
   canvasRef,
   activeFloor = 1,
-  meta = {},
+  submittalMeta = {},
+  sections = {},
 }) {
-  const reqs = analysisResults || project?.analysis_results || {};
+  const meta = { ...submittalMeta };
   const pName = project?.name || 'Fire Alarm System';
 
-  const sheetMeta = {
-    ...meta,
-    project_name: pName,
-    project_title: pName,
-    project_address: project?.address || '—',
-    owner_name: project?.owner_name || '—',
-  };
-
-  // Capture floor plan image at full resolution
+  // Capture the floor plan image
   let floorImgData = null;
   let floorImgDims = { width: 4, height: 3 };
 
-  const hi = captureRef?.current && typeof captureRef.current.getLayoutDataURL === 'function'
-    ? captureRef.current.getLayoutDataURL({
-        mimeType: 'image/png',
-        fitContent: true,
-        maxOutputEdge: 8192,
-        exportMarginPx: 48,
-        pixelRatio: 3,
-      })
-    : null;
-  if (hi) {
-    floorImgData = hi;
-  } else if (canvasRef?.current && typeof canvasRef.current.toDataURL === 'function') {
-    floorImgData = canvasRef.current.toDataURL('image/png');
-  }
+  const captureFloorPlan = async () => {
+    const hi = captureRef?.current && typeof captureRef.current.getLayoutDataURL === 'function'
+      ? captureRef.current.getLayoutDataURL({ mimeType: 'image/png', fitContent: true, maxOutputEdge: 8192, exportMarginPx: 48 })
+      : null;
+    if (hi) return hi;
+    return canvasRef?.current?.toDataURL?.('image/png') || null;
+  };
+
+  floorImgData = await captureFloorPlan();
   if (floorImgData) {
-    floorImgDims = await loadDataUrlImageSize(floorImgData);
+    floorImgDims = await new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth || 4, height: img.naturalHeight || 3 });
+      img.onerror = () => resolve({ width: 4, height: 3 });
+      img.src = floorImgData;
+    });
   }
 
-  // Create PDF with 36×24 landscape sheets
+  // Load logo
+  let logoDataUrl = null;
+  if (meta?.logo_data_url) {
+    logoDataUrl = meta.logo_data_url;
+  }
+
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [SHEET_W, SHEET_H] });
 
-  // ── Sheet 1: FA0.01 — Legend, Abbreviations, General Notes, Drawing Index ──
-  drawLegendSheet(doc, devices, sheetMeta, reqs);
-  drawRightTitleBlock(doc, sheetMeta, {
-    title: 'FIRE ALARM LEGEND\nAND GENERAL REQUIREMENTS',
-    number: 'FA0.01',
-    scale: 'NTS',
-  });
+  // ── Sheet 1: Legend / Abbreviations / General Notes / Drawing Index ──
+  await generateLegendSheet(doc, project, devices, meta, logoDataUrl);
 
-  // ── Sheet 2: FA5.01 — Floor Plan ──
+  // ── Sheet 2: Floor Plan ──
   doc.addPage([SHEET_W, SHEET_H], 'landscape');
-  drawFloorPlanSheet(doc, {
-    imgData: floorImgData,
-    imgWidth: floorImgDims.width,
-    imgHeight: floorImgDims.height,
-    project,
-    meta: sheetMeta,
-    activeFloor,
-    sheetNumber: 'FA5.01',
-    reqs,
-  });
+  await generateFloorPlanSheet(
+    doc, project, rooms, devices, layoutZones,
+    floorImgData, floorImgDims.width, floorImgDims.height,
+    activeFloor, meta, logoDataUrl, []
+  );
 
-  // ── Sheet 3: FA5.10 — One-Line Riser Diagram ──
+  // ── Sheet 3: System One-Line Riser + FACP I/O + Battery ──
   doc.addPage([SHEET_W, SHEET_H], 'landscape');
-  drawRiserDiagramSheet(doc, devices, project, sheetMeta, reqs);
+  await generateRiserSheet(doc, project, devices, analysisResults, meta, logoDataUrl);
 
-  const suffix = `Construction_Drawings_Floor${activeFloor}`;
-  doc.save(`${pName.replace(/\s+/g, '_')}_${suffix}.pdf`);
+  const fileName = `${(pName).replace(/\s+/g, '_')}_Construction_Drawings.pdf`;
+  doc.save(fileName);
 }
