@@ -156,7 +156,7 @@ export default function ProjectDesigner() {
   const markups = localMarkups ?? project?.markups ?? [];
   const layoutZones = localLayoutZones ?? project?.layout_zones ?? [];
   const documentWorkspace = localDocumentWorkspace ?? project?.document_workspace ?? null;
-  const planSheets = localPlanSheets ?? project?.plan_sheets ?? derivePlanSheets(floorPlans);
+  const planSheets = localPlanSheets ?? project?.plan_sheets ?? [];
   const planCategories = project?.plan_categories ?? [];
   const selectedSheet = planSheets.find(sheet => sheet.id === selectedSheetId) || planSheets[0] || null;
   const planTypes = useMemo(
@@ -1865,33 +1865,7 @@ function PlansPanel({
   );
 }
 
-function derivePlanSheets(floorPlans = []) {
-  const sheetsByKey = new Map();
-  floorPlans.forEach((plan) => {
-    if (plan.source === 'assigned_sheet') return;
-    const key = `${plan.file_url || plan.image_url}-${plan.page_number || 1}`;
-    if (!sheetsByKey.has(key)) {
-      sheetsByKey.set(key, {
-        id: plan.id || `sheet-existing-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        file_url: plan.file_url || plan.image_url,
-        file_type: plan.file_type || 'image/*',
-        file_name: plan.file_name || 'Floor plan',
-        page_number: plan.page_number || 1,
-        page_count: plan.page_count || 1,
-        preview_url: plan.rendered_image_url || (plan.file_type?.startsWith('image/') ? plan.image_url : ''),
-        title: plan.file_name || `Page ${plan.page_number || 1}`,
-        sheet_number: plan.sheet_number || '',
-        suggested_type: plan.plan_type || classifyPlanFromText(`${plan.file_name || ''} ${plan.sheet_text || ''}`),
-        plan_type: plan.plan_type || 'unassigned',
-        assigned_floor: plan.floor_number || '',
-        sheet_text: plan.sheet_text || '',
-        source: 'existing_floor_plan',
-        vision_analysis: plan.vision_analysis,
-      });
-    }
-  });
-  return Array.from(sheetsByKey.values()).sort((a, b) => Number(a.page_number || 0) - Number(b.page_number || 0));
-}
+
 
 function mergePlanSheets(existing = [], incoming = []) {
   const keyFor = (sheet) => `${sheet.file_url || sheet.file_name}-${sheet.page_number}`;
