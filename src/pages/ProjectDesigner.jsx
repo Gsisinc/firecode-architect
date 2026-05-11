@@ -141,9 +141,20 @@ export default function ProjectDesigner() {
     enabled: !!projectId,
   });
 
-  const rooms = localRooms ?? project?.rooms ?? [];
-  const storedDevices = localDevices ?? project?.devices ?? [];
-  const storedWires = localWires ?? project?.wires ?? [];
+  // ── Local backup safety net ──
+  // The Base44 entity layer can occasionally strip fields it does not yet have in
+  // its schema or fail a save silently. To make sure a user never has to re-upload
+  // drawings after a code-base refresh, mirror the latest server payload into
+  // localStorage and graft anything the server lost back onto the loaded project.
+  const projectBackup = useMemo(() => readProjectBackup(projectId), [projectId]);
+  const mergedProject = useMemo(
+    () => applyProjectBackup(project, projectBackup),
+    [project, projectBackup]
+  );
+
+  const rooms = localRooms ?? mergedProject?.rooms ?? [];
+  const storedDevices = localDevices ?? mergedProject?.devices ?? [];
+  const storedWires = localWires ?? mergedProject?.wires ?? [];
   const devices = useMemo(
     () => storedDevices.filter((d) => (d.discipline || 'fire_alarm') === disciplineId),
     [storedDevices, disciplineId]
@@ -152,12 +163,12 @@ export default function ProjectDesigner() {
     () => storedWires.filter((w) => (w.discipline || 'fire_alarm') === disciplineId),
     [storedWires, disciplineId]
   );
-  const floorPlans = localFloorPlans ?? project?.floor_plans ?? [];
-  const markups = localMarkups ?? project?.markups ?? [];
-  const layoutZones = localLayoutZones ?? project?.layout_zones ?? [];
-  const documentWorkspace = localDocumentWorkspace ?? project?.document_workspace ?? null;
-  const planSheets = localPlanSheets ?? project?.plan_sheets ?? [];
-  const planCategories = project?.plan_categories ?? [];
+  const floorPlans = localFloorPlans ?? mergedProject?.floor_plans ?? [];
+  const markups = localMarkups ?? mergedProject?.markups ?? [];
+  const layoutZones = localLayoutZones ?? mergedProject?.layout_zones ?? [];
+  const documentWorkspace = localDocumentWorkspace ?? mergedProject?.document_workspace ?? null;
+  const planSheets = localPlanSheets ?? mergedProject?.plan_sheets ?? [];
+  const planCategories = mergedProject?.plan_categories ?? [];
   const selectedSheet = planSheets.find(sheet => sheet.id === selectedSheetId) || planSheets[0] || null;
   const planTypes = useMemo(
     () =>
@@ -206,9 +217,21 @@ export default function ProjectDesigner() {
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
+    onMutate: (variables) => {
+      // Always snapshot the optimistic payload to localStorage before the network
+      // call so a server failure (or a code-base refresh) cannot wipe the project.
+      writeProjectBackup(projectId, variables);
+    },
     onSuccess: (_, _variables, context) => {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       if (context?.showToast) toast.success("Project saved");
+    },
+    onError: (error) => {
+      // Surface failures so users do not silently lose work — and so we have a
+      // chance to recover from the localStorage backup on next mount.
+      console.error("[ProjectDesigner] save failed", error);
+      const message = error?.response?.data?.message || error?.message || "Unknown error";
+      toast.error(`Save failed: ${message}. Changes are kept in your browser and will retry.`);
     },
   });
 
@@ -218,13 +241,13 @@ export default function ProjectDesigner() {
     latestRef.current = {
       localDevices, localRooms, localWires, localMarkups, localLayoutZones,
       localFloorPlans, localPlanSheets, localDocumentWorkspace, analysisResults,
-      projectRooms: project?.rooms, projectDevices: project?.devices,
-      projectMarkups: project?.markups, projectLayoutZones: project?.layout_zones,
-      projectFloorPlans: project?.floor_plans, projectPlanSheets: project?.plan_sheets,
-      projectPlanCategories: project?.plan_categories, projectDocumentWorkspace: project?.document_workspace,
-      projectWires: project?.wires, projectId: project?.id,
+      projectRooms: mergedProject?.rooms, projectDevices: mergedProject?.devices,
+      projectMarkups: mergedProject?.markups, projectLayoutZones: mergedProject?.layout_zones,
+      projectFloorPlans: mergedProject?.floor_plans, projectPlanSheets: mergedProject?.plan_sheets,
+      projectPlanCategories: mergedProject?.plan_categories, projectDocumentWorkspace: mergedProject?.document_workspace,
+      projectWires: mergedProject?.wires, projectId: project?.id,
     };
-  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, localPlanSheets, localDocumentWorkspace, analysisResults, project]);
+  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, localPlanSheets, localDocumentWorkspace, analysisResults, mergedProject, project?.id]);
 
   useEffect(() => {
     const hasLocalChanges =
@@ -233,7 +256,9 @@ export default function ProjectDesigner() {
       localWires !== null ||
       localMarkups !== null ||
       localLayoutZones !== null ||
-      localFloorPlans !== null;
+      localFloorPlans !== null ||
+      localPlanSheets !== null ||
+      localDocumentWorkspace !== null;
 
     // Never auto-save until project has loaded from server
     if (!hasLocalChanges || !project?.id || isLoading) return;
@@ -242,9 +267,9 @@ export default function ProjectDesigner() {
     autoSaveTimerRef.current = setTimeout(() => {
       const l = latestRef.current;
       // Only save if there are actual local changes to avoid clearing data
-      const hasLocalChanges = l.localDevices || l.localRooms || l.localWires || l.localMarkups || l.localLayoutZones || l.localFloorPlans || l.localPlanSheets || l.localDocumentWorkspace;
-      if (!hasLocalChanges) return;
-      
+      const hasPendingChanges = l.localDevices || l.localRooms || l.localWires || l.localMarkups || l.localLayoutZones || l.localFloorPlans || l.localPlanSheets || l.localDocumentWorkspace;
+      if (!hasPendingChanges) return;
+
       saveMutation.mutate({
         rooms: l.localRooms ?? l.projectRooms ?? [],
         devices: l.localDevices ?? l.projectDevices ?? [],
@@ -261,7 +286,7 @@ export default function ProjectDesigner() {
     }, 2000);
 
     return () => clearTimeout(autoSaveTimerRef.current);
-  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, isLoading]);
+  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, localPlanSheets, localDocumentWorkspace, isLoading]);
 
   // ── Flush any pending saves before unmount (e.g., during publish) ──
   useEffect(() => {
@@ -1916,6 +1941,91 @@ function upsertFloorPlan(floorPlans = [], plan) {
   if (idx >= 0) next[idx] = { ...next[idx], ...plan };
   else next.push(plan);
   return next;
+}
+
+// ── Local backup of the project payload ──
+// Why: the Base44 entity layer can drop fields it does not yet have in its schema
+// (and any save can fail). To make sure a user never loses uploaded drawings,
+// imported plan sheets, layout zones, etc. after a code-base refresh, we mirror
+// every save attempt into localStorage and graft missing fields back onto the
+// server-loaded project the next time it mounts.
+const BACKUP_KEYS = [
+  'rooms', 'devices', 'wires', 'markups', 'layout_zones',
+  'floor_plans', 'plan_sheets', 'plan_categories',
+  'document_workspace', 'analysis_results',
+];
+const BACKUP_STORAGE_KEY = (projectId) => `firecode_project_backup_${projectId || ''}`;
+
+function readProjectBackup(projectId) {
+  if (!projectId || typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(BACKUP_STORAGE_KEY(projectId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch (error) {
+    console.warn('[ProjectDesigner] failed to read project backup', error);
+    return null;
+  }
+}
+
+function writeProjectBackup(projectId, payload) {
+  if (!projectId || typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const subset = {};
+    BACKUP_KEYS.forEach((key) => {
+      if (payload[key] !== undefined) subset[key] = payload[key];
+    });
+    subset.__updatedAt = new Date().toISOString();
+    window.localStorage.setItem(BACKUP_STORAGE_KEY(projectId), JSON.stringify(subset));
+  } catch (error) {
+    // localStorage can throw on quota exceeded (e.g. base64 PDF blob in floor_plans).
+    // Strip the largest fields and try a slim backup before giving up.
+    try {
+      const slim = {};
+      BACKUP_KEYS.forEach((key) => {
+        if (payload[key] === undefined) return;
+        if (key === 'plan_sheets' || key === 'floor_plans') {
+          slim[key] = (payload[key] || []).map((entry) => {
+            const copy = { ...entry };
+            // Drop oversize data-url previews; the canvas can re-render PDF pages on demand.
+            if (typeof copy.preview_url === 'string' && copy.preview_url.startsWith('data:')) copy.preview_url = '';
+            if (typeof copy.rendered_image_url === 'string' && copy.rendered_image_url.startsWith('data:')) copy.rendered_image_url = '';
+            return copy;
+          });
+        } else {
+          slim[key] = payload[key];
+        }
+      });
+      slim.__updatedAt = new Date().toISOString();
+      window.localStorage.setItem(BACKUP_STORAGE_KEY(projectId), JSON.stringify(slim));
+    } catch (secondary) {
+      console.warn('[ProjectDesigner] failed to write project backup', secondary);
+    }
+  }
+}
+
+function isMissing(value) {
+  if (value == null) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0;
+  return false;
+}
+
+function applyProjectBackup(project, backup) {
+  if (!project || !backup) return project;
+  const merged = { ...project };
+  BACKUP_KEYS.forEach((key) => {
+    // Only graft from the backup when the server has nothing for that field.
+    // This lets a fresh server load win whenever it actually has data, but
+    // restores anything the server dropped (typically schema-stripped fields
+    // like plan_sheets / layout_zones / document_workspace).
+    if (isMissing(merged[key]) && !isMissing(backup[key])) {
+      merged[key] = backup[key];
+    }
+  });
+  return merged;
 }
 
 function DocumentWorkspaceLoading() {

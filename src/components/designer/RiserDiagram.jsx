@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { generateRiserDiagram } from '@/lib/codeEngine';
 
 const DEVICE_COLORS = {
   monitor_module: '#0f766e',

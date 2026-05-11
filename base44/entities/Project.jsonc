@@ -1,6 +1,7 @@
 {
   "name": "Project",
   "type": "object",
+  "additionalProperties": true,
   "properties": {
     "name": {
       "type": "string",
@@ -43,6 +44,7 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": true,
         "properties": {
           "floor": {
             "type": "number"
@@ -57,6 +59,7 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": true,
         "properties": {
           "floor": {
             "type": "number"
@@ -99,10 +102,12 @@
     },
     "equipment_specs": {
       "type": "object",
+      "additionalProperties": true,
       "description": "Optional manufacturer/model/CSFM per device type key (smoke_detector, facp, …) for submittal legend"
     },
     "submittal_meta": {
       "type": "object",
+      "additionalProperties": true,
       "description": "AHJ submittal fields: scope_of_work, contractor_license, monitoring_notes, drawn_by, checked_by, project_number (optional keys; used on FA-0 title block and monitoring strip)"
     },
     "elevator_count": {
@@ -124,13 +129,185 @@
     },
     "floor_plans": {
       "type": "array",
+      "description": "Active drawing-canvas backgrounds. Each entry binds a floor (and plan_type) to an uploaded image/PDF URL, optional rendered preview, and persisted scale calibration metadata. Items intentionally permissive (additionalProperties: true) so future fields are not silently stripped on save.",
       "items": {
         "type": "object",
+        "additionalProperties": true,
         "properties": {
           "floor_number": {
             "type": "number"
           },
           "image_url": {
+            "type": "string"
+          },
+          "file_url": {
+            "type": "string"
+          },
+          "file_type": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "page_number": {
+            "type": "number"
+          },
+          "page_count": {
+            "type": "number"
+          },
+          "rendered_image_url": {
+            "type": "string"
+          },
+          "plan_type": {
+            "type": "string"
+          },
+          "sheet_id": {
+            "type": "string"
+          },
+          "sheet_text": {
+            "type": "string"
+          },
+          "px_per_ft": {
+            "type": "number"
+          },
+          "scale_source": {
+            "type": "string"
+          },
+          "scale_candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "scale_updated_at": {
+            "type": "string"
+          },
+          "manual_calibration": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "building_bounds": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "plan_sheets": {
+      "type": "array",
+      "description": "Imported PDF/image sheet roster used by the Plans tab. Each sheet may be assigned to a floor and/or tagged with a plan_type. Persisting these is what allows users to come back after a refresh and still see their imported sheets ready for assignment.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "file_url": {
+            "type": "string"
+          },
+          "file_type": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "page_number": {
+            "type": "number"
+          },
+          "page_count": {
+            "type": "number"
+          },
+          "preview_url": {
+            "type": "string"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "sheet_number": {
+            "type": "string"
+          },
+          "suggested_type": {
+            "type": "string"
+          },
+          "plan_type": {
+            "type": "string"
+          },
+          "assigned_floor": {},
+          "sheet_text": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "uploaded_at": {
+            "type": "string"
+          },
+          "vision_analysis": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "plan_categories": {
+      "type": "array",
+      "description": "User-defined plan-type tags (Electrical, Fixture Plan, Reflected Ceiling, etc.) seeded by the Plans tab so they show up next session.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "layout_zones": {
+      "type": "array",
+      "description": "Rack/aisle/obstruction/no-device zones drawn inside sales floors. Used by auto-place to avoid obstructed areas; must persist or users have to redraw every refresh.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "floor": {
+            "type": "number"
+          },
+          "zone_type": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "blocks_placement": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
             "type": "string"
           }
         }
@@ -138,12 +315,14 @@
     },
     "analysis_results": {
       "type": "object",
+      "additionalProperties": true,
       "description": "Code analysis engine output"
     },
     "rooms": {
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": true,
         "properties": {
           "id": {
             "type": "string"
@@ -185,6 +364,7 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": true,
         "properties": {
           "id": {
             "type": "string"
@@ -196,6 +376,9 @@
             "type": "string"
           },
           "subtype": {
+            "type": "string"
+          },
+          "discipline": {
             "type": "string"
           },
           "x": {
@@ -216,6 +399,9 @@
           "circuit": {
             "type": "string"
           },
+          "circuit_type": {
+            "type": "string"
+          },
           "candela": {
             "type": "number"
           },
@@ -227,6 +413,27 @@
           },
           "room_id": {
             "type": "string"
+          },
+          "installation_status": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "installation_hours": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "generated_by": {
+            "type": "string"
+          },
+          "nfpa_symbol_reference": {
+            "type": "string"
           }
         }
       }
@@ -236,6 +443,7 @@
       "description": "Bluebeam-style canvas markups, measurements, and takeoff annotations",
       "items": {
         "type": "object",
+        "additionalProperties": true,
         "properties": {
           "id": {
             "type": "string"
@@ -289,6 +497,7 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": true,
         "properties": {
           "id": {
             "type": "string"
@@ -330,35 +539,45 @@
       "type": "array",
       "description": "Uploaded drawing sheets and PDF/image document records",
       "items": {
-        "type": "object"
+        "type": "object",
+        "additionalProperties": true
       }
     },
     "document_sets": {
       "type": "array",
       "description": "Ordered drawing packages with revisions and sheet membership",
       "items": {
-        "type": "object"
+        "type": "object",
+        "additionalProperties": true
       }
+    },
+    "document_workspace": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Persisted document-engine workspace (documents, sets, permissions, collaboration sessions, batch jobs) for the Documents tab."
     },
     "permissions": {
       "type": "array",
       "description": "Per-user project/document permissions",
       "items": {
-        "type": "object"
+        "type": "object",
+        "additionalProperties": true
       }
     },
     "collaboration_sessions": {
       "type": "array",
       "description": "Review sessions, comments, and audit records",
       "items": {
-        "type": "object"
+        "type": "object",
+        "additionalProperties": true
       }
     },
     "batch_jobs": {
       "type": "array",
       "description": "Queued and completed batch document operations",
       "items": {
-        "type": "object"
+        "type": "object",
+        "additionalProperties": true
       }
     },
     "wires": {
@@ -366,6 +585,7 @@
       "description": "Manual field wiring segments drawn between devices",
       "items": {
         "type": "object",
+        "additionalProperties": true,
         "properties": {
           "id": {
             "type": "string"
@@ -383,6 +603,12 @@
             "type": "string"
           },
           "circuit": {
+            "type": "string"
+          },
+          "circuit_type": {
+            "type": "string"
+          },
+          "discipline": {
             "type": "string"
           },
           "length_ft": {
