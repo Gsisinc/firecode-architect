@@ -1701,32 +1701,33 @@ function PlansPanel({
           </p>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {sheets.map((sheet) => (
-            <button
-              key={sheet.id}
-              onClick={() => onSelectSheet(sheet.id)}
-              className={`w-full rounded-lg border p-2 text-left transition-colors ${
-                selectedSheetId === sheet.id ? 'border-orange-400 bg-orange-50' : 'border-slate-200 bg-white hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex gap-2">
-                <div className="h-16 w-12 rounded border border-slate-200 bg-slate-100 flex items-center justify-center overflow-hidden">
-                  {sheet.preview_url ? <img src={sheet.preview_url} alt="" className="h-full w-full object-cover" /> : <span className="text-[10px] font-semibold text-slate-500">P{sheet.page_number}</span>}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-slate-900 truncate">{sheet.sheet_number || `Page ${sheet.page_number}`}</p>
-                  <p className="text-[11px] text-slate-500 truncate">{sheet.title || sheet.file_name || 'Imported sheet'}</p>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    {sheet.assigned_floor ? `Floor ${sheet.assigned_floor} · ${sheet.plan_type}` : `Unassigned · suggested ${sheet.suggested_type || 'Unknown'}`}
-                  </p>
-                </div>
-              </div>
-            </button>
-          ))}
-          {sheets.length === 0 && (
+          {sheets.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">
               Upload a PDF or image from the canvas tab to create selectable sheets.
             </div>
+          ) : (
+            sheets.map((sheet) => (
+              <button
+                key={sheet.id}
+                onClick={() => onSelectSheet(sheet.id)}
+                className={`w-full rounded-lg border p-2 text-left transition-colors ${
+                  selectedSheetId === sheet.id ? 'border-orange-400 bg-orange-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex gap-2">
+                  <div className="h-16 w-12 rounded border border-slate-200 bg-slate-100 flex items-center justify-center overflow-hidden shrink-0">
+                    {sheet.preview_url ? <img src={sheet.preview_url} alt="" className="h-full w-full object-cover" /> : <span className="text-[10px] font-semibold text-slate-500">P{sheet.page_number}</span>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-slate-900 truncate">{sheet.sheet_number || `Page ${sheet.page_number}`}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{sheet.title || sheet.file_name || 'Imported sheet'}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      {sheet.assigned_floor ? `Floor ${sheet.assigned_floor} · ${sheet.plan_type}` : `Unassigned · suggested ${sheet.suggested_type || 'Unknown'}`}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            ))
           )}
         </div>
       </aside>
@@ -1868,13 +1869,13 @@ function derivePlanSheets(floorPlans = []) {
   const sheetsByKey = new Map();
   floorPlans.forEach((plan) => {
     if (plan.source === 'assigned_sheet') return;
-    const key = `${plan.file_url || plan.image_url || plan.file_name}-${plan.page_number || 1}`;
+    const key = `${plan.file_url || plan.image_url}-${plan.page_number || 1}`;
     if (!sheetsByKey.has(key)) {
       sheetsByKey.set(key, {
-        id: `sheet-existing-${String(key).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40)}`,
+        id: plan.id || `sheet-existing-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         file_url: plan.file_url || plan.image_url,
         file_type: plan.file_type || 'image/*',
-        file_name: plan.file_name || 'Existing upload',
+        file_name: plan.file_name || 'Floor plan',
         page_number: plan.page_number || 1,
         page_count: plan.page_count || 1,
         preview_url: plan.rendered_image_url || (plan.file_type?.startsWith('image/') ? plan.image_url : ''),
@@ -1885,6 +1886,7 @@ function derivePlanSheets(floorPlans = []) {
         assigned_floor: plan.floor_number || '',
         sheet_text: plan.sheet_text || '',
         source: 'existing_floor_plan',
+        vision_analysis: plan.vision_analysis,
       });
     }
   });
