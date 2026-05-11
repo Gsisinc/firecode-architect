@@ -1799,7 +1799,12 @@ function PlansPanel({
                 >
                   Assign
                 </Button>
-                <Button variant="outline" onClick={() => onClearAssignment(selectedSheet)}>
+                <Button 
+                  variant="outline" 
+                  onClick={() => onClearAssignment(selectedSheet)}
+                  disabled={!!selectedSheet.assigned_floor}
+                  title={selectedSheet.assigned_floor ? "Cannot clear assigned sheets" : ""}
+                >
                   Clear
                 </Button>
               </div>
