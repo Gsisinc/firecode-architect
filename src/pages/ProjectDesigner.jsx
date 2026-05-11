@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan, Ruler, Clock } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan, Ruler } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -27,8 +27,6 @@ import RiserDiagram from "@/components/designer/RiserDiagram";
 import FireAlarmSimulation from "@/components/designer/FireAlarmSimulation";
 import MarkupsList from "@/components/designer/MarkupsList";
 import ScaleVerificationOverlay from "@/components/designer/ScaleVerificationOverlay";
-import TimeMachinePanel from "@/components/designer/TimeMachinePanel";
-import { saveSnapshot } from "@/lib/projectSnapshots";
 import { downloadDXF } from "@/lib/dxfExport";
 import {
   deriveDetectionGeometry,
@@ -120,7 +118,6 @@ export default function ProjectDesigner() {
   const [selectedCableType, setSelectedCableType] = useState('');
   const [selectedSheetId, setSelectedSheetId] = useState(null);
   const [showScaleVerify, setShowScaleVerify] = useState(false);
-  const [showTimeMachine, setShowTimeMachine] = useState(false);
 
   // ── Auto-save: debounce 2s after any local state change ──
   const autoSaveTimerRef = useRef(null);
@@ -238,17 +235,8 @@ export default function ProjectDesigner() {
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
-    onSuccess: (_, variables, context) => {
+    onSuccess: (_, _variables, context) => {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      // Save a local snapshot so the user can time-travel back
-      saveSnapshot(projectId, {
-        devices: variables.devices ?? [],
-        rooms: variables.rooms ?? [],
-        wires: variables.wires ?? [],
-        markups: variables.markups ?? [],
-        layout_zones: variables.layout_zones ?? [],
-        floor_plans: variables.floor_plans ?? [],
-      });
       if (context?.showToast) toast.success("Project saved");
     },
   });
@@ -836,16 +824,6 @@ Return only zones that are clearly the same kind of object. Do not include the o
     setLocalMarkups(markups.filter((markup) => markup.id !== markupId));
   };
 
-  const handleTimeMachineRestore = (snapshot) => {
-    setLocalDevices(snapshot.devices ?? []);
-    setLocalRooms(snapshot.rooms ?? []);
-    setLocalWires(snapshot.wires ?? []);
-    setLocalMarkups(snapshot.markups ?? []);
-    setLocalLayoutZones(snapshot.layout_zones ?? []);
-    if (snapshot.floor_plans?.length) setLocalFloorPlans(snapshot.floor_plans);
-    toast.success("Snapshot restored — click Save to make it permanent.");
-  };
-
   const handleRoomNameRequest = (rect) => {
     setPendingRoom(rect);
     setPendingRoomName('Room');
@@ -1344,7 +1322,6 @@ Return only zones that are clearly the same kind of object. Do not include the o
                     <ToolbarBtn onClick={() => downloadDXF(project, rooms, canvasDevices, activeFloor, { wires })} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
                     <ToolbarBtn onClick={() => setShowSubmittal(true)} icon={<BookOpen className="h-3 w-3" />} label="Submittal PDF" orange />
                     <ToolbarBtn active={showScaleVerify} onClick={() => setShowScaleVerify(v => !v)} icon={<Ruler className="h-3 w-3" />} label="Verify Scale" />
-                    <ToolbarBtn onClick={() => setShowTimeMachine(true)} icon={<Clock className="h-3 w-3" />} label="Time Machine" />
                   </div>
                 </div>
               </div>
@@ -1432,14 +1409,6 @@ Return only zones that are clearly the same kind of object. Do not include the o
           wires={wires}
           floorPlans={floorPlans}
           onClose={() => setShowBOM(false)}
-        />
-      )}
-
-      {showTimeMachine && (
-        <TimeMachinePanel
-          projectId={projectId}
-          onRestore={handleTimeMachineRestore}
-          onClose={() => setShowTimeMachine(false)}
         />
       )}
 
