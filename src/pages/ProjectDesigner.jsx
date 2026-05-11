@@ -445,25 +445,51 @@ Use decimal ratios (e.g. 0.184). Omit a field if unreadable.`,
     let pass2;
     try {
       pass2 = await base44.integrations.Core.InvokeLLM({
-        prompt: `Floor plan image is exactly ${imgW} pixels wide by ${imgH} pixels tall.
+        prompt: `You are analyzing a floor plan image that is exactly ${imgW} pixels wide by ${imgH} pixels tall.
 
-You MUST give each room box as NORMALIZED RATIOS (primary — required):
-  x1_ratio = left edge pixel x / ${imgW}
-  x2_ratio = right edge pixel x / ${imgW}
-  y1_ratio = top edge pixel y / ${imgH}
-  y2_ratio = bottom edge pixel y / ${imgH}
-Values must stay between 0 and 1. A garage spanning most of the sheet might have x1_ratio≈0.08 and x2_ratio≈0.55 — NOT tiny decimals unless the room is actually tiny.
+YOUR GOAL: Identify and return EVERY single labeled enclosed space on this floor plan — apartments, hotel rooms, offices, stairwells, corridors, bathrooms, mechanical rooms, storage rooms, laundry, lobbies, elevators, community rooms, kitchens — EVERYTHING with a label or room number.
 
-Reference building interior (ratios): left=${(buildingBounds.left / imgW).toFixed(4)}, top=${(buildingBounds.top / imgH).toFixed(4)}, right=${(buildingBounds.right / imgW).toFixed(4)}, bottom=${(buildingBounds.bottom / imgH).toFixed(4)}. Scale ≈ ${pxPerFt.toFixed(2)} px/ft.
+COORDINATE FORMAT — REQUIRED:
+Give NORMALIZED RATIOS (0.0 to 1.0) for each room bounding box:
+  x1_ratio = left wall pixel x / ${imgW}
+  x2_ratio = right wall pixel x / ${imgW}
+  y1_ratio = top wall pixel y / ${imgH}
+  y2_ratio = bottom wall pixel y / ${imgH}
 
-ROOMS — Every labeled enclosed space (kitchen, garage, bath, closet, etc.). One rectangle per label; walls hugging the room; do not merge two labels.
+DO NOT collapse multiple rooms into one box. Each label = one separate room object.
+DO NOT skip rooms just because they look small or repetitive (e.g. many identical apartment units must each get their own entry).
 
-Also set x1_px,y1_px,x2_px,y2_px = ratios × image size if you can (integers), for redundancy.
+Building interior reference (ratios): left=${(buildingBounds.left / imgW).toFixed(4)}, top=${(buildingBounds.top / imgH).toFixed(4)}, right=${(buildingBounds.right / imgW).toFixed(4)}, bottom=${(buildingBounds.bottom / imgH).toFixed(4)}.
+Detected scale: ${pxPerFt.toFixed(2)} px/ft.
 
-Layout zones: same ratio fields for aisles / racks / obstructions in open plans.
+For room_type, use the most specific type that matches:
+- Apartment / dwelling unit → "dwelling_unit"
+- Numbered rooms in residential buildings (e.g. "Room 101") → "dwelling_unit"  
+- Bedroom / sleeping room → "sleeping_room"
+- Stairway / stairwell / stair → "stairwell"
+- Elevator / lift → "elevator"
+- Lobby / foyer / entrance → "lobby"
+- Corridor / hallway → "corridor"
+- Bathroom / restroom / WC → "bathroom"
+- Kitchen / break room → "kitchen"
+- Laundry room → "laundry"
+- Community room / recreation → "community_room"
+- Common area / lounge → "common_area"
+- Office → "office"
+- Conference / meeting room → "conference_room"
+- Sales floor / retail → "sales_floor"
+- Storage room → "storage"
+- Mechanical room → "mechanical_room"
+- Electrical room → "electrical"
+- IT / telecom room → "it_room"
+- Janitor / utility closet → "janitor"
+- Garage / parking → "garage"
 
-Exclude title block, sheet border, and exterior parking.`,
+Also identify layout_zones for large open areas like rack rows, aisles, or obstructions.
+
+Exclude only: title block area, north arrows, sheet borders, and exterior areas outside the building walls.`,
         file_urls: [analysisImageUrl],
+        model: "claude_sonnet_4_6",
         response_json_schema: {
           type: "object",
           properties: {

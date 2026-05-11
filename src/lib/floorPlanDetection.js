@@ -4,20 +4,33 @@ const MAX_REASONABLE_SCALE = 250;
 const MIN_REASONABLE_SCALE = 0.5;
 
 const ROOM_TYPE_ALIASES = {
-  toilet: "bathroom",
-  restroom: "bathroom",
-  wc: "bathroom",
-  hall: "corridor",
-  hallway: "corridor",
-  mechanical: "mechanical_room",
-  mech: "mechanical_room",
-  electric: "mechanical_room",
-  electrical: "mechanical_room",
-  sales: "sales_floor",
-  retail: "sales_floor",
-  conference: "conference_room",
-  stairs: "stairwell",
-  stair: "stairwell",
+  // Residential
+  apartment: "dwelling_unit", unit: "dwelling_unit", apt: "dwelling_unit",
+  dwelling: "dwelling_unit", suite: "dwelling_unit",
+  bedroom: "sleeping_room", sleeping: "sleeping_room",
+  guest_room: "hotel_room", hotel: "hotel_room", motel: "hotel_room",
+  // Circulation
+  hall: "corridor", hallway: "corridor", passage: "corridor",
+  stairs: "stairwell", stair: "stairwell", stairway: "stairwell",
+  staircase: "stairwell", stairshaft: "stairwell",
+  lift: "elevator", elev: "elevator",
+  // Common areas
+  lounge: "common_area", amenity: "common_area",
+  recreation: "community_room", clubroom: "community_room", community: "community_room",
+  breakroom: "kitchen", break_room: "kitchen",
+  // Commercial
+  sales: "sales_floor", retail: "sales_floor", merchandise: "sales_floor",
+  backroom: "stockroom", warehouse: "stockroom",
+  // Service / Utility
+  toilet: "bathroom", restroom: "bathroom", wc: "bathroom", lavatory: "bathroom",
+  mechanical: "mechanical_room", mech: "mechanical_room", boiler: "mechanical_room",
+  electric: "electrical", electrical: "electrical",
+  telecom: "it_room", telephone: "it_room", it: "it_room", server: "it_room", data: "it_room",
+  janitor: "janitor", custodial: "janitor", closet: "janitor", utility: "janitor",
+  garage: "garage", parking: "garage",
+  // Conference / Lobby
+  conference: "conference_room", meeting: "conference_room", boardroom: "conference_room",
+  lobby: "lobby", foyer: "lobby", entrance: "lobby", reception: "lobby", vestibule: "lobby",
 };
 
 function asObject(value) {
@@ -315,14 +328,28 @@ export function deriveDetectionGeometry({ pass1, imgW, imgH, project, floor }) {
 function normalizeRoomType(rawType, name) {
   const value = String(rawType || name || "other").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   if (ROOM_TYPE_ALIASES[value]) return ROOM_TYPE_ALIASES[value];
-  if (value.includes("corridor") || value.includes("hall")) return "corridor";
-  if (value.includes("bath") || value.includes("toilet") || value.includes("restroom")) return "bathroom";
-  if (value.includes("mechanical") || value.includes("electric")) return "mechanical_room";
-  if (value.includes("storage")) return "storage";
+  // Keyword matching — order matters (most specific first)
   if (value.includes("stair")) return "stairwell";
-  if (value.includes("lobby") || value.includes("entrance")) return "lobby";
-  if (value.includes("conference")) return "conference_room";
-  if (value.includes("sales") || value.includes("retail")) return "sales_floor";
+  if (value.includes("elevator") || value.includes("lift")) return "elevator";
+  if (value.includes("dwelling") || value.includes("apartment") || value.includes("unit") || value.includes("apt")) return "dwelling_unit";
+  if (value.includes("bedroom") || value.includes("sleeping")) return "sleeping_room";
+  if (value.includes("hotel") || value.includes("motel") || value.includes("suite")) return "hotel_room";
+  if (value.includes("lobby") || value.includes("foyer") || value.includes("entrance") || value.includes("vestibule")) return "lobby";
+  if (value.includes("corridor") || value.includes("hall") || value.includes("passage")) return "corridor";
+  if (value.includes("bath") || value.includes("toilet") || value.includes("restroom") || value.includes("wc")) return "bathroom";
+  if (value.includes("laundry")) return "laundry";
+  if (value.includes("kitchen") || value.includes("break")) return "kitchen";
+  if (value.includes("community") || value.includes("recreation") || value.includes("clubroom")) return "community_room";
+  if (value.includes("common") || value.includes("lounge") || value.includes("amenity")) return "common_area";
+  if (value.includes("conference") || value.includes("meeting") || value.includes("board")) return "conference_room";
+  if (value.includes("sales") || value.includes("retail") || value.includes("merchandise")) return "sales_floor";
+  if (value.includes("stock") || value.includes("warehouse") || value.includes("backroom")) return "stockroom";
+  if (value.includes("garage") || value.includes("parking")) return "garage";
+  if (value.includes("electrical")) return "electrical";
+  if (value.includes("mechanical") || value.includes("boiler")) return "mechanical_room";
+  if (value.includes("telecom") || value.includes("telephone") || value.includes("server") || value.includes("data")) return "it_room";
+  if (value.includes("janitor") || value.includes("custodial") || value.includes("closet") || value.includes("utility")) return "janitor";
+  if (value.includes("storage")) return "storage";
   if (value.includes("office")) return "office";
   return value || "other";
 }
