@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Download, Loader2, FileText, Camera, Layout } from "lucide-react";
+import { X, Download, Loader2, FileText, Camera, Layout, Building2, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { runSubmittalPackagePdf } from "@/lib/submittalPackagePdf";
+import { generateConstructionDrawingPdf } from "@/lib/constructionDrawingPdf";
 
 const DEFAULT_FA0_META = {
   scope_of_work: "",
@@ -72,6 +73,7 @@ export default function SubmittalPackage({
   onSaveSubmittalMeta,
 }) {
   const [generating, setGenerating] = useState(false);
+  const [mode, setMode] = useState("construction"); // "construction" | "ahj"
   const [ahjCover, setAhjCover] = useState(true);
   const [submittalMeta, setSubmittalMeta] = useState(() => ({ ...DEFAULT_FA0_META }));
   useEffect(() => {
@@ -115,40 +117,50 @@ export default function SubmittalPackage({
   const toggleSection = (key) => setSections(s => ({ ...s, [key]: !s[key] }));
 
   const generate = async () => {
-    if (ahjCover) {
-      const missing = [];
-      if (!(project?.address || "").trim()) missing.push("Project address (project settings)");
-      if (!(submittalMeta.prepared_by || "").trim()) missing.push("Prepared by");
-      if (!(submittalMeta.scope_of_work || "").trim()) missing.push("Scope of work");
-      if (missing.length) {
-        window.alert(`Sheet FA-0 needs the following before generating:\n\n• ${missing.join("\n• ")}`);
-        return;
-      }
-      if (!(submittalMeta.site_map_image_data_url || "").trim()) {
-        const ok = window.confirm(
-          "No site map image was uploaded. FA-0 will show a text placeholder in the site location box. Continue?"
-        );
-        if (!ok) return;
-      }
-    }
     const packed = packSubmittalMetaForSave(submittalMeta);
     setGenerating(true);
     onSaveSubmittalMeta?.(packed);
     try {
-      await runSubmittalPackagePdf({
-        project,
-        devices,
-        rooms,
-        wires,
-        floorPlans,
-        analysisResults,
-        canvasRef,
-        captureRef,
-        sections,
-        ahjCover,
-        submittalMeta: packed,
-        activeFloor,
-      });
+      if (mode === "construction") {
+        await generateConstructionDrawingPdf({
+          project,
+          devices,
+          rooms,
+          wires,
+          floorPlans,
+          analysisResults,
+          canvasRef,
+          captureRef,
+          activeFloor,
+          meta: packed,
+        });
+      } else {
+        if (ahjCover) {
+          const missing = [];
+          if (!(project?.address || "").trim()) missing.push("Project address (project settings)");
+          if (!(packed.prepared_by || "").trim()) missing.push("Prepared by");
+          if (!(packed.scope_of_work || "").trim()) missing.push("Scope of work");
+          if (missing.length) {
+            window.alert(`Sheet FA-0 needs the following:\n\n• ${missing.join("\n• ")}`);
+            setGenerating(false);
+            return;
+          }
+        }
+        await runSubmittalPackagePdf({
+          project,
+          devices,
+          rooms,
+          wires,
+          floorPlans,
+          analysisResults,
+          canvasRef,
+          captureRef,
+          sections,
+          ahjCover,
+          submittalMeta: packed,
+          activeFloor,
+        });
+      }
     } finally {
       setGenerating(false);
     }
@@ -180,7 +192,7 @@ export default function SubmittalPackage({
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md flex flex-col">
+      <Card className="w-full max-w-xl flex flex-col">
         <CardHeader className="py-3 px-4 flex flex-row items-center justify-between shrink-0 border-b">
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-orange-500" />
@@ -192,6 +204,150 @@ export default function SubmittalPackage({
         </CardHeader>
 
         <CardContent className="p-4 space-y-4 max-h-[min(90vh,720px)] overflow-y-auto">
+
+          {/* Mode selector */}
+          <div className="rounded-lg border border-slate-200 p-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setMode("construction")}
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded px-3 py-2 text-xs font-semibold transition-colors ${mode === "construction" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+            >
+              <Building2 className="h-3.5 w-3.5" />
+              Construction Drawings
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("ahj")}
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded px-3 py-2 text-xs font-semibold transition-colors ${mode === "ahj" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              AHJ Submittal (legacy)
+            </button>
+          </div>
+
+          {mode === "construction" && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 space-y-3">
+              <p className="text-xs font-semibold text-blue-900">Construction Drawing Package</p>
+              <p className="text-[10px] text-blue-700 leading-snug">
+                Generates professional 36"×24" sheets: <strong>FA0.01</strong> Legend + Abbreviations + General Notes + Drawing Index, <strong>FA5.01</strong> Full Floor Plan (full-resolution, not a viewport screenshot), and <strong>FA5.10</strong> One-Line Riser Diagram. Right-side title block with stamp and logo area.
+              </p>
+
+              {/* Company logo */}
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-700 font-medium">Company Logo (right title block)</Label>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  className="text-xs h-8 file:mr-2 file:text-xs"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const reader = new FileReader();
+                    reader.onload = () => setSubmittalMeta(m => ({ ...m, logo_data_url: reader.result }));
+                    reader.readAsDataURL(f);
+                  }}
+                />
+                {submittalMeta.logo_data_url && (
+                  <div className="flex items-center gap-2">
+                    <img src={submittalMeta.logo_data_url} alt="logo" className="h-8 object-contain border rounded" />
+                    <Button type="button" variant="ghost" size="sm" className="text-[10px] h-6 px-2 text-red-500"
+                      onClick={() => setSubmittalMeta(m => ({ ...m, logo_data_url: "" }))}>Remove</Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Engineer stamp */}
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-700 font-medium">Engineer / Inspector Stamp (optional)</Label>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  className="text-xs h-8 file:mr-2 file:text-xs"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const reader = new FileReader();
+                    reader.onload = () => setSubmittalMeta(m => ({ ...m, stamp_data_url: reader.result }));
+                    reader.readAsDataURL(f);
+                  }}
+                />
+                {submittalMeta.stamp_data_url && (
+                  <div className="flex items-center gap-2">
+                    <img src={submittalMeta.stamp_data_url} alt="stamp" className="h-8 object-contain border rounded" />
+                    <Button type="button" variant="ghost" size="sm" className="text-[10px] h-6 px-2 text-red-500"
+                      onClick={() => setSubmittalMeta(m => ({ ...m, stamp_data_url: "" }))}>Remove</Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Company name */}
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-700">Company name (if no logo image)</Label>
+                <Input className="text-xs h-8" placeholder="e.g. ABC Fire Protection Inc."
+                  value={submittalMeta.company_name || ""}
+                  onChange={(e) => setSubmittalMeta(m => ({ ...m, company_name: e.target.value }))} />
+              </div>
+
+              {/* Title block fields */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-slate-700">Prepared by <span className="text-red-500">*</span></Label>
+                  <Input className="text-xs h-8" value={submittalMeta.prepared_by}
+                    onChange={(e) => setSubmittalMeta(m => ({ ...m, prepared_by: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-slate-700">Checked by</Label>
+                  <Input className="text-xs h-8" value={submittalMeta.checked_by}
+                    onChange={(e) => setSubmittalMeta(m => ({ ...m, checked_by: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-slate-700">Project #</Label>
+                  <Input className="text-xs h-8" value={submittalMeta.project_number}
+                    onChange={(e) => setSubmittalMeta(m => ({ ...m, project_number: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-slate-700">Date (blank = today)</Label>
+                  <Input className="text-xs h-8" placeholder="e.g. 05/10/2026" value={submittalMeta.submittal_date}
+                    onChange={(e) => setSubmittalMeta(m => ({ ...m, submittal_date: e.target.value }))} />
+                </div>
+              </div>
+
+              {/* Scope of work */}
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-700">Scope of work (optional override for general notes)</Label>
+                <Textarea className="text-xs min-h-[48px]" placeholder="e.g. New addressable fire alarm system…"
+                  value={submittalMeta.scope_of_work}
+                  onChange={(e) => setSubmittalMeta(m => ({ ...m, scope_of_work: e.target.value }))} />
+              </div>
+
+              {/* Drawing index */}
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-700">Drawing index (one line per sheet)</Label>
+                <Textarea className="text-xs min-h-[48px] font-mono"
+                  value={submittalMeta.drawing_index_lines}
+                  onChange={(e) => setSubmittalMeta(m => ({ ...m, drawing_index_lines: e.target.value }))} />
+              </div>
+
+              {/* Revisions */}
+              <div className="space-y-1">
+                <Label className="text-[10px] text-slate-700">Revisions (up to 3)</Label>
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex flex-wrap gap-1 items-center">
+                    <Input className="text-[10px] h-7 w-[72px] px-1" placeholder="Date"
+                      value={submittalMeta.revisions?.[i]?.date ?? ""} onChange={(e) => setRev(i, "date", e.target.value)} />
+                    <Input className="text-[10px] h-7 flex-1 min-w-[120px] px-1" placeholder="Description"
+                      value={submittalMeta.revisions?.[i]?.text ?? ""} onChange={(e) => setRev(i, "text", e.target.value)} />
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-[10px] text-blue-600 leading-snug">
+                The floor plan sheet will capture the full drawing at 3× resolution (not a viewport screenshot). Make sure the Floor Plan tab is active and devices are placed before generating.
+              </p>
+            </div>
+          )}
+
+          {mode === "ahj" && (
           <div className="rounded-lg border border-orange-200 bg-orange-50/80 p-3 space-y-2">
             <div className="flex items-center gap-2">
               <Layout className="h-4 w-4 text-orange-600 shrink-0" />
@@ -455,12 +611,12 @@ export default function SubmittalPackage({
               />
             </div>
             <p className="text-[10px] text-slate-500">
-              For sharpest brand mark on PDFs, add <span className="font-mono">public/branding/gsis-logo.png</span> (any aspect ratio; portrait lockup recommended). Otherwise the app rasterizes the bundled SVG.
-            </p>
-            <p className="text-[10px] text-slate-500">
-              Upload manufacturer PDFs in Documents; map models to <span className="font-mono">project.equipment_specs</span> in a future release — legend uses placeholders until then.
+              Upload manufacturer PDFs in Documents; legend uses placeholders until equipment_specs is mapped.
             </p>
           </div>
+          )}
+
+          {mode === "ahj" && (
           <div>
             <p className="text-xs text-muted-foreground mb-3">Select sections to include in the PDF:</p>
             <div className="space-y-2">
@@ -481,6 +637,7 @@ export default function SubmittalPackage({
               ))}
             </div>
           </div>
+          )}
 
           <div className="pt-2 border-t flex items-center justify-between">
             <div className="text-xs text-muted-foreground">
@@ -492,7 +649,7 @@ export default function SubmittalPackage({
               className="bg-orange-500 hover:bg-orange-600 text-white gap-2 text-xs"
             >
               {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-              {generating ? "Generating..." : "Generate PDF"}
+              {generating ? "Generating..." : mode === "construction" ? "Generate Construction Drawings" : "Generate AHJ Submittal"}
             </Button>
           </div>
         </CardContent>

@@ -5,7 +5,7 @@ const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 function pickApiKey() {
   return (
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENAI_API_KEY) ||
-    (typeof process !== 'undefined' && process.env?.VITE_OPENAI_API_KEY) ||
+    (typeof globalThis !== 'undefined' && globalThis.process?.env?.VITE_OPENAI_API_KEY) ||
     ''
   );
 }
