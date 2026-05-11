@@ -119,6 +119,40 @@ export default function ProjectDesigner() {
   const [selectedSheetId, setSelectedSheetId] = useState(null);
   const [showScaleVerify, setShowScaleVerify] = useState(false);
 
+  // ── Auto-save: debounce 2s after any local state change ──
+  const autoSaveTimerRef = useRef(null);
+  useEffect(() => {
+    // Only auto-save if we have local overrides (i.e. unsaved changes)
+    const hasLocalChanges =
+      localDevices !== null ||
+      localRooms !== null ||
+      localWires !== null ||
+      localMarkups !== null ||
+      localLayoutZones !== null ||
+      localFloorPlans !== null;
+
+    if (!hasLocalChanges || !project?.id) return;
+
+    clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      saveMutation.mutate({
+        rooms: localRooms ?? project?.rooms ?? [],
+        devices: localDevices ?? project?.devices ?? [],
+        markups: localMarkups ?? project?.markups ?? [],
+        layout_zones: localLayoutZones ?? project?.layout_zones ?? [],
+        floor_plans: localFloorPlans ?? project?.floor_plans ?? [],
+        plan_sheets: localPlanSheets ?? project?.plan_sheets ?? [],
+        plan_categories: project?.plan_categories ?? [],
+        document_workspace: localDocumentWorkspace ?? project?.document_workspace ?? null,
+        wires: localWires ?? project?.wires ?? [],
+        analysis_results: analysisResults,
+        status: (localDevices ?? project?.devices ?? []).length > 0 ? "in_progress" : "draft",
+      });
+    }, 2000);
+
+    return () => clearTimeout(autoSaveTimerRef.current);
+  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans]);
+
   useEffect(() => {
     const t = disciplineConfig.circuitTypes[0]?.value || 'SLC';
     setSelectedCircuitType(t);
@@ -201,9 +235,9 @@ export default function ProjectDesigner() {
 
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Project.update(projectId, data),
-    onSuccess: () => {
+    onSuccess: (_, _variables, context) => {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      toast.success("Project saved");
+      if (context?.showToast) toast.success("Project saved");
     },
   });
 
@@ -238,7 +272,7 @@ export default function ProjectDesigner() {
       wires: storedWires,
       analysis_results: analysisResults,
       status: storedDevices.length > 0 ? "in_progress" : "draft",
-    });
+    }, { context: { showToast: true } });
   };
 
   const handleFloorPlanUploaded = async (upload) => {
