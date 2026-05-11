@@ -94,9 +94,39 @@ export default function ProjectSetup() {
             : Number(data.default_ceiling_height),
       };
       const analysis = determineSystemRequirements(normalized);
-      const payload = { ...normalized, analysis_results: analysis };
-      if (isNew) return base44.entities.Project.create(payload);
-      return base44.entities.Project.update(id, payload);
+
+      if (isNew) {
+        const payload = { ...normalized, analysis_results: analysis };
+        return base44.entities.Project.create(payload);
+      }
+
+      // For existing projects, only update setup fields — never overwrite
+      // devices, rooms, wires, markups, floor_plans, etc. saved by the designer.
+      const setupOnlyFields = {
+        name: normalized.name,
+        address: normalized.address,
+        primary_discipline: normalized.primary_discipline,
+        owner_name: normalized.owner_name,
+        installer_name: normalized.installer_name,
+        occupancy_group: normalized.occupancy_group,
+        total_occupant_load: normalized.total_occupant_load,
+        total_sleeping_units: normalized.total_sleeping_units,
+        num_floors: normalized.num_floors,
+        sprinkler_status: normalized.sprinkler_status,
+        default_ceiling_height: normalized.default_ceiling_height,
+        default_ceiling_type: normalized.default_ceiling_type,
+        ceiling_height_confirmed: normalized.ceiling_height_confirmed,
+        elevator_count: normalized.elevator_count,
+        air_handling_units: normalized.air_handling_units,
+        level_of_exit_discharge_floor: normalized.level_of_exit_discharge_floor,
+        ahj_contact: normalized.ahj_contact,
+        adopted_code_edition: normalized.adopted_code_edition,
+        communication_pathway: normalized.communication_pathway,
+        occupant_load_per_floor: normalized.occupant_load_per_floor,
+        gross_sqft_per_floor: normalized.gross_sqft_per_floor,
+        analysis_results: analysis,
+      };
+      return base44.entities.Project.update(id, setupOnlyFields);
     },
     onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
