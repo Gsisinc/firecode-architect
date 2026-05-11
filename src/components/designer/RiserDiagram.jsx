@@ -77,13 +77,13 @@ function DeviceSymbolSVG({ device, type, x, y, r = 14 }) {
 
 function SchematicRiser({ project, devices }) {
   const numFloors = project?.num_floors || 1;
-  const FLOOR_H = 220;
-  const PANEL_Y = numFloors * FLOOR_H + 72;
-  const SVG_H = PANEL_Y + 120;
-  const SVG_W = 1200;
-  const RISER_X = 90;
-  const DEV_GAP = 52;
-  const ROW_H = 52;
+  const FLOOR_H = 180;
+  const PANEL_Y = numFloors * FLOOR_H + 60;
+  const SVG_H = PANEL_Y + 140;
+  const SVG_W = 1400;
+  const RISER_X = 120;
+  const DEV_GAP = 48;
+  const ROW_H = 50;
 
   const byFloor = useMemo(() => {
     const map = {};
@@ -153,12 +153,12 @@ function SchematicRiser({ project, devices }) {
       <text x={RISER_X + 145} y={PANEL_Y + 40} textAnchor="middle" fontSize={7} fill="#4ade80" fontFamily="Arial">DACT / IP / RADIO</text>
 
       {/* Floors */}
-      {floorData.map(({ floor, slc, nac, y }) => {
-        const floorY = y + 40;
-        const branchX = RISER_X + 52;
-        const slcY = floorY - ROW_H * 0.8;
-        const nacY = floorY + ROW_H * 0.9;
-        const maxShow = 14;
+       {floorData.map(({ floor, slc, nac, y }) => {
+         const floorY = y + 35;
+         const branchX = RISER_X + 60;
+         const slcY = floorY - 60;
+         const nacY = floorY + 60;
+         const maxShow = 16;
 
         return (
           <g key={floor}>
@@ -173,67 +173,61 @@ function SchematicRiser({ project, devices }) {
             <circle cx={RISER_X} cy={floorY} r={5} fill="#334155" stroke="white" strokeWidth={1} />
 
             {/* SLC circuit branch */}
-            {slc.length > 0 && (
-              <g>
-                <line x1={branchX} y1={floorY} x2={branchX} y2={slcY} stroke="#2563eb" strokeWidth={2.5} />
-                <line x1={branchX} y1={slcY} x2={branchX + Math.min(slc.length, maxShow) * DEV_GAP + 64} y2={slcY} stroke="#2563eb" strokeWidth={2} />
-                {/* SLC circuit label */}
-                <rect x={branchX + 2} y={slcY - 22} width={80} height={16} rx={2} fill="#eff6ff" stroke="#2563eb" strokeWidth={1} />
-                <text x={branchX + 42} y={slcY - 10} textAnchor="middle" fontSize={9} fill="#1d4ed8" fontWeight="bold" fontFamily="Arial">SLC-{floor}</text>
-                <text x={branchX + 42} y={slcY - 3} textAnchor="middle" fontSize={7} fill="#3b82f6" fontFamily="Arial">FPLP 18/2</text>
-                {/* Devices on SLC */}
-                {slc.slice(0, maxShow).map((d, i) => {
-                  const dx = branchX + 30 + i * DEV_GAP;
-                  const dy = slcY;
-                  return (
-                    <g key={d.id}>
-                      <line x1={dx} y1={dy} x2={dx} y2={dy - 18} stroke="#2563eb" strokeWidth={1.5} />
-                      <DeviceSymbolSVG device={d} x={dx} y={dy - 26} r={12} />
-                      <text x={dx} y={dy + 8} textAnchor="middle" fontSize={7} fill="#475569" fontFamily="Arial">{(d.label || '').slice(0, 7)}</text>
-                    </g>
-                  );
-                })}
-                {slc.length > maxShow && (
-                  <text x={branchX + 30 + maxShow * DEV_GAP} y={slcY - 20} fontSize={9} fill="#64748b" fontFamily="Arial">+{slc.length - maxShow}</text>
-                )}
-                {/* EOL resistor */}
-                <rect x={branchX + 30 + Math.min(slc.length, maxShow) * DEV_GAP} y={slcY - 9} width={20} height={18} rx={3} fill="#dbeafe" stroke="#2563eb" strokeWidth={1.2} strokeDasharray="4,2" />
-                <text x={branchX + 40 + Math.min(slc.length, maxShow) * DEV_GAP} y={slcY + 4} textAnchor="middle" fontSize={7.5} fill="#1d4ed8" fontWeight="bold" fontFamily="Arial">EOL</text>
-                <text x={branchX + 8} y={slcY + 20} fontSize={8} fill="#64748b" fontFamily="Arial">
-                  {slc.length} device{slc.length !== 1 ? 's' : ''} · ~{wireEstimate(slc.length)} ft
-                </text>
-              </g>
-            )}
+             {slc.length > 0 && (
+               <g>
+                 <line x1={branchX} y1={floorY} x2={branchX} y2={slcY} stroke="#2563eb" strokeWidth={2.5} />
+                 <line x1={branchX} y1={slcY} x2={branchX + Math.min(slc.length, maxShow) * DEV_GAP + 80} y2={slcY} stroke="#2563eb" strokeWidth={2} />
+                 {/* SLC circuit label */}
+                 <rect x={branchX + 4} y={slcY - 26} width={90} height={18} rx={2} fill="#eff6ff" stroke="#2563eb" strokeWidth={1.5} />
+                 <text x={branchX + 49} y={slcY - 12} textAnchor="middle" fontSize={9} fill="#1d4ed8" fontWeight="bold" fontFamily="Arial">SLC-{floor}</text>
+                 <text x={branchX + 49} y={slcY - 4} textAnchor="middle" fontSize={7} fill="#3b82f6" fontFamily="Arial">FPLP 18/2</text>
+                 {/* Devices on SLC */}
+                 {slc.slice(0, maxShow).map((d, i) => {
+                   const dx = branchX + 40 + i * DEV_GAP;
+                   const dy = slcY;
+                   return (
+                     <g key={d.id}>
+                       <line x1={dx} y1={dy} x2={dx} y2={dy - 20} stroke="#2563eb" strokeWidth={1.5} />
+                       <DeviceSymbolSVG device={d} x={dx} y={dy - 28} r={11} />
+                       <text x={dx} y={dy + 10} textAnchor="middle" fontSize={6.5} fill="#475569" fontFamily="Arial">{(d.label || '').slice(0, 6)}</text>
+                     </g>
+                   );
+                 })}
+                 {slc.length > maxShow && (
+                   <text x={branchX + 40 + maxShow * DEV_GAP} y={slcY - 22} fontSize={8} fill="#64748b" fontFamily="Arial">+{slc.length - maxShow}</text>
+                 )}
+                 {/* EOL resistor */}
+                 <rect x={branchX + 40 + Math.min(slc.length, maxShow) * DEV_GAP} y={slcY - 10} width={18} height={20} rx={3} fill="#dbeafe" stroke="#2563eb" strokeWidth={1.2} strokeDasharray="4,2" />
+                 <text x={branchX + 49 + Math.min(slc.length, maxShow) * DEV_GAP} y={slcY + 5} textAnchor="middle" fontSize={7} fill="#1d4ed8" fontWeight="bold" fontFamily="Arial">EOL</text>
+               </g>
+             )}
 
             {/* NAC circuit branch */}
-            {nac.length > 0 && (
-              <g>
-                <line x1={branchX} y1={floorY} x2={branchX} y2={nacY} stroke="#ea580c" strokeWidth={2.5} />
-                <line x1={branchX} y1={nacY} x2={branchX + Math.min(nac.length, 10) * DEV_GAP + 64} y2={nacY} stroke="#ea580c" strokeWidth={2} />
-                {/* NAC circuit label */}
-                <rect x={branchX + 2} y={nacY + 6} width={80} height={16} rx={2} fill="#fff7ed" stroke="#ea580c" strokeWidth={1} />
-                <text x={branchX + 42} y={nacY + 16} textAnchor="middle" fontSize={9} fill="#c2410c" fontWeight="bold" fontFamily="Arial">NAC-{floor}</text>
-                <text x={branchX + 42} y={nacY + 23} textAnchor="middle" fontSize={7} fill="#f97316" fontFamily="Arial">FPLP 18/2</text>
-                {/* Devices on NAC */}
-                {nac.slice(0, 10).map((d, i) => {
-                  const dx = branchX + 30 + i * DEV_GAP;
-                  const dy = nacY;
-                  return (
-                    <g key={d.id}>
-                      <line x1={dx} y1={dy} x2={dx} y2={dy + 18} stroke="#ea580c" strokeWidth={1.5} />
-                      <DeviceSymbolSVG device={d} x={dx} y={dy + 26} r={12} />
-                      <text x={dx} y={dy - 8} textAnchor="middle" fontSize={7} fill="#475569" fontFamily="Arial">{(d.label || '').slice(0, 7)}</text>
-                    </g>
-                  );
-                })}
-                {nac.length > 10 && (
-                  <text x={branchX + 30 + 10 * DEV_GAP} y={nacY + 26} fontSize={9} fill="#64748b" fontFamily="Arial">+{nac.length - 10}</text>
-                )}
-                <text x={branchX + 8} y={nacY + 46} fontSize={8} fill="#64748b" fontFamily="Arial">
-                  {nac.length} device{nac.length !== 1 ? 's' : ''} · ~{wireEstimate(nac.length)} ft
-                </text>
-              </g>
-            )}
+             {nac.length > 0 && (
+               <g>
+                 <line x1={branchX} y1={floorY} x2={branchX} y2={nacY} stroke="#ea580c" strokeWidth={2.5} />
+                 <line x1={branchX} y1={nacY} x2={branchX + Math.min(nac.length, maxShow) * DEV_GAP + 80} y2={nacY} stroke="#ea580c" strokeWidth={2} />
+                 {/* NAC circuit label */}
+                 <rect x={branchX + 4} y={nacY + 8} width={90} height={18} rx={2} fill="#fff7ed" stroke="#ea580c" strokeWidth={1.5} />
+                 <text x={branchX + 49} y={nacY + 18} textAnchor="middle" fontSize={9} fill="#c2410c" fontWeight="bold" fontFamily="Arial">NAC-{floor}</text>
+                 <text x={branchX + 49} y={nacY + 26} textAnchor="middle" fontSize={7} fill="#f97316" fontFamily="Arial">FPLP 18/2</text>
+                 {/* Devices on NAC */}
+                 {nac.slice(0, maxShow).map((d, i) => {
+                   const dx = branchX + 40 + i * DEV_GAP;
+                   const dy = nacY;
+                   return (
+                     <g key={d.id}>
+                       <line x1={dx} y1={dy} x2={dx} y2={dy + 20} stroke="#ea580c" strokeWidth={1.5} />
+                       <DeviceSymbolSVG device={d} x={dx} y={dy + 28} r={11} />
+                       <text x={dx} y={dy - 10} textAnchor="middle" fontSize={6.5} fill="#475569" fontFamily="Arial">{(d.label || '').slice(0, 6)}</text>
+                     </g>
+                   );
+                 })}
+                 {nac.length > maxShow && (
+                   <text x={branchX + 40 + maxShow * DEV_GAP} y={nacY + 28} fontSize={8} fill="#64748b" fontFamily="Arial">+{nac.length - maxShow}</text>
+                 )}
+               </g>
+             )}
 
             {slc.length === 0 && nac.length === 0 && (
               <text x={branchX + 12} y={floorY + 5} fontSize={10} fill="#cbd5e1" fontFamily="Arial" fontStyle="italic">No devices on Floor {floor}</text>
