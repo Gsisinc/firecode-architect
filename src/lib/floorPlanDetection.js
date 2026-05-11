@@ -355,6 +355,7 @@ function normalizeRoomType(rawType, name) {
 }
 
 function getRoomBounds(room, pxPerFt, buildingBounds, imgW, imgH) {
+  // ── Step 1: derive pixel position from ratios (preferred) or px fields ──
   const x1r = getFirstNumber(room, ["x1_ratio", "left_ratio"]);
   const y1r = getFirstNumber(room, ["y1_ratio", "top_ratio"]);
   const x2r = getFirstNumber(room, ["x2_ratio", "right_ratio"]);
@@ -362,45 +363,48 @@ function getRoomBounds(room, pxPerFt, buildingBounds, imgW, imgH) {
   const hasRatioBox =
     isUnitRatio(x1r) && isUnitRatio(y1r) && isUnitRatio(x2r) && isUnitRatio(y2r);
 
-  let x1;
-  let y1;
-  let x2;
-  let y2;
+  let x1, y1, x2, y2;
   if (hasRatioBox) {
     x1 = x1r * imgW;
     y1 = y1r * imgH;
     x2 = x2r * imgW;
     y2 = y2r * imgH;
   } else {
-    x1 = getFirstNumber(room, ["x1_px", "left_px", "left", "x1", "px", "x"]) ?? buildingBounds.left;
-    y1 = getFirstNumber(room, ["y1_px", "top_px", "top", "y1", "py", "y"]) ?? buildingBounds.top;
+    x1 = getFirstNumber(room, ["x1_px", "left_px", "left", "x1", "x"]) ?? buildingBounds.left;
+    y1 = getFirstNumber(room, ["y1_px", "top_px", "top", "y1", "y"]) ?? buildingBounds.top;
     x2 = getFirstNumber(room, ["x2_px", "right_px", "right", "x2"]);
     y2 = getFirstNumber(room, ["y2_px", "bottom_px", "bottom", "y2"]);
   }
   if (x1 != null && x2 != null && x1 > x2) [x1, x2] = [x2, x1];
   if (y1 != null && y2 != null && y1 > y2) [y1, y2] = [y2, y1];
-  const widthRatio = getFirstNumber(room, ["width_ratio", "w_ratio"]);
-  const heightRatio = getFirstNumber(room, ["height_ratio", "h_ratio", "depth_ratio"]);
-  const widthPx = isUnitRatio(widthRatio)
-    ? widthRatio * imgW
-    : getFirstNumber(room, ["width_px", "w_px", "width", "w"]);
-  const heightPx = isUnitRatio(heightRatio)
-    ? heightRatio * imgH
-    : getFirstNumber(room, ["height_px", "h_px", "height", "h"]);
+
+  // ── Step 2: read real-world dimension callouts from the drawing ──
   const widthFt = getFirstFeet(room, ["width_ft", "width_feet", "width_label", "width_dimension"]);
   const heightFt = getFirstFeet(room, ["height_ft", "height_feet", "height_label", "height_dimension", "depth_ft"]);
 
-  // Prefer callout dimensions (read directly from drawing text) over pixel-derived sizes.
-  // Callout-derived pixel sizes are anchored to the room's top-left corner.
-  const widthFromCallout = widthFt ? widthFt * pxPerFt : null;
-  const heightFromCallout = heightFt ? heightFt * pxPerFt : null;
-  let width = widthFromCallout ?? widthPx ?? (x2 !== null ? x2 - x1 : null);
-  let height = heightFromCallout ?? heightPx ?? (y2 !== null ? y2 - y1 : null);
+  // ── Step 3: compute pixel size — dimension callouts override ratio box ──
+  // If the AI read actual callouts (e.g. "12'-6" × 10'-0""), trust those for size
+  // but keep the top-left anchor from the ratio box for position alignment.
+  const ratioWidth = x2 != null ? x2 - x1 : null;
+  const ratioHeight = y2 != null ? y2 - y1 : null;
+
+  let width, height;
+  if (widthFt && widthFt > 0 && pxPerFt > 0) {
+    // Dimension callout available — use it for exact size
+    width = widthFt * pxPerFt;
+  } else {
+    width = ratioWidth;
+  }
+  if (heightFt && heightFt > 0 && pxPerFt > 0) {
+    height = heightFt * pxPerFt;
+  } else {
+    height = ratioHeight;
+  }
 
   if (!width || !height || width <= 0 || height <= 0) return null;
 
-  const x = clamp(Math.round(x1), 0, imgW - MIN_ROOM_SIZE_PX);
-  const y = clamp(Math.round(y1), 0, imgH - MIN_ROOM_SIZE_PX);
+  const x = clamp(Math.round(x1 ?? 0), 0, imgW - MIN_ROOM_SIZE_PX);
+  const y = clamp(Math.round(y1 ?? 0), 0, imgH - MIN_ROOM_SIZE_PX);
   width = clamp(Math.round(width), MIN_ROOM_SIZE_PX, imgW - x);
   height = clamp(Math.round(height), MIN_ROOM_SIZE_PX, imgH - y);
 
@@ -545,11 +549,10 @@ export function normalizeDetectedRooms({ pass2, activeFloor, project, geometry, 
       if (seen.has(centerKey)) return null;
       seen.add(centerKey);
 
-      // Priority: 1) printed area callout, 2) printed W×H callout, 3) pixel-derived estimate
       const explicitSqft = getFirstNumber(room, ["sqft", "area_sqft", "area_sf", "room_area_sf"]);
       const sqft = explicitSqft
-        || (bounds.widthFt && bounds.heightFt ? Math.round(bounds.widthFt * bounds.heightFt) : null)
-        || Math.round((bounds.width * bounds.height) / (geometry.pxPerFt * geometry.pxPerFt));
+        || (bounds.widthFt && bounds.heightFt ? bounds.widthFt * bounds.heightFt : null)
+        || (bounds.width * bounds.height) / (geometry.pxPerFt * geometry.pxPerFt);
 
       return {
         id: `room-${activeFloor}-${Date.now()}-${index}`,
