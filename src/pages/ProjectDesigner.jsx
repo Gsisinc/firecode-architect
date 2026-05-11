@@ -145,7 +145,8 @@ export default function ProjectDesigner() {
       localLayoutZones !== null ||
       localFloorPlans !== null;
 
-    if (!hasLocalChanges || !project?.id) return;
+    // Never auto-save until project has loaded from server — prevents overwriting DB with stale data on app reload
+    if (!hasLocalChanges || !project?.id || isLoading) return;
 
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -166,7 +167,7 @@ export default function ProjectDesigner() {
     }, 2000);
 
     return () => clearTimeout(autoSaveTimerRef.current);
-  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans]);
+  }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, isLoading]);
 
   useEffect(() => {
     const t = disciplineConfig.circuitTypes[0]?.value || 'SLC';
