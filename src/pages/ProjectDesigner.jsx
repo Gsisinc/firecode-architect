@@ -346,10 +346,24 @@ export default function ProjectDesigner() {
       if (uploadedSheets[0]) setSelectedSheetId(uploadedSheets[0].id);
       setActiveTab('plans');
       try {
-        await saveProjectPatch({ plan_sheets: nextSheets });
+        // Force immediate save for PDF uploads (no debounce)
+        clearTimeout(autoSaveTimerRef.current);
+        await saveMutation.mutateAsync({
+          rooms,
+          devices: storedDevices,
+          markups,
+          layout_zones: layoutZones,
+          floor_plans: floorPlans,
+          plan_sheets: nextSheets,
+          plan_categories: planCategories,
+          document_workspace: documentWorkspace,
+          wires: storedWires,
+          analysis_results: analysisResults,
+          status: storedDevices.length > 0 ? "in_progress" : "draft",
+        });
         toast.success(`Uploaded ${uploadedSheets.length} PDF sheets. Assign floor-plan pages in the Plans tab.`);
       } catch (error) {
-        toast.error(`Sheets imported locally, but autosave failed: ${error?.message || 'Unknown error'}`);
+        toast.error(`Sheets failed to save: ${error?.message || 'Unknown error'}`);
       }
       return;
     }
@@ -367,10 +381,24 @@ export default function ProjectDesigner() {
     const updated = upsertFloorPlan(floorPlans, imagePlan);
     setLocalFloorPlans(updated);
     try {
-      await saveProjectPatch({ floor_plans: updated });
-      toast.success(`Floor ${activeFloor} plan uploaded`);
+      // Force immediate save for image uploads (no debounce)
+      clearTimeout(autoSaveTimerRef.current);
+      await saveMutation.mutateAsync({
+        rooms,
+        devices: storedDevices,
+        markups,
+        layout_zones: layoutZones,
+        floor_plans: updated,
+        plan_sheets: planSheets,
+        plan_categories: planCategories,
+        document_workspace: documentWorkspace,
+        wires: storedWires,
+        analysis_results: analysisResults,
+        status: storedDevices.length > 0 ? "in_progress" : "draft",
+      });
+      toast.success(`Floor ${activeFloor} plan uploaded and saved`);
     } catch (error) {
-      toast.error(`Plan uploaded locally, but autosave failed: ${error?.message || 'Unknown error'}`);
+      toast.error(`Plan failed to save: ${error?.message || 'Unknown error'}`);
     }
   };
 
