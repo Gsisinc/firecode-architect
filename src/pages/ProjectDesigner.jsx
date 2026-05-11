@@ -446,48 +446,36 @@ Use decimal ratios (e.g. 0.184). Omit a field if unreadable.`,
     try {
       pass2 = await base44.integrations.Core.InvokeLLM({
         prompt: `You are analyzing a floor plan image that is exactly ${imgW} pixels wide by ${imgH} pixels tall.
+Scale already established: ${pxPerFt.toFixed(2)} px/ft.
 
-YOUR GOAL: Identify and return EVERY single labeled enclosed space on this floor plan — apartments, hotel rooms, offices, stairwells, corridors, bathrooms, mechanical rooms, storage rooms, laundry, lobbies, elevators, community rooms, kitchens — EVERYTHING with a label or room number.
+YOUR GOAL: For EVERY labeled enclosed space, return:
+1. The precise wall-to-wall bounding box as normalized ratios (0–1)
+2. The real-world dimensions read from dimension callouts printed on the drawing (e.g. "12'-6\" × 10'-0\"" or "3.6m × 4.2m")
 
-COORDINATE FORMAT — REQUIRED:
-Give NORMALIZED RATIOS (0.0 to 1.0) for each room bounding box:
-  x1_ratio = left wall pixel x / ${imgW}
-  x2_ratio = right wall pixel x / ${imgW}
-  y1_ratio = top wall pixel y / ${imgH}
-  y2_ratio = bottom wall pixel y / ${imgH}
+COORDINATE RULES (critical for alignment):
+- x1_ratio = LEFT wall pixel x / ${imgW}   (e.g. 0.12)
+- x2_ratio = RIGHT wall pixel x / ${imgW}
+- y1_ratio = TOP wall pixel y / ${imgH}
+- y2_ratio = BOTTOM wall pixel y / ${imgH}
+- Trace the ACTUAL wall lines, not the label position
+- Each room box must be tight to its four walls — no gaps, no overlap with adjacent rooms
+- DO NOT collapse multiple rooms. Each label or room number = one entry.
+- DO NOT skip small or repetitive rooms (apartments, bathrooms, closets all get their own entry)
 
-DO NOT collapse multiple rooms into one box. Each label = one separate room object.
-DO NOT skip rooms just because they look small or repetitive (e.g. many identical apartment units must each get their own entry).
+DIMENSION READING (improves sqft accuracy):
+- Look for dimension strings printed inside or beside each room: "12'-0\" × 10'-6\"", "144 SF", "3.0 x 4.5m"
+- Fill width_ft and height_ft from these callouts (convert meters × 3.281 if metric)
+- If no callout found, derive from: width_ft = (x2_ratio - x1_ratio) × ${imgW} / ${pxPerFt.toFixed(2)}, same for height
 
-Building interior reference (ratios): left=${(buildingBounds.left / imgW).toFixed(4)}, top=${(buildingBounds.top / imgH).toFixed(4)}, right=${(buildingBounds.right / imgW).toFixed(4)}, bottom=${(buildingBounds.bottom / imgH).toFixed(4)}.
-Detected scale: ${pxPerFt.toFixed(2)} px/ft.
+Building interior (ratios): left=${(buildingBounds.left / imgW).toFixed(4)}, top=${(buildingBounds.top / imgH).toFixed(4)}, right=${(buildingBounds.right / imgW).toFixed(4)}, bottom=${(buildingBounds.bottom / imgH).toFixed(4)}.
 
-For room_type, use the most specific type that matches:
-- Apartment / dwelling unit → "dwelling_unit"
-- Numbered rooms in residential buildings (e.g. "Room 101") → "dwelling_unit"  
-- Bedroom / sleeping room → "sleeping_room"
-- Stairway / stairwell / stair → "stairwell"
-- Elevator / lift → "elevator"
-- Lobby / foyer / entrance → "lobby"
-- Corridor / hallway → "corridor"
-- Bathroom / restroom / WC → "bathroom"
-- Kitchen / break room → "kitchen"
-- Laundry room → "laundry"
-- Community room / recreation → "community_room"
-- Common area / lounge → "common_area"
-- Office → "office"
-- Conference / meeting room → "conference_room"
-- Sales floor / retail → "sales_floor"
-- Storage room → "storage"
-- Mechanical room → "mechanical_room"
-- Electrical room → "electrical"
-- IT / telecom room → "it_room"
-- Janitor / utility closet → "janitor"
-- Garage / parking → "garage"
+Room types to use:
+dwelling_unit, sleeping_room, hotel_room, stairwell, elevator, lobby, corridor, bathroom,
+kitchen, laundry, community_room, common_area, office, conference_room, sales_floor,
+stockroom, storage, mechanical_room, electrical, it_room, janitor, garage
 
-Also identify layout_zones for large open areas like rack rows, aisles, or obstructions.
-
-Exclude only: title block area, north arrows, sheet borders, and exterior areas outside the building walls.`,
+Also identify layout_zones for aisles, rack rows, or large obstructions.
+Exclude: title block, sheet border, north arrow, exterior areas outside walls.`,
         file_urls: [analysisImageUrl],
         model: "claude_sonnet_4_6",
         response_json_schema: {

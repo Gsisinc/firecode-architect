@@ -390,8 +390,12 @@ function getRoomBounds(room, pxPerFt, buildingBounds, imgW, imgH) {
   const widthFt = getFirstFeet(room, ["width_ft", "width_feet", "width_label", "width_dimension"]);
   const heightFt = getFirstFeet(room, ["height_ft", "height_feet", "height_label", "height_dimension", "depth_ft"]);
 
-  let width = widthPx ?? (x2 !== null ? x2 - x1 : null) ?? (widthFt ? widthFt * pxPerFt : null);
-  let height = heightPx ?? (y2 !== null ? y2 - y1 : null) ?? (heightFt ? heightFt * pxPerFt : null);
+  // Prefer callout dimensions (read directly from drawing text) over pixel-derived sizes.
+  // Callout-derived pixel sizes are anchored to the room's top-left corner.
+  const widthFromCallout = widthFt ? widthFt * pxPerFt : null;
+  const heightFromCallout = heightFt ? heightFt * pxPerFt : null;
+  let width = widthFromCallout ?? widthPx ?? (x2 !== null ? x2 - x1 : null);
+  let height = heightFromCallout ?? heightPx ?? (y2 !== null ? y2 - y1 : null);
 
   if (!width || !height || width <= 0 || height <= 0) return null;
 
@@ -541,10 +545,11 @@ export function normalizeDetectedRooms({ pass2, activeFloor, project, geometry, 
       if (seen.has(centerKey)) return null;
       seen.add(centerKey);
 
+      // Priority: 1) printed area callout, 2) printed W×H callout, 3) pixel-derived estimate
       const explicitSqft = getFirstNumber(room, ["sqft", "area_sqft", "area_sf", "room_area_sf"]);
       const sqft = explicitSqft
-        || (bounds.widthFt && bounds.heightFt ? bounds.widthFt * bounds.heightFt : null)
-        || (bounds.width * bounds.height) / (geometry.pxPerFt * geometry.pxPerFt);
+        || (bounds.widthFt && bounds.heightFt ? Math.round(bounds.widthFt * bounds.heightFt) : null)
+        || Math.round((bounds.width * bounds.height) / (geometry.pxPerFt * geometry.pxPerFt));
 
       return {
         id: `room-${activeFloor}-${Date.now()}-${index}`,
