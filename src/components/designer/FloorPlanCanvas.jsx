@@ -1446,6 +1446,8 @@ export default function FloorPlanCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     drawFloorPlanScene(ctx, sceneProps);
+    // Expose current transform so overlay components can align with world coords
+    canvas.dataset.transform = JSON.stringify({ scale, offsetX: offset.x, offsetY: offset.y });
   }, [canvasRef, circuitTypes, currentFloor, devicePalette, devices, disciplineId, drawingLayoutZone, drawingMarkup, drawingRoom, drawingScaleLine, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
 
   useImperativeHandle(

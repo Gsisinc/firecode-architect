@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { base44 } from "@/api/base44Client";
-import { FileText, ImagePlus, Loader2, Sparkles, Upload } from "lucide-react";
+import { FileText, ImagePlus, Loader2, Ruler, Sparkles, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
@@ -13,7 +13,7 @@ const UPLOAD_STEPS = {
   saving: { label: "Saving sheet set...", ceiling: 98 },
 };
 
-export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded, onAnalyze, analyzing }) {
+export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded, onAnalyze, analyzing, onVerifyScale, pxPerFt }) {
   const fileRef = useRef();
   const [uploadState, setUploadState] = useState("idle");
   const [uploadFileName, setUploadFileName] = useState("");
@@ -129,6 +129,19 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
             {analyzing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
             {analyzing ? "Analyzing..." : "AI: Detect Rooms"}
           </Button>
+          {onVerifyScale && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-8 text-xs shadow-sm bg-white border-sky-200 text-sky-700 hover:bg-sky-50"
+              onClick={onVerifyScale}
+              disabled={uploading}
+              title={pxPerFt ? `Current scale: ${Number(pxPerFt).toFixed(1)} px/ft` : 'Scale not calibrated'}
+            >
+              <Ruler className="h-3 w-3" />
+              {pxPerFt ? `${Number(pxPerFt).toFixed(1)} px/ft` : 'Verify Scale'}
+            </Button>
+          )}
         </div>
         {uploading && <UploadProgressCard fileName={uploadFileName} status={uploadStatus} progress={uploadProgress} />}
         {input}

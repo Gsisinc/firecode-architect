@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan, Ruler } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -26,6 +26,7 @@ import ProjectDashboard from "@/components/designer/ProjectDashboard";
 import RiserDiagram from "@/components/designer/RiserDiagram";
 import FireAlarmSimulation from "@/components/designer/FireAlarmSimulation";
 import MarkupsList from "@/components/designer/MarkupsList";
+import ScaleVerificationOverlay from "@/components/designer/ScaleVerificationOverlay";
 import { downloadDXF } from "@/lib/dxfExport";
 import {
   deriveDetectionGeometry,
@@ -116,6 +117,7 @@ export default function ProjectDesigner() {
   const [selectedCircuitId, setSelectedCircuitId] = useState(() => `${disciplineConfig.circuitTypes[0]?.value || 'SLC'}-1`);
   const [selectedCableType, setSelectedCableType] = useState('');
   const [selectedSheetId, setSelectedSheetId] = useState(null);
+  const [showScaleVerify, setShowScaleVerify] = useState(false);
 
   useEffect(() => {
     const t = disciplineConfig.circuitTypes[0]?.value || 'SLC';
@@ -1235,7 +1237,25 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 onUploaded={handleFloorPlanUploaded}
                 onAnalyze={handleAnalyzeFloorPlan}
                 analyzing={analyzingFloor}
+                onVerifyScale={() => setShowScaleVerify(v => !v)}
+                pxPerFt={canvasPxPerFt}
               />
+              {showScaleVerify && (
+                <ScaleVerificationOverlay
+                  canvasRef={canvasRef}
+                  captureRef={floorPlanCaptureRef}
+                  rooms={rooms}
+                  devices={canvasDevices}
+                  wires={wires}
+                  currentFloor={activeFloor}
+                  floorPlans={floorPlans}
+                  onFloorPlansUpdate={(nextPlans) => {
+                    setLocalFloorPlans(nextPlans);
+                    saveProjectPatch({ floor_plans: nextPlans });
+                  }}
+                  onClose={() => setShowScaleVerify(false)}
+                />
+              )}
               <DevicePanel
                 device={selectedDevice}
                 onClose={() => setSelectedDevice(null)}
@@ -1247,7 +1267,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
               />
               {/* Collapsible bottom toolbar */}
               <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center pointer-events-none">
-                {/* Toggle tab */}
+                {/* Toggle tab — shows current scale */}
                 <button
                   className="pointer-events-auto mb-0 px-4 py-1 bg-slate-800 text-white/70 text-xs rounded-t-lg hover:bg-slate-700 hover:text-white flex items-center gap-1.5 shadow-lg transition-colors"
                   onClick={() => setToolbarOpen(o => !o)}
@@ -1267,6 +1287,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                     <ToolbarBtn active={rightPanel === 'markups'} onClick={() => setRightPanel(p => p === 'markups' ? null : 'markups')} icon={<MessageSquare className="h-3 w-3" />} label="Markups" />
                     <ToolbarBtn onClick={() => downloadDXF(project, rooms, canvasDevices, activeFloor, { wires })} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
                     <ToolbarBtn onClick={() => setShowSubmittal(true)} icon={<BookOpen className="h-3 w-3" />} label="Submittal PDF" orange />
+                    <ToolbarBtn active={showScaleVerify} onClick={() => setShowScaleVerify(v => !v)} icon={<Ruler className="h-3 w-3" />} label="Verify Scale" />
                   </div>
                 </div>
               </div>

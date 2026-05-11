@@ -16,7 +16,7 @@ import {
   calculateBatterySizing,
   calculateNacLoading,
 } from '@/lib/codeEngine';
-import { dataUrlImageFormat, fitLogoSizeMm } from '@/lib/submittalBranding';
+import { dataUrlImageFormat } from '@/lib/submittalBranding';
 
 // ─── Sheet dimensions (mm) ───────────────────────────────────────────────────
 const SHEET_W = 914.4;  // 36"
@@ -33,7 +33,6 @@ const DRAW_W = TB_X - DRAW_X - 4;
 const DRAW_H = SHEET_H - 16;
 
 // Colors
-const C_BLACK   = [20, 20, 20];
 const C_DARK    = [40, 40, 40];
 const C_GRAY    = [100, 116, 139];
 const C_LGRAY   = [203, 213, 225];
@@ -51,29 +50,6 @@ function setFont(doc, size, style = 'normal', color = C_DARK) {
   doc.setFont('helvetica', style);
   doc.setFontSize(size);
   doc.setTextColor(...color);
-}
-
-function line(doc, x1, y1, x2, y2, w = 0.25, color = C_DARK) {
-  doc.setDrawColor(...color);
-  doc.setLineWidth(w);
-  doc.line(x1, y1, x2, y2);
-}
-
-function rect(doc, x, y, w, h, fill = null, strokeColor = C_DARK, lineW = 0.25) {
-  if (fill) { doc.setFillColor(...fill); }
-  doc.setDrawColor(...strokeColor);
-  doc.setLineWidth(lineW);
-  if (fill) doc.rect(x, y, w, h, 'FD');
-  else doc.rect(x, y, w, h, 'S');
-}
-
-function cell(doc, x, y, w, h, text, opts = {}) {
-  const { fill, bold, fontSize = 6, align = 'left', color = C_DARK, pad = 1.5 } = opts;
-  if (fill) { doc.setFillColor(...fill); doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.15); doc.rect(x, y, w, h, 'FD'); }
-  setFont(doc, fontSize, bold ? 'bold' : 'normal', color);
-  const tx = align === 'center' ? x + w / 2 : align === 'right' ? x + w - pad : x + pad;
-  const ty = y + h / 2 + fontSize * 0.35;
-  doc.text(String(text || ''), tx, ty, { align });
 }
 
 /** Draw the right-side title block (vertical band). */
@@ -473,7 +449,7 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
 
 // ─── FA-5.01: Floor Plan Sheet ───────────────────────────────────────────────
 
-export async function generateFloorPlanSheet(doc, project, rooms, devices, layoutZones, floorImg, floorImgW, floorImgH, activeFloor, meta, logoDataUrl, markups) {
+export async function generateFloorPlanSheet(doc, project, _rooms, _devices, _layoutZones, floorImg, floorImgW, floorImgH, activeFloor, meta, logoDataUrl, _markups) {
   drawSheetBorder(doc, meta);
   drawTitleBlock(doc, project, meta, logoDataUrl, `FA5.0${activeFloor}`, `FIRE ALARM ${activeFloor === 1 ? '1ST' : activeFloor === 2 ? '2ND' : `${activeFloor}TH`} FLOOR PLAN`);
 
@@ -558,7 +534,7 @@ export async function generateFloorPlanSheet(doc, project, rooms, devices, layou
 
 // ─── FA-5.10: System One-Line Riser + FACP I/O Matrix + Sequence ─────────────
 
-export async function generateRiserSheet(doc, project, devices, analysisResults, meta, logoDataUrl) {
+export async function generateRiserSheet(doc, project, devices, _analysisResults, meta, logoDataUrl) {
   drawSheetBorder(doc, meta);
   drawTitleBlock(doc, project, meta, logoDataUrl, 'FA5.10', 'FIRE ALARM DIAGRAMS PLAN');
 
@@ -590,7 +566,7 @@ export async function generateRiserSheet(doc, project, devices, analysisResults,
   drawGeneralNotesSide(doc, rightX, gnY, rightW, gnH);
 }
 
-function drawFacpIOMatrix(doc, x, y, w, h, project, devices, meta) {
+function drawFacpIOMatrix(doc, x, y, w, _h, project, devices, _meta) {
   // Title
   doc.setFillColor(15, 23, 42); doc.rect(x, y, w, 8, 'F');
   setFont(doc, 8, 'bold', C_WHITE);
@@ -694,7 +670,7 @@ function drawFacpIOMatrix(doc, x, y, w, h, project, devices, meta) {
   doc.text('PROVIDE BYPASS SWITCHES AS REQUIRED MAINTAINING FIRE ALARM SYSTEM DURING MAINTENANCE AND ANNUAL INSPECTION.', x + 2, sy + 3, { maxWidth: w - 4 });
 }
 
-function drawBatteryCalcBlock(doc, x, y, w, h, devices, meta) {
+function drawBatteryCalcBlock(doc, x, y, w, h, devices, _meta) {
   const batt = calculateBatterySizing(devices.length);
   const nac = calculateNacLoading(devices);
 
@@ -885,15 +861,13 @@ export async function runConstructionDrawingPdf({
   project,
   devices = [],
   rooms = [],
-  layoutZones = [],
-  wires = [],
-  floorPlans = [],
+  wires: _wires = [],
+  floorPlans: _floorPlans = [],
   analysisResults,
   captureRef,
   canvasRef,
   activeFloor = 1,
   submittalMeta = {},
-  sections = {},
 }) {
   const meta = { ...submittalMeta };
   const pName = project?.name || 'Fire Alarm System';
@@ -934,7 +908,7 @@ export async function runConstructionDrawingPdf({
   // ── Sheet 2: Floor Plan ──
   doc.addPage([SHEET_W, SHEET_H], 'landscape');
   await generateFloorPlanSheet(
-    doc, project, rooms, devices, layoutZones,
+    doc, project, rooms, devices, [],
     floorImgData, floorImgDims.width, floorImgDims.height,
     activeFloor, meta, logoDataUrl, []
   );
