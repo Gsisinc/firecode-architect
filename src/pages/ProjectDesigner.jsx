@@ -121,6 +121,20 @@ export default function ProjectDesigner() {
 
   // ── Auto-save: debounce 2s after any local state change ──
   const autoSaveTimerRef = useRef(null);
+  // Keep a ref to always-current values so the setTimeout closure doesn't capture stale state
+  const latestRef = useRef({});
+  useEffect(() => {
+    latestRef.current = {
+      localDevices, localRooms, localWires, localMarkups, localLayoutZones,
+      localFloorPlans, localPlanSheets, localDocumentWorkspace, analysisResults,
+      projectRooms: project?.rooms, projectDevices: project?.devices,
+      projectMarkups: project?.markups, projectLayoutZones: project?.layout_zones,
+      projectFloorPlans: project?.floor_plans, projectPlanSheets: project?.plan_sheets,
+      projectPlanCategories: project?.plan_categories, projectDocumentWorkspace: project?.document_workspace,
+      projectWires: project?.wires, projectId: project?.id,
+    };
+  });
+
   useEffect(() => {
     // Only auto-save if we have local overrides (i.e. unsaved changes)
     const hasLocalChanges =
@@ -135,18 +149,19 @@ export default function ProjectDesigner() {
 
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
+      const l = latestRef.current;
       saveMutation.mutate({
-        rooms: localRooms ?? project?.rooms ?? [],
-        devices: localDevices ?? project?.devices ?? [],
-        markups: localMarkups ?? project?.markups ?? [],
-        layout_zones: localLayoutZones ?? project?.layout_zones ?? [],
-        floor_plans: localFloorPlans ?? project?.floor_plans ?? [],
-        plan_sheets: localPlanSheets ?? project?.plan_sheets ?? [],
-        plan_categories: project?.plan_categories ?? [],
-        document_workspace: localDocumentWorkspace ?? project?.document_workspace ?? null,
-        wires: localWires ?? project?.wires ?? [],
-        analysis_results: analysisResults,
-        status: (localDevices ?? project?.devices ?? []).length > 0 ? "in_progress" : "draft",
+        rooms: l.localRooms ?? l.projectRooms ?? [],
+        devices: l.localDevices ?? l.projectDevices ?? [],
+        markups: l.localMarkups ?? l.projectMarkups ?? [],
+        layout_zones: l.localLayoutZones ?? l.projectLayoutZones ?? [],
+        floor_plans: l.localFloorPlans ?? l.projectFloorPlans ?? [],
+        plan_sheets: l.localPlanSheets ?? l.projectPlanSheets ?? [],
+        plan_categories: l.projectPlanCategories ?? [],
+        document_workspace: l.localDocumentWorkspace ?? l.projectDocumentWorkspace ?? null,
+        wires: l.localWires ?? l.projectWires ?? [],
+        analysis_results: l.analysisResults,
+        status: (l.localDevices ?? l.projectDevices ?? []).length > 0 ? "in_progress" : "draft",
       });
     }, 2000);
 
