@@ -119,7 +119,7 @@ export default function ProjectDesigner() {
   const [selectedSheetId, setSelectedSheetId] = useState(null);
   const [showScaleVerify, setShowScaleVerify] = useState(false);
 
-  // ── Auto-save refs (initialized here, effect runs after query below) ──
+  // ── Auto-save refs (initialized here, effect runs after saveMutation below) ──
   const autoSaveTimerRef = useRef(null);
   const latestRef = useRef({});
 
@@ -203,6 +203,14 @@ export default function ProjectDesigner() {
     [disciplineId, storedWires]
   );
 
+  const saveMutation = useMutation({
+    mutationFn: (data) => base44.entities.Project.update(projectId, data),
+    onSuccess: (_, _variables, context) => {
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      if (context?.showToast) toast.success("Project saved");
+    },
+  });
+
   // ── Auto-save: debounce 2s after any local state change ──
   // Keep a ref to always-current values so the setTimeout closure doesn't capture stale state
   useEffect(() => {
@@ -249,14 +257,6 @@ export default function ProjectDesigner() {
 
     return () => clearTimeout(autoSaveTimerRef.current);
   }, [localDevices, localRooms, localWires, localMarkups, localLayoutZones, localFloorPlans, isLoading]);
-
-  const saveMutation = useMutation({
-    mutationFn: (data) => base44.entities.Project.update(projectId, data),
-    onSuccess: (_, _variables, context) => {
-      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      if (context?.showToast) toast.success("Project saved");
-    },
-  });
 
   const saveProjectPatch = (patch) => {
     const devs = patch.devices ?? storedDevices;
