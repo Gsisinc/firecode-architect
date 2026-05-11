@@ -5,6 +5,7 @@ import {
   MousePointer, Square, Hand, Trash2, Settings2, Cable, MessageSquare, Network, Ruler, Sparkles, Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MARKUP_TOOLS } from '@/lib/bluebeamMarkupTools';
 import { feetBetween, getFloorScale } from '@/lib/designScale';
 import { buildLifeSafetyReviewFlags } from '@/lib/lifeSafetyReview';
@@ -143,34 +144,37 @@ export default function DesignerSidebar({
         </SidebarSection>
 
         {/* Circuit selection */}
-        <SidebarSection title="Circuits" icon={Network} open={openSection === 'circuits'} onToggle={() => toggle('circuits')}>
-          <div className="space-y-2">
-            <p className="text-[10px] text-white/35 px-1 leading-snug">
-              Select the circuit type and ID before using the Wire tool. Saved line segments keep this assignment.
-            </p>
-            <div className="grid grid-cols-2 gap-1">
-              {circuitTypes.map((circuit) => (
-                <button
-                  key={circuit.value}
-                  type="button"
-                  onClick={() => {
-                    onCircuitTypeChange?.(circuit.value);
-                    if (!selectedCircuitId || selectedCircuitId.startsWith(selectedCircuitType)) {
-                      onCircuitIdChange?.(`${circuit.value}-1`);
-                    }
-                  }}
-                  title={circuit.description}
-                  className={`rounded px-2 py-1.5 text-xs font-semibold border transition-colors ${
-                    selectedCircuitType === circuit.value
-                      ? 'bg-white text-slate-950 border-white'
-                      : 'text-white/60 border-white/10 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: circuit.color }} />
-                  {circuit.label}
-                </button>
-              ))}
-            </div>
+         <SidebarSection title="Circuits" icon={Network} open={openSection === 'circuits'} onToggle={() => toggle('circuits')}>
+           <div className="space-y-2">
+             <p className="text-[10px] text-white/35 px-1 leading-snug">
+               Select the circuit type and ID before using the Wire tool. Saved line segments keep this assignment.
+             </p>
+             <div>
+               <label className="block text-[10px] uppercase tracking-wider text-white/35 px-1 mb-1">Circuit Type</label>
+               <Select
+                 value={selectedCircuitType}
+                 onValueChange={(value) => {
+                   onCircuitTypeChange?.(value);
+                   if (!selectedCircuitId || selectedCircuitId.startsWith(selectedCircuitType)) {
+                     onCircuitIdChange?.(`${value}-1`);
+                   }
+                 }}
+               >
+                 <SelectTrigger className="w-full h-8 bg-white/5 border-white/10 text-white text-xs">
+                   <SelectValue />
+                 </SelectTrigger>
+                 <SelectContent className="bg-slate-900 border-white/10">
+                   {circuitTypes.map((circuit) => (
+                     <SelectItem key={circuit.value} value={circuit.value} className="text-white text-xs">
+                       <span className="flex items-center gap-2">
+                         <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: circuit.color }} />
+                         {circuit.label}
+                       </span>
+                     </SelectItem>
+                   ))}
+                 </SelectContent>
+               </Select>
+             </div>
             <label className="block text-[10px] uppercase tracking-wider text-white/35 px-1">Circuit ID</label>
             <input
               value={selectedCircuitId}
