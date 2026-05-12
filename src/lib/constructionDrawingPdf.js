@@ -1136,39 +1136,41 @@ export async function runConstructionDrawingPdf({
     onProgress?.(stepsDone, totalSteps, label);
   };
 
-  // ── Capture the floor plan image ──
-  // Priority order:
-  //  1. captureRef.getLayoutDataURL() — full vector render the designer set up
-  //  2. canvasRef.current.toDataURL() — what's on screen right now
-  //  3. pickFloorPlanForPdfExport + loadPlanUrlAsPngDataUrl / renderPdfPageToDataUrl
-  //     — uploaded plan for the active floor when the canvas is unavailable.
-  let floorImgData = null;
-  let floorImgDims = { width: 4, height: 3 };
+  /**
+   * Load a raw plan image for a floor from stored floorPlans array.
+   * Returns { dataUrl, dims } or null.
+   */
+  const loadRawPlanForFloor = async (floor) => {
+    const plan = pickFloorPlanForPdfExport(floorPlans, floor);
+    if (!plan) return null;
+    const imageUrl = (plan.image_url || '').trim();
+    const fileUrl  = (plan.file_url  || '').trim();
+    const pageNum  = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
+    const isPdf    = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl || imageUrl);
 
-  const captureFloorPlan = async () => {
-    try {
-      if (captureRef?.current && typeof captureRef.current.getLayoutDataURL === 'function') {
-        // MUST await — getLayoutDataURL is async (re-fetches blueprint as blob to avoid taint)
-        const hi = await captureRef.current.getLayoutDataURL({
-          mimeType: 'image/png',
-          fitContent: true,
-          maxOutputEdge: 8192,
-          exportMarginPx: 48,
-          pixelRatio: 3,
-        });
-        if (hi && hi.length > 1000) return hi;
-      }
-    } catch (err) {
-      console.warn('[PDF] captureRef.getLayoutDataURL failed:', err?.message || err);
+    let dataUrl = null;
+    if (isPdf && (fileUrl || imageUrl)) {
+      try {
+        const rendered = await renderPdfPageToDataUrl(fileUrl || imageUrl, pageNum, 4);
+        dataUrl = rendered?.dataUrl || null;
+      } catch { /* fall through */ }
     }
-    // Never fall back to canvas.toDataURL — cross-origin blueprint taints the canvas
-    return null;
+    if (!dataUrl && imageUrl && !isPdf) dataUrl = await loadPlanUrlAsPngDataUrl(imageUrl, { maxEdge: 12000 });
+    if (!dataUrl && fileUrl  && !isPdf) dataUrl = await loadPlanUrlAsPngDataUrl(fileUrl,  { maxEdge: 12000 });
+    if (!dataUrl) return null;
+
+    const dims = await new Promise(resolve => {
+      const img = new Image();
+      img.onload  = () => resolve({ width: img.naturalWidth || 4, height: img.naturalHeight || 3 });
+      img.onerror = () => resolve({ width: 4, height: 3 });
+      img.src = dataUrl;
+    });
+    return { dataUrl, dims };
   };
 
   /**
-   * Given a raw plan data URL and a floor number, apply the CAD composite:
-   * white background + monochrome threshold + vector device symbols.
-   * Returns a new data URL (PNG) of the composited canvas.
+   * Apply CAD composite: white bg + monochrome threshold + vector device symbols + wires.
+   * Always used — consistent for every floor, no live-canvas dependency.
    */
   const applyCADComposite = async (rawDataUrl, floor, imgW, imgH) => {
     if (!rawDataUrl) return rawDataUrl;
@@ -1207,53 +1209,13 @@ export async function runConstructionDrawingPdf({
     }
   };
 
-  // Track whether the active floor image came from the live canvas capture.
-  // If it did, it already contains all devices + wires rendered correctly —
-  // do NOT run applyCADComposite on it (that would strip wires and re-draw
-  // only devices using the cadRenderer, losing circuit lines).
-  let activeFloorFromCapture = false;
-
-  floorImgData = await captureFloorPlan();
-  if (floorImgData) {
-    activeFloorFromCapture = true;
-  } else {
-    const plan = pickFloorPlanForPdfExport(floorPlans, activeFloor);
-    if (plan) {
-      const imageUrl = (plan.image_url || '').trim();
-      const fileUrl  = (plan.file_url  || '').trim();
-      const pageNum  = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
-      const isPdf    = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl || imageUrl);
-
-      if (isPdf && (fileUrl || imageUrl)) {
-        try {
-          const rendered = await renderPdfPageToDataUrl(fileUrl || imageUrl, pageNum, 4);
-          floorImgData = rendered?.dataUrl || null;
-        } catch { /* fall through to image fetch */ }
-      }
-
-      if (!floorImgData && imageUrl && !isPdf) {
-        floorImgData = await loadPlanUrlAsPngDataUrl(imageUrl, { maxEdge: 12000 });
-      }
-
-      if (!floorImgData && fileUrl && !isPdf) {
-        floorImgData = await loadPlanUrlAsPngDataUrl(fileUrl, { maxEdge: 12000 });
-      }
-    }
-  }
-
-  if (floorImgData) {
-    floorImgDims = await new Promise(resolve => {
-      const img = new Image();
-      img.onload = () => resolve({ width: img.naturalWidth || 4, height: img.naturalHeight || 3 });
-      img.onerror = () => resolve({ width: 4, height: 3 });
-      img.src = floorImgData;
-    });
-    // Only apply CAD composite when using a raw plan image fallback.
-    // When the image came from captureRef (live canvas), it already has
-    // devices + wires correctly rendered — skip composite to avoid losing them.
-    if (!activeFloorFromCapture) {
-      floorImgData = await applyCADComposite(floorImgData, activeFloor, floorImgDims.width, floorImgDims.height);
-    }
+  // Pre-load the active floor plan image (same source as the preview)
+  let floorImgData = null;
+  let floorImgDims = { width: 4, height: 3 };
+  const activePlan = await loadRawPlanForFloor(activeFloor);
+  if (activePlan) {
+    floorImgDims = activePlan.dims;
+    floorImgData = await applyCADComposite(activePlan.dataUrl, activeFloor, activePlan.dims.width, activePlan.dims.height);
   }
 
   // Load logo: prefer hosted URL (small DB field); optional legacy data URL.
@@ -1285,38 +1247,15 @@ export async function runConstructionDrawingPdf({
       let thisFloorImg = null;
       let thisFloorDims = { width: 4, height: 3 };
 
-      // For the active floor, re-use the already-captured image
       if (floor === activeFloor && floorImgData) {
+        // Reuse the already-composited active floor image
         thisFloorImg  = floorImgData;
         thisFloorDims = floorImgDims;
       } else {
-        // Fetch from stored plan
-        const plan = pickFloorPlanForPdfExport(floorPlans, floor);
-        if (plan) {
-          const fu   = (plan.file_url  || '').trim();
-          const iu   = (plan.image_url || '').trim();
-          const pg   = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
-          const isPdf = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fu || iu);
-
-          if (isPdf && (fu || iu)) {
-            try {
-              const rendered = await renderPdfPageToDataUrl(fu || iu, pg, 4);
-              thisFloorImg = rendered?.dataUrl || null;
-            } catch { /* fall through */ }
-          }
-          if (!thisFloorImg && (iu || fu) && !isPdf) {
-            thisFloorImg = await loadPlanUrlAsPngDataUrl(iu || fu, { maxEdge: 12000 });
-          }
-          if (thisFloorImg) {
-            thisFloorDims = await new Promise(resolve => {
-              const img = new Image();
-              img.onload  = () => resolve({ width: img.naturalWidth || 4, height: img.naturalHeight || 3 });
-              img.onerror = () => resolve({ width: 4, height: 3 });
-              img.src = thisFloorImg;
-            });
-            // Apply CAD composite: white bg + monochrome threshold + vector symbols
-            thisFloorImg = await applyCADComposite(thisFloorImg, floor, thisFloorDims.width, thisFloorDims.height);
-          }
+        const rawPlan = await loadRawPlanForFloor(floor);
+        if (rawPlan) {
+          thisFloorDims = rawPlan.dims;
+          thisFloorImg  = await applyCADComposite(rawPlan.dataUrl, floor, rawPlan.dims.width, rawPlan.dims.height);
         }
       }
 
