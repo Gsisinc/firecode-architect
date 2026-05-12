@@ -63,19 +63,28 @@ export default function SubmittalPackage({
   const [generating, setGenerating] = useState(false);
   const [submittalMeta, setSubmittalMeta] = useState(() => ({ ...DEFAULT_FA0_META }));
 
+  // Sync from server only when the *project record* changes. Do NOT depend on
+  // `project.submittal_meta` by reference: React Query refetches after autosave
+  // return a new object identity for the same data, which was resetting this
+  // form on every refetch and made inputs unfocus / "kick" the user out.
   useEffect(() => {
     const m = project?.submittal_meta;
-    if (!m || typeof m !== "object") { setSubmittalMeta({ ...DEFAULT_FA0_META }); return; }
+    if (!m || typeof m !== "object") {
+      setSubmittalMeta({ ...DEFAULT_FA0_META });
+      return;
+    }
     setSubmittalMeta({
-      ...DEFAULT_FA0_META, ...m,
+      ...DEFAULT_FA0_META,
+      ...m,
       drawing_index_lines: Array.isArray(m.drawing_index_lines)
         ? m.drawing_index_lines.join("\n")
         : m.drawing_index_lines ?? DEFAULT_FA0_META.drawing_index_lines,
-      revisions: Array.isArray(m.revisions) && m.revisions.length
-        ? DEFAULT_FA0_META.revisions.map((def, i) => ({ ...def, ...(m.revisions[i] || {}) }))
-        : DEFAULT_FA0_META.revisions,
+      revisions:
+        Array.isArray(m.revisions) && m.revisions.length
+          ? DEFAULT_FA0_META.revisions.map((def, i) => ({ ...def, ...(m.revisions[i] || {}) }))
+          : DEFAULT_FA0_META.revisions,
     });
-  }, [project?.id, project?.submittal_meta]);
+  }, [project?.id]);
 
   const set = (field) => (e) => setSubmittalMeta((m) => ({ ...m, [field]: e.target.value }));
   const setRev = (i, field, value) => setSubmittalMeta((s) => {
@@ -109,7 +118,10 @@ export default function SubmittalPackage({
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-2xl flex flex-col max-h-[95vh]">
+      <Card
+        className="w-full max-w-2xl flex flex-col max-h-[95vh]"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <CardHeader className="py-3 px-4 flex flex-row items-center justify-between shrink-0 border-b">
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-orange-500" />
@@ -123,8 +135,8 @@ export default function SubmittalPackage({
           </Button>
         </CardHeader>
 
-        <CardContent className="p-0 flex-1 overflow-hidden">
-          <Tabs defaultValue="company" className="h-full flex flex-col">
+        <CardContent className="p-0 flex-1 flex flex-col min-h-0 overflow-hidden">
+          <Tabs defaultValue="company" className="flex flex-1 flex-col min-h-0">
             <TabsList className="mx-4 mt-3 shrink-0">
               <TabsTrigger value="company" className="text-xs gap-1">
                 <Building2 className="w-3 h-3" />Company &amp; Logo
@@ -137,10 +149,8 @@ export default function SubmittalPackage({
               </TabsTrigger>
             </TabsList>
 
-            <div className="flex-1 overflow-y-auto px-4 pb-4">
-
               {/* ── COMPANY TAB ── */}
-              <TabsContent value="company" className="space-y-3 mt-3">
+              <TabsContent value="company" className="mx-4 mt-3 mb-4 flex-1 min-h-0 overflow-y-auto space-y-3 outline-none">
                 <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-800">
                   This information fills the <strong>right title block column</strong> on every sheet — matching the reference drawings with company logo, address, and engineer stamp box.
                 </div>
@@ -194,7 +204,7 @@ export default function SubmittalPackage({
               </TabsContent>
 
               {/* ── PROJECT TAB ── */}
-              <TabsContent value="project" className="space-y-3 mt-3">
+              <TabsContent value="project" className="mx-4 mt-3 mb-4 flex-1 min-h-0 overflow-y-auto space-y-3 outline-none">
                 <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-800">
                   <strong>Battery calcs, NAC loading, and riser diagram</strong> are auto-generated from your placed devices. The floor plan sheet embeds the full-resolution drawing — not a screenshot.
                 </div>
@@ -233,7 +243,7 @@ export default function SubmittalPackage({
               </TabsContent>
 
               {/* ── REVISIONS & INDEX TAB ── */}
-              <TabsContent value="revisions" className="space-y-3 mt-3">
+              <TabsContent value="revisions" className="mx-4 mt-3 mb-4 flex-1 min-h-0 overflow-y-auto space-y-3 outline-none">
                 <F label="Drawing Index (one line per sheet — appears on FA0.01)">
                   <Textarea className="text-xs min-h-[72px] font-mono"
                     value={submittalMeta.drawing_index_lines} onChange={set("drawing_index_lines")} />
@@ -260,7 +270,6 @@ export default function SubmittalPackage({
                   </div>
                 </div>
               </TabsContent>
-            </div>
           </Tabs>
         </CardContent>
 
