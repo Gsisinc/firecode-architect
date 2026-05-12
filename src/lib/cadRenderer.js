@@ -146,6 +146,64 @@ function drawLabel(ctx, cx, cy, r, text) {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
+ * Draw circuit wire lines for a given floor onto `ctx`.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array} devices  – all project devices (to resolve from/to IDs → coordinates)
+ * @param {Array} wires    – all project wires
+ * @param {number} floor
+ * @param {number} scaleX
+ * @param {number} scaleY
+ */
+export function drawCadWires(ctx, devices, wires, floor, scaleX, scaleY) {
+  if (!wires || wires.length === 0) return;
+  const devMap = {};
+  (devices || []).forEach(d => { devMap[d.id] = d; });
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+
+  (wires || []).filter(w => Number(w.floor ?? floor) === Number(floor)).forEach(wire => {
+    const a = devMap[wire.from];
+    const b = devMap[wire.to];
+    if (!a || !b || a.x == null || b.x == null) return;
+    if (Number(a.floor) !== Number(floor) || Number(b.floor) !== Number(floor)) return;
+
+    const ct = String(wire.type || wire.circuit_type || 'SLC').toUpperCase();
+    const isNac = ct.includes('NAC');
+    const isAux = ct.includes('AUX');
+
+    ctx.beginPath();
+    ctx.moveTo(a.x * scaleX, a.y * scaleY);
+    ctx.lineTo(b.x * scaleX, b.y * scaleY);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = isNac ? 2 : 1.4;
+    ctx.setLineDash(isAux ? [4, 3] : isNac ? [] : [8, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Small circuit label at midpoint
+    const mx = ((a.x + b.x) / 2) * scaleX;
+    const my = ((a.y + b.y) / 2) * scaleY;
+    const lbl = wire.circuit || wire.type || ct;
+    ctx.save();
+    ctx.font = '10px "Courier New", Courier, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    const tw = ctx.measureText(lbl).width;
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(mx - tw / 2 - 2, my - 12, tw + 4, 13);
+    ctx.fillStyle = '#000000';
+    ctx.fillText(lbl, mx, my - 1);
+    ctx.restore();
+  });
+
+  ctx.restore();
+}
+
+/**
  * Draw all device symbols for a given floor onto `ctx`.
  *
  * @param {CanvasRenderingContext2D} ctx
@@ -261,6 +319,7 @@ export function applyMonochromeThreshold(imageData, threshold = 210) {
 export async function renderCadComposite(planDataUrl, opts = {}) {
   const {
     devices,
+    wires,
     floor,
     planNaturalW,
     planNaturalH,
@@ -291,8 +350,11 @@ export async function renderCadComposite(planDataUrl, opts = {}) {
     ctx.putImageData(applyMonochromeThreshold(imageData, threshold), 0, 0);
   }
 
-  // 4. Draw CAD device symbols — crisp, no smoothing
+  // 4. Draw circuit wires first (under devices)
   ctx.imageSmoothingEnabled = false;
+  drawCadWires(ctx, devices, wires, floor, 1, 1);
+
+  // 5. Draw CAD device symbols on top
   drawCadDevices(ctx, devices, floor, 1, 1, symbolRadius);
 
   return canvas;

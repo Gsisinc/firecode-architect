@@ -1116,7 +1116,7 @@ export async function runConstructionDrawingPdf({
   project,
   devices = [],
   rooms = [],
-  wires: _wires = [],
+  wires = [],
   floorPlans = [],
   analysisResults,
   captureRef,
@@ -1176,6 +1176,7 @@ export async function runConstructionDrawingPdf({
       const symbolRadius = Math.max(10, Math.round(Math.min(imgW, imgH) / 80));
       const cadCanvas = await renderCadComposite(rawDataUrl, {
         devices,
+        wires,
         floor,
         planNaturalW: imgW,
         planNaturalH: imgH,
