@@ -91,3 +91,40 @@ export function pickFloorPlanForPdfExport(floorPlans, activeFloor) {
   }
   return onFloor.find((fp) => fp.image_url || fp.file_url) || onFloor[0];
 }
+
+const LEGEND_KEYWORDS = /legend|notes|fa0|abbreviation|general|index|cover/i;
+
+/**
+ * Same floor as the designer canvas: numeric floor match, optional sheet_id preference,
+ * and plan-type priority (skip obvious legend-only sheets when possible).
+ *
+ * @param {Array<object>} floorPlans
+ * @param {number|string} activeFloor
+ * @returns {object|undefined}
+ */
+export function pickFloorPlanForCanvas(floorPlans, activeFloor) {
+  const n = Number(activeFloor);
+  const onFloor = (floorPlans || []).filter(
+    (fp) => Number(fp.floor_number) === n && (fp.image_url || fp.file_url)
+  );
+  if (onFloor.length === 0) return undefined;
+  if (onFloor.length === 1) return onFloor[0];
+
+  const assigned = onFloor.filter((fp) => fp.sheet_id);
+  const pool = assigned.length > 0 ? assigned : onFloor;
+
+  const priority = ['Floor Plan', 'Architectural', 'Fire Alarm', 'floor_plan'];
+  for (const pt of priority) {
+    const hit = pool.find(
+      (fp) =>
+        (fp.plan_type || 'floor_plan') === pt &&
+        !LEGEND_KEYWORDS.test(fp.file_name || fp.title || fp.sheet_text?.slice(0, 100) || '')
+    );
+    if (hit) return hit;
+  }
+  for (const pt of priority) {
+    const hit = pool.find((fp) => (fp.plan_type || 'floor_plan') === pt);
+    if (hit) return hit;
+  }
+  return pool.sort((a, b) => Number(b.page_number || 0) - Number(a.page_number || 0))[0];
+}

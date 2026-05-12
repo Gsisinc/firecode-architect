@@ -42,6 +42,7 @@ import { useBlueprintEditorStore } from "@/stores/blueprintEditorStore";
 import { mergeGeneratedDevices } from "@/lib/designValidation";
 import { renderPdfPageToDataUrl } from "@/lib/documentEngine";
 import { analyzeUploadedSheet, classifyPlanFromText } from "@/lib/planVision";
+import { pickFloorPlanForCanvas } from "@/lib/planImageExport";
 import { nudgeDevicesOutOfBlockedZones, normalizeDetectedLayoutZones, mergeLayoutZones, suggestFacpPlacementPx } from "@/lib/layoutZones";
 import { readProjectBackup, writeProjectBackup, applyProjectBackup } from "@/lib/projectBackup";
 
@@ -463,13 +464,17 @@ export default function ProjectDesigner() {
   };
 
   const handleAnalyzeFloorPlan = async () => {
-    const plan = floorPlans.find(fp => fp.floor_number === activeFloor);
-    if (!plan?.image_url) { toast.error("Upload a floor plan first"); return; }
+    const plan = pickFloorPlanForCanvas(floorPlans, activeFloor);
+    const planUrl = (plan?.image_url || plan?.file_url || "").trim();
+    if (!plan || !planUrl) {
+      toast.error("Upload a floor plan first", { id: "need-floor-plan" });
+      return;
+    }
     setAnalyzingFloor(true);
     toast.info("AI is reading blueprint dimensions — step 1 of 2...");
-    let analysisImageUrl = plan.image_url;
+    let analysisImageUrl = plan.rendered_image_url || plan.image_url || plan.file_url;
 
-    if (plan.file_type === 'application/pdf') {
+    if (plan.file_type === "application/pdf" || /\.pdf($|\?)/i.test(String(analysisImageUrl || ""))) {
       try {
         const renderedPage = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
         analysisImageUrl = renderedPage.dataUrl;
@@ -899,16 +904,17 @@ Exclude: title block, sheet border, north arrow, exterior areas outside walls.`,
 
   const handleDetectSimilarLayoutZones = async (seedZone) => {
     if (!seedZone || detectingSimilarZones) return;
-    const plan = floorPlans.find(fp => fp.floor_number === activeFloor);
-    if (!plan?.image_url) {
-      toast.error("Assign a floor plan before detecting similar racks or aisles");
+    const plan = pickFloorPlanForCanvas(floorPlans, activeFloor);
+    const planUrl = (plan?.image_url || plan?.file_url || "").trim();
+    if (!plan || !planUrl) {
+      toast.error("Assign a floor plan before detecting similar racks or aisles", { id: "need-floor-plan-zones" });
       return;
     }
 
     setDetectingSimilarZones(true);
     try {
-      let analysisImageUrl = plan.rendered_image_url || plan.image_url;
-      if (!plan.rendered_image_url && plan.file_type === 'application/pdf') {
+      let analysisImageUrl = plan.rendered_image_url || plan.image_url || plan.file_url;
+      if (!plan.rendered_image_url && (plan.file_type === "application/pdf" || /\.pdf($|\?)/i.test(String(analysisImageUrl || "")))) {
         const renderedPage = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
         analysisImageUrl = renderedPage.dataUrl;
       }
@@ -1375,7 +1381,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
           {activeTab === 'canvas' && (
             <>
               <FloorPlanCanvas
-                floorPlanUrl={currentFloorPlan?.image_url}
+                floorPlanUrl={currentFloorPlan?.image_url || currentFloorPlan?.file_url}
                 floorPlanFileType={currentFloorPlan?.file_type}
                 floorPlanPreviewUrl={currentFloorPlan?.rendered_image_url}
                 floorPlanPageNumber={currentFloorPlan?.page_number || 1}
@@ -1417,7 +1423,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
               />
               <FloorPlanUploader
                 floorNumber={activeFloor}
-                currentUrl={currentFloorPlan?.image_url}
+                currentUrl={currentFloorPlan?.image_url || currentFloorPlan?.file_url}
                 onUploaded={handleFloorPlanUploaded}
                 onAnalyze={handleAnalyzeFloorPlan}
                 analyzing={analyzingFloor}
@@ -1936,34 +1942,6 @@ function mergePlanSheets(existing = [], incoming = []) {
   const keyFor = (sheet) => `${sheet.file_url || sheet.file_name}-${sheet.page_number}`;
   const seen = new Set(incoming.map(keyFor));
   return [...existing.filter((sheet) => !seen.has(keyFor(sheet))), ...incoming];
-}
-
-/** Sidebar floors are numeric; API may store floor_number as string. Multiple plan types per floor are supported — pick the best one for the canvas. */
-function pickFloorPlanForCanvas(floorPlans, activeFloor) {
-  const n = Number(activeFloor);
-  const onFloor = (floorPlans || []).filter((fp) => Number(fp.floor_number) === n && (fp.image_url || fp.file_url));
-  if (onFloor.length === 0) return undefined;
-  if (onFloor.length === 1) return onFloor[0];
-
-  // Prefer user-assigned sheets (have sheet_id) over auto-derived entries
-  const assigned = onFloor.filter((fp) => fp.sheet_id);
-  const pool = assigned.length > 0 ? assigned : onFloor;
-
-  // Among the pool, prefer by plan type priority — but skip types that look like legend/notes sheets
-  const LEGEND_KEYWORDS = /legend|notes|fa0|abbreviation|general|index|cover/i;
-  const priority = ['Floor Plan', 'Architectural', 'Fire Alarm', 'floor_plan'];
-  for (const pt of priority) {
-    // First try non-legend entries
-    const hit = pool.find((fp) => (fp.plan_type || 'floor_plan') === pt && !LEGEND_KEYWORDS.test(fp.file_name || fp.title || fp.sheet_text?.slice(0, 100) || ''));
-    if (hit) return hit;
-  }
-  // Fallback: any matching type including legend
-  for (const pt of priority) {
-    const hit = pool.find((fp) => (fp.plan_type || 'floor_plan') === pt);
-    if (hit) return hit;
-  }
-  // Last resort: highest page number (floor plan drawing is usually later in the PDF than legend)
-  return pool.sort((a, b) => Number(b.page_number || 0) - Number(a.page_number || 0))[0];
 }
 
 function upsertFloorPlan(floorPlans = [], plan) {

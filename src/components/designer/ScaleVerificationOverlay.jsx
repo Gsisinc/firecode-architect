@@ -18,6 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
+import { pickFloorPlanForCanvas } from '@/lib/planImageExport';
 import { getFloorScale, updateFloorPlanManualCalibration } from '@/lib/designScale';
 import { deriveDetectionGeometry } from '@/lib/floorPlanDetection';
 import { useBlueprintEditorStore } from '@/stores/blueprintEditorStore';
@@ -210,9 +211,10 @@ export default function ScaleVerificationOverlay({
 
   // ── Auto-calibration: call AI to read scale from image ───────────────────
   const handleAutoCalibrate = useCallback(async () => {
-    const plan = floorPlans.find((fp) => Number(fp.floor_number) === Number(currentFloor));
-    if (!plan?.image_url && !plan?.file_url) {
-      toast.error('Upload a floor plan first');
+    const plan = pickFloorPlanForCanvas(floorPlans, currentFloor);
+    const planUrl = (plan?.image_url || plan?.file_url || '').trim();
+    if (!plan || !planUrl) {
+      toast.error('Upload a floor plan first', { id: 'need-floor-plan' });
       return;
     }
     setAutoCalLoading(true);
