@@ -1122,9 +1122,18 @@ export async function runConstructionDrawingPdf({
   canvasRef,
   activeFloor = 1,
   submittalMeta = {},
+  onProgress = null,
 }) {
-  const meta = { ...submittalMeta };
-  const pName = project?.name || 'Fire Alarm System';
+  const meta    = { ...submittalMeta };
+  const pName   = project?.name || 'Fire Alarm System';
+  const numFloors = Math.max(1, project?.num_floors || 1);
+  // progress helper: total = legend(1) + floors(N) + riser(1)
+  const totalSteps = 1 + numFloors + 1;
+  let stepsDone = 0;
+  const progress = (label) => {
+    stepsDone += 1;
+    onProgress?.(stepsDone, totalSteps, label);
+  };
 
   // ── Capture the floor plan image ──
   // Priority order:
@@ -1220,19 +1229,77 @@ export async function runConstructionDrawingPdf({
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [SHEET_W, SHEET_H] });
 
   // ── Sheet 1: Legend / Abbreviations / General Notes / Drawing Index ──
+  onProgress?.(0, totalSteps, 'Building legend sheet…');
   await generateLegendSheet(doc, project, devices, meta, logoDataUrl);
+  progress('Legend sheet done');
 
-  // ── Sheet 2: Floor Plan ──
-  doc.addPage([SHEET_W, SHEET_H], 'landscape');
-  await generateFloorPlanSheet(
-    doc, project, rooms, devices, [],
-    floorImgData, floorImgDims.width, floorImgDims.height,
-    activeFloor, meta, logoDataUrl, []
-  );
+  // ── One floor-plan sheet per floor (batched to avoid OOM on large projects) ──
+  // Process floors in batches of 5 — render, add to PDF, then release canvas memory
+  const BATCH_SIZE = 5;
+  for (let batchStart = 1; batchStart <= numFloors; batchStart += BATCH_SIZE) {
+    const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, numFloors);
 
-  // ── Sheet 3: System One-Line Riser + FACP I/O + Battery ──
+    for (let floor = batchStart; floor <= batchEnd; floor++) {
+      onProgress?.(stepsDone, totalSteps, `Rendering floor ${floor} of ${numFloors}…`);
+
+      // Capture image for this floor
+      let thisFloorImg = null;
+      let thisFloorDims = { width: 4, height: 3 };
+
+      // For the active floor, re-use the already-captured image
+      if (floor === activeFloor && floorImgData) {
+        thisFloorImg  = floorImgData;
+        thisFloorDims = floorImgDims;
+      } else {
+        // Fetch from stored plan
+        const plan = pickFloorPlanForPdfExport(floorPlans, floor);
+        if (plan) {
+          const fu   = (plan.file_url  || '').trim();
+          const iu   = (plan.image_url || '').trim();
+          const pg   = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
+          const isPdf = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fu || iu);
+
+          if (isPdf && (fu || iu)) {
+            try {
+              const rendered = await renderPdfPageToDataUrl(fu || iu, pg, 4);
+              thisFloorImg = rendered?.dataUrl || null;
+            } catch { /* fall through */ }
+          }
+          if (!thisFloorImg && (iu || fu) && !isPdf) {
+            thisFloorImg = await loadPlanUrlAsPngDataUrl(iu || fu, { maxEdge: 12000 });
+          }
+          if (thisFloorImg) {
+            thisFloorDims = await new Promise(resolve => {
+              const img = new Image();
+              img.onload  = () => resolve({ width: img.naturalWidth || 4, height: img.naturalHeight || 3 });
+              img.onerror = () => resolve({ width: 4, height: 3 });
+              img.src = thisFloorImg;
+            });
+          }
+        }
+      }
+
+      doc.addPage([SHEET_W, SHEET_H], 'landscape');
+      await generateFloorPlanSheet(
+        doc, project, rooms, devices, [],
+        thisFloorImg, thisFloorDims.width, thisFloorDims.height,
+        floor, meta, logoDataUrl, []
+      );
+
+      // Release memory — let GC collect the potentially large data URL
+      thisFloorImg = null;
+      progress(`Floor ${floor} done`);
+    }
+
+    // Yield to the event loop between batches so the browser stays responsive
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  // ── Final sheet: System One-Line Riser + FACP I/O + Battery ──
+  onProgress?.(stepsDone, totalSteps, 'Building riser/matrix sheet…');
   doc.addPage([SHEET_W, SHEET_H], 'landscape');
   await generateRiserSheet(doc, project, devices, analysisResults, meta, logoDataUrl);
+  progress('Riser sheet done');
 
   const fileName = `${(pName).replace(/\s+/g, '_')}_Construction_Drawings.pdf`;
   doc.save(fileName);
