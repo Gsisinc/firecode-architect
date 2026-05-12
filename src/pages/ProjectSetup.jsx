@@ -77,6 +77,12 @@ export default function ProjectSetup() {
   }, [isNew, searchParams]);
 
   useEffect(() => {
+    if (!isFireAlarmDiscipline(form.primary_discipline)) {
+      setAnalysisPreview(null);
+    }
+  }, [form.primary_discipline]);
+
+  useEffect(() => {
     if (existingProject) {
       setForm({
         ...existingProject,
@@ -95,8 +101,12 @@ export default function ProjectSetup() {
           data.default_ceiling_height === '' || data.default_ceiling_height == null
             ? 0
             : Number(data.default_ceiling_height),
+        occupant_load_per_floor: data.occupant_load_per_floor || [],
+        gross_sqft_per_floor: data.gross_sqft_per_floor || [],
       };
-      const analysis = determineSystemRequirements(normalized);
+      const analysis = isFireAlarmDiscipline(normalized.primary_discipline)
+        ? determineSystemRequirements(normalized)
+        : null;
 
       if (isNew) {
         const payload = { ...normalized, analysis_results: analysis };
@@ -182,7 +192,11 @@ export default function ProjectSetup() {
   };
 
   const runAnalysisPreview = () => {
-    const result = determineSystemRequirements(form);
+    const result = determineSystemRequirements({
+      ...form,
+      occupant_load_per_floor: form.occupant_load_per_floor || [],
+      gross_sqft_per_floor: form.gross_sqft_per_floor || [],
+    });
     setAnalysisPreview(result);
   };
 
@@ -312,7 +326,10 @@ export default function ProjectSetup() {
               </p>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Occupancy Group" required>
-                  <Select value={f.occupancy_group} onValueChange={v => setForm(p => ({ ...p, occupancy_group: v }))}>
+                  <Select
+                    value={f.occupancy_group || undefined}
+                    onValueChange={(v) => setForm((p) => ({ ...p, occupancy_group: v }))}
+                  >
                     <SelectTrigger className="bg-white border-slate-200"><SelectValue placeholder="Select..." /></SelectTrigger>
                     <SelectContent>
                       {OCCUPANCY_GROUPS.map(g => <SelectItem key={g} value={g}>Group {g}</SelectItem>)}
@@ -572,14 +589,14 @@ export default function ProjectSetup() {
                   )}
                   <div className="mt-3 pt-3 border-t border-slate-200">
                     <p className="text-xs text-slate-500 font-medium mb-2">Code References:</p>
-                    {analysisPreview.codeReferences.map((ref, i) => (
+                    {(analysisPreview.codeReferences || []).map((ref, i) => (
                       <span key={i} className="block text-xs text-slate-600">{ref}</span>
                     ))}
                   </div>
-                  {analysisPreview.specialNotes.length > 0 && (
+                  {(analysisPreview.specialNotes || []).length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-200 space-y-1.5">
                       <p className="text-xs text-slate-500 font-medium">Notes:</p>
-                      {analysisPreview.specialNotes.map((note, i) => (
+                      {(analysisPreview.specialNotes || []).map((note, i) => (
                         <div key={i} className="flex items-start gap-1.5">
                           <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
                           <p className="text-xs text-slate-600">{note}</p>
@@ -621,11 +638,12 @@ function ComplianceNotice() {
   );
 }
 
-function Field({ label, required, children }) {
+function Field({ label, required, hint, children }) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs text-slate-600">{label}{required && <span className="text-red-600 ml-0.5">*</span>}</Label>
       {children}
+      {hint && <p className="text-[11px] text-slate-500 mt-1">{hint}</p>}
     </div>
   );
 }
