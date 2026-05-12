@@ -20,6 +20,7 @@ import { dataUrlImageFormat } from '@/lib/submittalBranding';
 import { pickFloorPlanForPdfExport, loadPlanUrlAsPngDataUrl } from '@/lib/planImageExport';
 import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
 import { renderCadComposite } from '@/lib/cadRenderer';
+import { renderRiserToDataUrl } from '@/lib/riserSvgRenderer';
 
 // ─── Sheet dimensions (mm) ───────────────────────────────────────────────────
 const SHEET_W = 914.4;  // 36"
@@ -790,27 +791,38 @@ export async function generateRiserSheet(doc, project, devices, _analysisResults
   const W = DRAW_W - 4;
   const H = DRAW_H - 4;
 
-  // Split into left (I/O matrix) and right (one-line riser)
-  const leftW = W * 0.37;
-  const rightX = baseX + leftW + 5;
-  const rightW = W - leftW - 5;
+  // ── TOP: Full-width proper riser diagram (canvas-rendered, matches the Riser tab) ──
+  const riserH = H * 0.62;
+  try {
+    const { dataUrl, width, height } = renderRiserToDataUrl(project, devices);
+    const scale = Math.min((W - 4) / width, (riserH - 4) / height);
+    const dw = width * scale;
+    const dh = height * scale;
+    const dx = baseX + (W - dw) / 2;
+    const dy = baseY;
+    doc.addImage(dataUrl, 'PNG', dx, dy, dw, dh);
+  } catch (err) {
+    // fallback: text placeholder
+    setFont(doc, 9, 'normal', C_GRAY);
+    doc.text('Riser diagram unavailable', baseX + W / 2, baseY + riserH / 2, { align: 'center' });
+  }
 
-  // ── LEFT: FACP I/O Matrix ─────────────────────────────────────────────────
-  drawFacpIOMatrix(doc, baseX, baseY, leftW, H * 0.55, project, devices, meta);
+  // ── BOTTOM LEFT: FACP I/O Matrix ─────────────────────────────────────────
+  const bottomY = baseY + riserH + 4;
+  const bottomH = H - riserH - 6;
+  const leftW = W * 0.5;
+  const rightX = baseX + leftW + 4;
+  const rightW = W - leftW - 4;
 
-  // ── LEFT BELOW: Battery + Code-3 notes ───────────────────────────────────
-  const battY = baseY + H * 0.55 + 4;
-  const battH = H - H * 0.55 - 6;
+  drawFacpIOMatrix(doc, baseX, bottomY, leftW, bottomH * 0.65, project, devices, meta);
+
+  // ── BOTTOM LEFT BELOW: Battery calc ──────────────────────────────────────
+  const battY = bottomY + bottomH * 0.65 + 3;
+  const battH = bottomH - bottomH * 0.65 - 3;
   drawBatteryCalcBlock(doc, baseX, battY, leftW, battH, devices, meta);
 
-  // ── RIGHT: System One-Line Riser ──────────────────────────────────────────
-  const riserH = H * 0.7;
-  drawOneLineRiser(doc, rightX, baseY, rightW, riserH, project, devices);
-
-  // ── RIGHT BELOW: General Requirement Notes ───────────────────────────────
-  const gnY = baseY + riserH + 4;
-  const gnH = H - riserH - 6;
-  drawGeneralNotesSide(doc, rightX, gnY, rightW, gnH);
+  // ── BOTTOM RIGHT: General Notes ───────────────────────────────────────────
+  drawGeneralNotesSide(doc, rightX, bottomY, rightW, bottomH);
 }
 
 function drawFacpIOMatrix(doc, x, y, w, _h, project, devices, _meta) {
@@ -971,7 +983,8 @@ function drawBatteryCalcBlock(doc, x, y, w, h, devices, _meta) {
   }
 }
 
-function drawOneLineRiser(doc, x, y, w, h, project, devices) {
+// eslint-disable-next-line no-unused-vars
+function drawOneLineRiser_UNUSED(doc, x, y, w, h, project, devices) {
   doc.setFillColor(15, 23, 42); doc.rect(x, y, w, 8, 'F');
   setFont(doc, 8, 'bold', C_WHITE);
   doc.text('FIRE ALARM SYSTEM ONE-LINE DIAGRAM', x + w / 2, y + 5.5, { align: 'center' });
@@ -1169,19 +1182,96 @@ export async function runConstructionDrawingPdf({
   };
 
   /**
-   * Apply CAD composite: white bg + monochrome threshold + vector device symbols + wires.
+   * Crop the original architect's title block from a plan image.
+   * Standard arch drawings have a title block on the right ~18% and/or bottom ~10%.
+   * We detect large white/gray banded regions on those edges and crop them off,
+   * keeping only the actual floor plan drawing area.
+   */
+  const cropTitleBlock = async (dataUrl, imgW, imgH) => {
+    if (!dataUrl || imgW < 10 || imgH < 10) return { dataUrl, w: imgW, h: imgH };
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = imgW;
+        tmpCanvas.height = imgH;
+        const tmpCtx = tmpCanvas.getContext('2d');
+        tmpCtx.drawImage(img, 0, 0, imgW, imgH);
+
+        // Sample columns from the right edge to find where the title block starts.
+        // A title block is mostly light (avg luminance > 220) in a vertical strip.
+        // Walk inward from right until we hit a column that isn't all-light.
+        const SAMPLE_ROWS = 20;
+        const rowStep = Math.max(1, Math.floor(imgH / SAMPLE_ROWS));
+        let cropRightAt = imgW; // x where we cut (exclusive)
+
+        for (let cx = imgW - 1; cx > imgW * 0.6; cx -= Math.max(1, Math.floor(imgW / 200))) {
+          let totalLum = 0;
+          for (let ry = 0; ry < imgH; ry += rowStep) {
+            const p = tmpCtx.getImageData(cx, ry, 1, 1).data;
+            totalLum += (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]);
+          }
+          const avgLum = totalLum / SAMPLE_ROWS;
+          // If this column is NOT uniformly light, the title block starts here
+          if (avgLum < 230) {
+            cropRightAt = cx + Math.max(1, Math.floor(imgW / 200));
+            break;
+          }
+        }
+
+        // Similarly crop bottom — title block note strips at bottom
+        let cropBottomAt = imgH;
+        const COL_SAMPLE = 20;
+        const colStep = Math.max(1, Math.floor(imgW / COL_SAMPLE));
+        for (let cy = imgH - 1; cy > imgH * 0.75; cy -= Math.max(1, Math.floor(imgH / 150))) {
+          let totalLum = 0;
+          for (let rx = 0; rx < cropRightAt; rx += colStep) {
+            const p = tmpCtx.getImageData(rx, cy, 1, 1).data;
+            totalLum += (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]);
+          }
+          const avgLum = totalLum / COL_SAMPLE;
+          if (avgLum < 230) {
+            cropBottomAt = cy + Math.max(1, Math.floor(imgH / 150));
+            break;
+          }
+        }
+
+        // If crop didn't help much (< 5% gain), skip it — the plan might not have a detectable block
+        const cropW = Math.max(Math.round(imgW * 0.5), cropRightAt);
+        const cropH = Math.max(Math.round(imgH * 0.7), cropBottomAt);
+
+        const out = document.createElement('canvas');
+        out.width = cropW;
+        out.height = cropH;
+        const outCtx = out.getContext('2d');
+        outCtx.fillStyle = '#ffffff';
+        outCtx.fillRect(0, 0, cropW, cropH);
+        outCtx.drawImage(tmpCanvas, 0, 0, cropW, cropH, 0, 0, cropW, cropH);
+        resolve({ dataUrl: out.toDataURL('image/png'), w: cropW, h: cropH });
+      };
+      img.onerror = () => resolve({ dataUrl, w: imgW, h: imgH });
+      img.src = dataUrl;
+    });
+  };
+
+  /**
+   * Apply CAD composite: title-block crop + white bg + monochrome threshold + vector device symbols + wires.
    * Always used — consistent for every floor, no live-canvas dependency.
    */
   const applyCADComposite = async (rawDataUrl, floor, imgW, imgH) => {
     if (!rawDataUrl) return rawDataUrl;
     try {
-      const symbolRadius = Math.max(10, Math.round(Math.min(imgW, imgH) / 80));
-      const cadCanvas = await renderCadComposite(rawDataUrl, {
+      // First strip the architect's title block from the uploaded plan
+      const { dataUrl: croppedUrl, w: croppedW, h: croppedH } = await cropTitleBlock(rawDataUrl, imgW, imgH);
+
+      // Symbol radius: small enough to be professional, big enough to be legible
+      const symbolRadius = Math.max(8, Math.round(Math.min(croppedW, croppedH) / 100));
+      const cadCanvas = await renderCadComposite(croppedUrl, {
         devices,
         wires,
         floor,
-        planNaturalW: imgW,
-        planNaturalH: imgH,
+        planNaturalW: croppedW,
+        planNaturalH: croppedH,
         symbolRadius,
         threshold: 210,
       });
@@ -1214,7 +1304,9 @@ export async function runConstructionDrawingPdf({
   let floorImgDims = { width: 4, height: 3 };
   const activePlan = await loadRawPlanForFloor(activeFloor);
   if (activePlan) {
-    floorImgDims = activePlan.dims;
+    const { w: cw, h: ch } = await cropTitleBlock(activePlan.dataUrl, activePlan.dims.width, activePlan.dims.height);
+    floorImgDims = { width: cw, height: ch };
+    // applyCADComposite internally also crops — so just pass raw dims
     floorImgData = await applyCADComposite(activePlan.dataUrl, activeFloor, activePlan.dims.width, activePlan.dims.height);
   }
 
@@ -1254,7 +1346,8 @@ export async function runConstructionDrawingPdf({
       } else {
         const rawPlan = await loadRawPlanForFloor(floor);
         if (rawPlan) {
-          thisFloorDims = rawPlan.dims;
+          const { dataUrl: croppedUrl, w: cw, h: ch } = await cropTitleBlock(rawPlan.dataUrl, rawPlan.dims.width, rawPlan.dims.height);
+          thisFloorDims = { width: cw, height: ch };
           thisFloorImg  = await applyCADComposite(rawPlan.dataUrl, floor, rawPlan.dims.width, rawPlan.dims.height);
         }
       }
