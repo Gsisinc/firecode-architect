@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import {
-  Ruler, Zap, Eye, EyeOff, RefreshCw, Loader2, CheckCircle2, AlertTriangle, X,
+  Ruler, Zap, Eye, EyeOff, RefreshCw, Loader2, CheckCircle2, AlertTriangle, X, Crosshair,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -22,6 +22,7 @@ import { pickFloorPlanForCanvas } from '@/lib/planImageExport';
 import { getFloorScale, updateFloorPlanManualCalibration } from '@/lib/designScale';
 import { deriveDetectionGeometry } from '@/lib/floorPlanDetection';
 import { useBlueprintEditorStore } from '@/stores/blueprintEditorStore';
+import TwoPointCalibration from './TwoPointCalibration';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ export default function ScaleVerificationOverlay({
   const [showRooms, setShowRooms] = useState(true);
   const [showCableRuns, setShowCableRuns] = useState(true);
   const [autoCalLoading, setAutoCalLoading] = useState(false);
+  const [showTwoPoint, setShowTwoPoint] = useState(false);
   const pxPerFt = getFloorScale(floorPlans, currentFloor);
   const setLastCalibration = useBlueprintEditorStore((s) => s.setLastCalibration);
 
@@ -211,10 +213,27 @@ export default function ScaleVerificationOverlay({
 
   // ── Auto-calibration: call AI to read scale from image ───────────────────
   const handleAutoCalibrate = useCallback(async () => {
+    // Diagnostic: log exactly what state the function sees
+    console.log('[AutoCal] floorPlans:', JSON.stringify(floorPlans?.map(p => ({
+      floor: p.floor_number,
+      image_url: p.image_url ? p.image_url.slice(0, 60) : null,
+      file_url: p.file_url ? p.file_url.slice(0, 60) : null,
+      file_type: p.file_type,
+    }))));
+    console.log('[AutoCal] currentFloor:', currentFloor);
+
     const plan = pickFloorPlanForCanvas(floorPlans, currentFloor);
     const planUrl = (plan?.image_url || plan?.file_url || '').trim();
+
     if (!plan || !planUrl) {
-      toast.error('Upload a floor plan first', { id: 'need-floor-plan' });
+      const floorCount = (floorPlans || []).length;
+      const floorNums = (floorPlans || []).map(p => p.floor_number).join(', ');
+      toast.error(
+        floorCount === 0
+          ? 'No floor plans uploaded yet. Upload a plan in the Floor Plan tab first.'
+          : `No plan found for floor ${currentFloor}. Available floors: ${floorNums}. Switch to the correct floor or assign a sheet.`,
+        { id: 'need-floor-plan', duration: 6000 }
+      );
       return;
     }
     setAutoCalLoading(true);
@@ -334,6 +353,21 @@ If a field is not found, omit it or set to null.`,
 
   return (
     <div className="absolute inset-0 pointer-events-none z-20">
+      {/* Two-point calibration overlay (portal-level, covers canvas) */}
+      {showTwoPoint && (
+        <TwoPointCalibration
+          canvasRef={canvasRef}
+          currentFloor={currentFloor}
+          floorPlans={floorPlans}
+          onCalibrationSaved={(nextPlans) => {
+            onFloorPlansUpdate?.(nextPlans);
+            const newPxPerFt = nextPlans.find(p => Number(p.floor_number) === Number(currentFloor))?.px_per_ft;
+            if (newPxPerFt) toast.success(`Calibrated: ${newPxPerFt.toFixed(2)} px/ft`);
+          }}
+          onClose={() => setShowTwoPoint(false)}
+        />
+      )}
+
       {/* Overlay canvas — sits on top of the floor-plan canvas */}
       <canvas
         ref={overlayRef}
@@ -383,20 +417,31 @@ If a field is not found, omit it or set to null.`,
             <ToggleBtn active={showCableRuns} onClick={() => setShowCableRuns((v) => !v)} icon={<Zap className="w-3 h-3" />} label="Cables" color="orange" />
           </div>
 
+          {/* Two-point calibration */}
+          <Button
+            size="sm"
+            className="w-full h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white border-0"
+            onClick={() => { setShowTwoPoint(true); }}
+          >
+            <Crosshair className="w-3 h-3" />
+            Two-Point Calibrate (recommended)
+          </Button>
+
           {/* Auto-calibrate */}
           <Button
             size="sm"
             className="w-full h-8 text-xs gap-1.5 bg-sky-600 hover:bg-sky-500 text-white border-0"
-            disabled={autoCalLoading}
+            disabled={autoCalLoading || !(pickFloorPlanForCanvas(floorPlans, currentFloor))}
             onClick={handleAutoCalibrate}
+            title={!pickFloorPlanForCanvas(floorPlans, currentFloor) ? 'Upload a floor plan first' : ''}
           >
             {autoCalLoading
               ? <Loader2 className="w-3 h-3 animate-spin" />
               : <RefreshCw className="w-3 h-3" />}
-            {autoCalLoading ? 'Auto-calibrating…' : 'Auto-calibrate from plan'}
+            {autoCalLoading ? 'Auto-calibrating…' : 'AI Auto-calibrate from plan'}
           </Button>
           <p className="text-[10px] text-white/40 leading-snug">
-            AI reads the graphic scale bar & dimension callouts to set px/ft. Use the Scale Line tool in the toolbar for manual override.
+            Two-point: click two known points → enter real distance. AI: reads scale bar automatically.
           </p>
         </div>
 
