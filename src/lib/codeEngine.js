@@ -1242,78 +1242,78 @@ export function generateSequenceOfOperations(analysisResults = {}, project = {})
   lines.push(`Occupancy: Group ${occupancy_group}`);
   lines.push(`Authority: NFPA 72 (2022), NFPA 101 (2021), IBC (2021), NEC (2023)`);
   lines.push('');
-  lines.push('INITIATING DEVICES → CONTROL PANEL ACTIONS → NOTIFICATION ACTIONS');
+  lines.push('INITIATING DEVICES  >  CONTROL PANEL ACTIONS  >  NOTIFICATION ACTIONS');
   lines.push('');
 
   lines.push('1. MANUAL PULL STATION ACTIVATION');
-  lines.push('   → FACP enters ALARM mode');
-  lines.push('   → All NAC circuits energized (Temporal-3 pattern)');
-  lines.push('   → All horn/strobe devices activate');
+  lines.push('   - FACP enters ALARM mode');
+  lines.push('   - All NAC circuits energized (Temporal-3 pattern)');
+  lines.push('   - All horn/strobe devices activate');
   if (requirements?.voiceEvacRequired) {
-    lines.push('   → Voice evacuation message broadcasts on all speaker circuits');
+    lines.push('   - Voice evacuation message broadcasts on all speaker circuits');
   }
-  lines.push('   → Supervisory signal transmitted to central monitoring station');
-  lines.push('   → FACP LCD displays zone and device in alarm');
-  lines.push('   → Trouble relay drops (unless silenced)');
+  lines.push('   - Supervisory signal transmitted to central monitoring station');
+  lines.push('   - FACP LCD displays zone and device in alarm');
+  lines.push('   - Trouble relay drops (unless silenced)');
   lines.push('');
 
   lines.push('2. SMOKE DETECTOR ACTIVATION (Area Detection)');
-  lines.push('   → FACP enters ALARM mode');
+  lines.push('   - FACP enters ALARM mode');
   if (requirements?.positiveAlarmSequence) {
-    lines.push('   → POSITIVE ALARM SEQUENCE: 15-second acknowledge window at FACP');
-    lines.push('   → If acknowledged: 3-minute investigation period begins');
-    lines.push('   → If not acknowledged OR investigation period expires: full alarm activates');
+    lines.push('   - POSITIVE ALARM SEQUENCE: 15-second acknowledge window at FACP');
+    lines.push('   - If acknowledged: 3-minute investigation period begins');
+    lines.push('   - If not acknowledged OR investigation period expires: full alarm activates');
   } else {
-    lines.push('   → All NAC circuits energized immediately');
+    lines.push('   - All NAC circuits energized immediately');
   }
-  lines.push('   → All horn/strobe devices activate');
-  lines.push('   → HVAC shutdown signal sent to air handling units (if programmed)');
-  lines.push('   → Magnetic hold-open door releases activate (if installed)');
-  lines.push('   → Signal transmitted to monitoring station');
+  lines.push('   - All horn/strobe devices activate');
+  lines.push('   - HVAC shutdown signal sent to air handling units (if programmed)');
+  lines.push('   - Magnetic hold-open door releases activate (if installed)');
+  lines.push('   - Signal transmitted to monitoring station');
   lines.push('');
 
   if (isFullySprinklered) {
     lines.push('3. SPRINKLER WATERFLOW SWITCH ACTIVATION');
-    lines.push('   → Waterflow monitoring module detects flow (0-90 second delay)');
-    lines.push('   → FACP enters ALARM mode');
-    lines.push('   → All NAC circuits energized');
-    lines.push('   → All horn/strobe devices activate');
-    lines.push('   → Signal transmitted to monitoring station');
+    lines.push('   - Waterflow monitoring module detects flow (0-90 second delay)');
+    lines.push('   - FACP enters ALARM mode');
+    lines.push('   - All NAC circuits energized');
+    lines.push('   - All horn/strobe devices activate');
+    lines.push('   - Signal transmitted to monitoring station');
     lines.push('');
 
     lines.push('4. SPRINKLER VALVE/TAMPER SWITCH ACTIVATION');
-    lines.push('   → FACP enters SUPERVISORY mode');
-    lines.push('   → SUPERVISORY audible and visual indicators at FACP activate');
-    lines.push('   → Supervisory signal transmitted to monitoring station');
-    lines.push('   → Evacuation devices DO NOT activate');
+    lines.push('   - FACP enters SUPERVISORY mode');
+    lines.push('   - SUPERVISORY audible and visual indicators at FACP activate');
+    lines.push('   - Supervisory signal transmitted to monitoring station');
+    lines.push('   - Evacuation devices DO NOT activate');
     lines.push('');
   }
 
   if (elevator_count > 0 && num_floors >= 3) {
     lines.push('5. ELEVATOR LOBBY/MACHINE ROOM SMOKE DETECTOR ACTIVATION');
-    lines.push('   → FACP enters SUPERVISORY mode (per NFPA 72 §21.3)');
-    lines.push('   → Elevator recall signal sent to elevator controller');
-    lines.push('   → Elevator(s) return to designated main floor (Phase I Recall)');
-    lines.push('   → SUPERVISORY indicators at FACP activate');
-    lines.push('   → Evacuation alarm devices DO NOT activate from this detector alone');
-    lines.push('   → Note: If same floor area detector activates, full evacuation proceeds');
+    lines.push('   - FACP enters SUPERVISORY mode (per NFPA 72 21.3)');
+    lines.push('   - Elevator recall signal sent to elevator controller');
+    lines.push('   - Elevator(s) return to designated main floor (Phase I Recall)');
+    lines.push('   - SUPERVISORY indicators at FACP activate');
+    lines.push('   - Evacuation alarm devices DO NOT activate from this detector alone');
+    lines.push('   - Note: If same floor area detector activates, full evacuation proceeds');
     lines.push('');
   }
 
   lines.push('ALARM SILENCING PROCEDURE');
-  lines.push('   → Authorized personnel acknowledge alarm at FACP');
-  lines.push('   → Audible devices silence; visual (strobe) devices continue');
-  lines.push('   → FACP remains in ALARM mode until manually reset');
-  lines.push('   → Reset requires: all initiating devices in normal condition');
-  lines.push('   → After reset: all NAC circuits de-energized, system returns to normal');
+  lines.push('   - Authorized personnel acknowledge alarm at FACP');
+  lines.push('   - Audible devices silence; visual (strobe) devices continue');
+  lines.push('   - FACP remains in ALARM mode until manually reset');
+  lines.push('   - Reset requires: all initiating devices in normal condition');
+  lines.push('   - After reset: all NAC circuits de-energized, system returns to normal');
   lines.push('');
 
   lines.push('TROUBLE CONDITIONS');
-  lines.push('   → Any open/short on initiating, NAC, or SLC circuit → TROUBLE');
-  lines.push('   → FACP trouble audible/visual indicators activate');
-  lines.push('   → Trouble signal transmitted to monitoring station');
-  lines.push('   → Low battery condition → TROUBLE signal');
-  lines.push('   → AC power loss → TROUBLE after programmable delay');
+  lines.push('   - Any open/short on initiating, NAC, or SLC circuit -> TROUBLE');
+  lines.push('   - FACP trouble audible/visual indicators activate');
+  lines.push('   - Trouble signal transmitted to monitoring station');
+  lines.push('   - Low battery condition -> TROUBLE signal');
+  lines.push('   - AC power loss -> TROUBLE after programmable delay');
   lines.push('');
 
   lines.push('REFERENCES: NFPA 72 §23.8 (Sequence of Operations), NFPA 101 §9.6.3');

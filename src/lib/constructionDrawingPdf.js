@@ -52,6 +52,184 @@ function setFont(doc, size, style = 'normal', color = C_DARK) {
   doc.setTextColor(...color);
 }
 
+/**
+ * Draw a legend symbol inside a cell. Uses primitive jsPDF shapes — never
+ * Unicode glyphs — so symbols render reliably regardless of the embedded
+ * font's character support.
+ */
+function drawLegendSymbol(doc, row, x, y, w, h) {
+  const cx = x + w / 2;
+  const cy = y + h / 2 + 0.2;
+  doc.setLineCap('round');
+
+  const stroke = (r, g, b) => doc.setDrawColor(r, g, b);
+  const fill = (r, g, b) => doc.setFillColor(r, g, b);
+
+  switch (row.shape) {
+    case 'line':
+      stroke(...C_DARK); doc.setLineWidth(0.7);
+      doc.line(x + 2, cy, x + w - 2, cy);
+      break;
+    case 'dash':
+      stroke(...C_DARK); doc.setLineWidth(0.7);
+      doc.setLineDashPattern([1.2, 0.8], 0);
+      doc.line(x + 2, cy, x + w - 2, cy);
+      doc.setLineDashPattern([], 0);
+      break;
+    case 'dot':
+      stroke(...C_DARK); doc.setLineWidth(0.7);
+      doc.setLineDashPattern([0.3, 0.8], 0);
+      doc.line(x + 2, cy, x + w - 2, cy);
+      doc.setLineDashPattern([], 0);
+      break;
+    case 'wavy':
+      stroke(...C_DARK); doc.setLineWidth(0.6);
+      for (let i = 0; i < 4; i++) {
+        const sx = x + 2 + i * 4;
+        doc.line(sx, cy + 0.6, sx + 2, cy - 0.6);
+        doc.line(sx + 2, cy - 0.6, sx + 4, cy + 0.6);
+      }
+      break;
+    case 'hatch':
+      stroke(...C_DARK); doc.setLineWidth(0.4);
+      for (let i = 0; i < 5; i++) {
+        const sx = x + 2 + i * 3.4;
+        doc.line(sx, cy + 1, sx + 1.6, cy - 1);
+      }
+      break;
+    case 'arrowUp':
+      stroke(...C_DARK); doc.setLineWidth(0.7);
+      doc.line(cx, y + h - 1.5, cx, y + 1.5);
+      doc.line(cx, y + 1.5, cx - 1.6, y + 3.4);
+      doc.line(cx, y + 1.5, cx + 1.6, y + 3.4);
+      break;
+    case 'arrowDn':
+      stroke(...C_DARK); doc.setLineWidth(0.7);
+      doc.line(cx, y + 1.5, cx, y + h - 1.5);
+      doc.line(cx, y + h - 1.5, cx - 1.6, y + h - 3.4);
+      doc.line(cx, y + h - 1.5, cx + 1.6, y + h - 3.4);
+      break;
+    case 'stub':
+      stroke(...C_DARK); doc.setLineWidth(0.7);
+      doc.line(x + 2, cy, x + w - 5, cy);
+      fill(...C_WHITE); doc.circle(x + w - 4, cy, 1.1, 'FD');
+      break;
+    case 'hashHR':
+      stroke(...C_DARK); doc.setLineWidth(0.7);
+      doc.line(x + 2, cy, x + w - 2, cy);
+      // tick marks for conductor count
+      doc.line(x + 6, cy - 1.4, x + 6, cy + 1.4);
+      doc.line(x + 8, cy - 1.4, x + 8, cy + 1.4);
+      break;
+    case 'gnd':
+      stroke(...C_DARK); doc.setLineWidth(0.6);
+      doc.line(cx, cy - 2, cx, cy + 0.4);
+      doc.line(cx - 2.4, cy + 0.4, cx + 2.4, cy + 0.4);
+      doc.line(cx - 1.6, cy + 1.4, cx + 1.6, cy + 1.4);
+      doc.line(cx - 0.8, cy + 2.4, cx + 0.8, cy + 2.4);
+      break;
+    case 'flex':
+      stroke(...C_DARK); doc.setLineWidth(0.6);
+      for (let i = 0; i < 6; i++) {
+        doc.circle(x + 3 + i * 2.4, cy, 1, 'S');
+      }
+      break;
+    case 'jbox':
+      stroke(...C_DARK); doc.setLineWidth(0.5); fill(...C_WHITE);
+      doc.rect(cx - 3, cy - 2, 6, 4, 'FD');
+      doc.line(cx - 3, cy - 2, cx + 3, cy + 2);
+      doc.line(cx + 3, cy - 2, cx - 3, cy + 2);
+      break;
+    case 'gfi':
+      stroke(...C_DARK); doc.setLineWidth(0.5); fill(...C_WHITE);
+      doc.rect(cx - 3, cy - 2, 6, 4, 'FD');
+      setFont(doc, 4.5, 'bold', C_DARK);
+      doc.text('GFI', cx, cy + 1.2, { align: 'center' });
+      break;
+    case 'circle':
+      fill(255, 255, 255); stroke(...C_DARK); doc.setLineWidth(0.6);
+      doc.circle(cx, cy, 2.4, 'FD');
+      setFont(doc, 5.5, 'bold', C_DARK);
+      doc.text(row.label || '?', cx, cy + 1.4, { align: 'center' });
+      break;
+    case 'square':
+      fill(255, 255, 255); stroke(...C_DARK); doc.setLineWidth(0.6);
+      doc.rect(cx - 2.4, cy - 2.4, 4.8, 4.8, 'FD');
+      setFont(doc, 5.5, 'bold', C_DARK);
+      doc.text(row.label || '?', cx, cy + 1.4, { align: 'center' });
+      break;
+    case 'rectTag': {
+      fill(255, 255, 255); stroke(...C_DARK); doc.setLineWidth(0.6);
+      doc.rect(cx - 3.4, cy - 2.4, 6.8, 4.8, 'FD');
+      // small fill bar at top so it reads like a tag
+      fill(220, 230, 240); stroke(...C_DARK);
+      doc.rect(cx - 3.4, cy - 2.4, 6.8, 1.5, 'F');
+      setFont(doc, 5.2, 'bold', C_DARK);
+      doc.text(row.label || '?', cx, cy + 1.5, { align: 'center' });
+      break;
+    }
+    case 'labelRect': {
+      fill(254, 242, 242); stroke(...C_RED); doc.setLineWidth(0.6);
+      doc.rect(cx - 6, cy - 2.6, 12, 5.2, 'FD');
+      setFont(doc, 5.8, 'bold', C_RED);
+      doc.text(row.label || '?', cx, cy + 1.4, { align: 'center' });
+      break;
+    }
+    case 'diamond': {
+      fill(255, 255, 255); stroke(...C_DARK); doc.setLineWidth(0.6);
+      doc.lines(
+        [[3, -3], [3, 3], [-3, 3], [-3, -3]],
+        cx - 3, cy,
+        [1, 1], 'FD', true
+      );
+      setFont(doc, 5, 'bold', C_DARK);
+      doc.text(row.label || '?', cx, cy + 1.4, { align: 'center' });
+      break;
+    }
+    case 'hex': {
+      fill(255, 255, 255); stroke(...C_DARK); doc.setLineWidth(0.6);
+      const r = 2.8;
+      const pts = [];
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i;
+        pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+      }
+      const deltas = pts.slice(1).map((p, i) => [p[0] - pts[i][0], p[1] - pts[i][1]]);
+      deltas.push([pts[0][0] - pts[5][0], pts[0][1] - pts[5][1]]);
+      doc.lines(deltas, pts[0][0], pts[0][1], [1, 1], 'FD', true);
+      setFont(doc, 5, 'bold', C_DARK);
+      doc.text(row.label || '?', cx, cy + 1.4, { align: 'center' });
+      break;
+    }
+    case 'speaker': {
+      fill(255, 255, 255); stroke(...C_DARK); doc.setLineWidth(0.6);
+      doc.lines(
+        [[3.4, -1.4], [0, 4.4], [-3.4, -1.4], [0, -1.6]],
+        cx - 1.6, cy - 1.5,
+        [1, 1], 'FD', true
+      );
+      setFont(doc, 4.6, 'bold', C_DARK);
+      doc.text(row.label || '?', cx + 1.2, cy + 1.4, { align: 'center' });
+      break;
+    }
+    case 'rectTag2': {
+      fill(255, 255, 255); stroke(...C_DARK); doc.setLineWidth(0.5);
+      doc.rect(cx - 4, cy - 2.4, 8, 4.8, 'FD');
+      setFont(doc, 5, 'bold', C_DARK);
+      doc.text(String(row.label || '?').slice(0, 4), cx, cy + 1.4, { align: 'center' });
+      break;
+    }
+    default:
+      fill(255, 255, 255); stroke(...C_DARK); doc.setLineWidth(0.5);
+      doc.rect(cx - 4, cy - 2.4, 8, 4.8, 'FD');
+      setFont(doc, 5, 'bold', C_DARK);
+      doc.text(String(row.label || '?').slice(0, 4), cx, cy + 1.4, { align: 'center' });
+      break;
+  }
+  // Reset for callers
+  doc.setLineDashPattern([], 0);
+}
+
 /** Draw the right-side title block (vertical band). */
 function drawTitleBlock(doc, project, meta, logoDataUrl, sheetNo, sheetTitle, sheetScale = 'NTS') {
   const x = TB_X;
@@ -212,37 +390,43 @@ function drawSheetBorder(doc, meta) {
   doc.text('100% BID SET', SHEET_W / 2, SHEET_H - 4, { align: 'center' });
 }
 
-// ─── FA-0.01: Legend · Abbreviations · General Notes · Drawing Index ─────────
+// ─── FA-0.01: Legend / Abbreviations / General Notes / Drawing Index ─────────
 
+// shape: how the renderer draws the symbol cell — keeps glyph drawing inside the
+// PDF instead of relying on Unicode glyphs that jsPDF Helvetica can't render
+// (which is why the legend looked like garbage before).
 const LEGEND_ROWS = [
-  { sym: '——',   desc: 'Lighting or Power Panel' },
-  { sym: '—·—',  desc: 'Conduit Exposed' },
-  { sym: '—c—',  desc: 'Conduit in Wall / Ceiling Space Only' },
-  { sym: '~ ~',  desc: 'Conduit Under Ground or Floor' },
-  { sym: '/////', desc: 'Existing Conduit' },
-  { sym: '↑',    desc: 'Conduit Up' },
-  { sym: '↓',    desc: 'Conduit Down' },
-  { sym: '—B—',  desc: 'Conduit Stub Out with Plastic Bushing' },
-  { sym: '##',   desc: 'Branch Circuit Home Run #12 Conductors & #12 Ground UNG' },
-  { sym: '⏚⏚',  desc: 'Grounding Electrode Per Codes' },
-  { sym: '——',   desc: 'Flexible Conduit' },
-  { sym: '⊡',    desc: 'Code Feed Junction Box with Cover Plate' },
-  { sym: '⊟',    desc: 'Duplex Receptacle GFI Type' },
-  { sym: 'FACP', desc: 'Fire Alarm Control Panel' },
-  { sym: 'ANN',  desc: 'Fire Alarm Annunciator' },
-  { sym: 'ANN',  desc: 'Fire Alarm Notification Appliance Panel' },
-  { sym: 'S',    desc: 'Fire Alarm Smoke Detector, S-Sounder Base' },
-  { sym: 'D',    desc: 'Fire Alarm Duct Smoke Detector' },
-  { sym: 'H',    desc: 'Fire Alarm Fixed Heat Detector' },
-  { sym: 'MM',   desc: 'Fire Alarm Monitor Module' },
-  { sym: 'CM',   desc: 'Fire Alarm Control Module / Relay Module' },
-  { sym: 'H/S',  desc: 'Horn/Strobe, Wall Mounted' },
-  { sym: 'MPS',  desc: 'Fire Alarm Manual Pull Station, Dual Action' },
-  { sym: 'WF',   desc: 'Sprinkler Waterflow Switch / Preview Point Module' },
-  { sym: 'VS',   desc: 'Sprinkler Valve Supervisory / Preview Point Module' },
-  { sym: 'ER',   desc: 'Elevator Recall Detector' },
-  { sym: 'CO',   desc: 'Carbon Monoxide Detector' },
-  { sym: 'DH',   desc: 'Door Holder' },
+  { shape: 'line',     desc: 'Lighting or power feeder, exposed' },
+  { shape: 'dash',     desc: 'Conduit exposed' },
+  { shape: 'dot',      desc: 'Conduit concealed in wall or ceiling space' },
+  { shape: 'wavy',     desc: 'Conduit under ground or floor slab' },
+  { shape: 'hatch',    desc: 'Existing conduit (to remain)' },
+  { shape: 'arrowUp',  desc: 'Conduit up' },
+  { shape: 'arrowDn',  desc: 'Conduit down' },
+  { shape: 'stub',     desc: 'Conduit stub-out with plastic bushing' },
+  { shape: 'hashHR',   desc: 'Branch circuit home run, #12 conductors w/ #12 ground (UON)' },
+  { shape: 'gnd',      desc: 'Grounding electrode per codes' },
+  { shape: 'flex',     desc: 'Flexible conduit' },
+  { shape: 'jbox',     desc: 'Junction box with cover plate' },
+  { shape: 'gfi',      desc: 'Duplex GFCI receptacle, weatherproof' },
+  { shape: 'labelRect', label: 'FACP', desc: 'Fire alarm control panel' },
+  { shape: 'labelRect', label: 'NAC',  desc: 'NAC notification appliance panel' },
+  { shape: 'labelRect', label: 'RAR',  desc: 'Remote annunciator (LCD)' },
+  { shape: 'circle',    label: 'S',    desc: 'Smoke detector, S = sounder base where indicated' },
+  { shape: 'rectTag',   label: 'DS',   desc: 'Duct smoke detector (supply/return)' },
+  { shape: 'circle',    label: 'H',    desc: 'Heat detector, fixed-temp / rate-of-rise' },
+  { shape: 'circle',    label: 'B',    desc: 'Projected-beam smoke detector' },
+  { shape: 'square',    label: 'MPS',  desc: 'Manual pull station, dual-action' },
+  { shape: 'hex',       label: 'H/S',  desc: 'Horn/strobe, wall mounted' },
+  { shape: 'circle',    label: 'CD',   desc: 'Strobe only (candela rated)' },
+  { shape: 'speaker',   label: 'SP',   desc: 'Speaker, voice evac' },
+  { shape: 'diamond',   label: 'WF',   desc: 'Sprinkler waterflow switch' },
+  { shape: 'diamond',   label: 'VS',   desc: 'Sprinkler valve supervisory (tamper)' },
+  { shape: 'circle',    label: 'ER',   desc: 'Elevator recall detector' },
+  { shape: 'circle',    label: 'CO',   desc: 'Carbon monoxide detector' },
+  { shape: 'square',    label: 'MM',   desc: 'Monitor module' },
+  { shape: 'square',    label: 'CM',   desc: 'Control / relay module' },
+  { shape: 'square',    label: 'DH',   desc: 'Magnetic door holder' },
 ];
 
 const ABBREV_ROWS = [
@@ -336,16 +520,29 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
   doc.text('DESCRIPTION', col1X + 18, y + 3.5);
   y += 5;
 
+  // Wider rows so symbols are drawable and the description isn't truncated.
+  const legendRowH = 7;
+  const symColW = 22;
+  const descX = col1X + symColW + 3;
+  const descMaxW = colW1 - symColW - 5;
   LEGEND_ROWS.forEach((row, i) => {
     doc.setFillColor(i % 2 === 0 ? 252 : 246, 249, 253);
-    doc.rect(col1X, y, colW1, rowH, 'F');
+    doc.rect(col1X, y, colW1, legendRowH, 'F');
     doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.1);
-    doc.line(col1X, y + rowH, col1X + colW1, y + rowH);
-    setFont(doc, 5, 'bold', C_BLUE);
-    doc.text(row.sym.slice(0, 8), col1X + 2, y + rowH - 1.5);
-    setFont(doc, 5, 'normal', C_DARK);
-    doc.text(row.desc.slice(0, 32), col1X + 18, y + rowH - 1.5);
-    y += rowH;
+    doc.line(col1X, y + legendRowH, col1X + colW1, y + legendRowH);
+
+    drawLegendSymbol(doc, row, col1X + 1, y, symColW, legendRowH);
+
+    setFont(doc, 6.5, 'normal', C_DARK);
+    const wrapped = doc.splitTextToSize(row.desc, descMaxW);
+    const baseline = y + legendRowH / 2 + 1.5;
+    if (wrapped.length === 1) {
+      doc.text(wrapped[0], descX, baseline);
+    } else {
+      doc.text(wrapped[0], descX, baseline - 1.5);
+      doc.text(wrapped[1] || '', descX, baseline + 2.5);
+    }
+    y += legendRowH;
   });
 
   // ── ABBREVIATIONS ─────────────────────────────────────────────────────
@@ -367,25 +564,29 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
   doc.text('DESCRIPTION', col2X + abW + 18, ay + 3.5);
   ay += 5;
 
+  const abbrevRowH = 6.4;
   const half = Math.ceil(ABBREV_ROWS.length / 2);
   for (let i = 0; i < half; i++) {
     doc.setFillColor(i % 2 === 0 ? 252 : 246, 249, 253);
-    doc.rect(col2X, ay, colW2, rowH, 'F');
+    doc.rect(col2X, ay, colW2, abbrevRowH, 'F');
     doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.1);
-    doc.line(col2X, ay + rowH, col2X + colW2, ay + rowH);
+    doc.line(col2X, ay + abbrevRowH, col2X + colW2, ay + abbrevRowH);
 
+    const baseline = ay + abbrevRowH / 2 + 1.4;
     const left = ABBREV_ROWS[i] || [];
-    setFont(doc, 5, 'bold', C_BLUE);
-    doc.text(left[0] || '', col2X + 2, ay + rowH - 1.5);
-    setFont(doc, 5, 'normal', C_DARK);
-    doc.text((left[1] || '').slice(0, 24), col2X + 16, ay + rowH - 1.5);
+    setFont(doc, 6.5, 'bold', C_BLUE);
+    doc.text(left[0] || '', col2X + 2, baseline);
+    setFont(doc, 6.5, 'normal', C_DARK);
+    const leftDesc = doc.splitTextToSize(left[1] || '', abW - 16);
+    doc.text(leftDesc[0] || '', col2X + 14, baseline);
 
     const right = ABBREV_ROWS[i + half] || [];
-    setFont(doc, 5, 'bold', C_BLUE);
-    doc.text(right[0] || '', col2X + abW + 4, ay + rowH - 1.5);
-    setFont(doc, 5, 'normal', C_DARK);
-    doc.text((right[1] || '').slice(0, 24), col2X + abW + 18, ay + rowH - 1.5);
-    ay += rowH;
+    setFont(doc, 6.5, 'bold', C_BLUE);
+    doc.text(right[0] || '', col2X + abW + 4, baseline);
+    setFont(doc, 6.5, 'normal', C_DARK);
+    const rightDesc = doc.splitTextToSize(right[1] || '', abW - 16);
+    doc.text(rightDesc[0] || '', col2X + abW + 16, baseline);
+    ay += abbrevRowH;
   }
 
   // ── GENERAL NOTES ────────────────────────────────────────────────────
@@ -396,16 +597,16 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
   gy += headerH + 1;
 
   GENERAL_NOTES_FA0.forEach((note, i) => {
+    if (gy > DRAW_Y + DRAW_H - 24) return;
     const numStr = String(i + 1) + '.';
-    const lines = doc.splitTextToSize(note, colW3 - 10);
-    setFont(doc, 5.5, 'bold', C_DARK);
+    const lines = doc.splitTextToSize(note, colW3 - 12);
+    setFont(doc, 7, 'bold', C_DARK);
     doc.text(numStr, col3X + 2, gy + 3.5);
-    setFont(doc, 5.5, 'normal', C_DARK);
+    setFont(doc, 7, 'normal', C_DARK);
     lines.forEach((ln, li) => {
-      doc.text(ln, col3X + 8, gy + 3.5 + li * 3.8);
+      doc.text(ln, col3X + 9, gy + 3.5 + li * 4.4);
     });
-    gy += lines.length * 3.8 + 3;
-    if (gy > DRAW_Y + DRAW_H - 20) return;
+    gy += lines.length * 4.4 + 3;
   });
 
   // General sequence notes
@@ -475,8 +676,30 @@ export async function generateFloorPlanSheet(doc, project, _rooms, _devices, _la
     const dy = planY + (planH - dh) / 2;
     try { doc.addImage(floorImg, dataUrlImageFormat(floorImg), dx, dy, dw, dh); } catch { /* fallback */ }
   } else {
-    setFont(doc, 9, 'normal', C_GRAY);
-    doc.text('Open the Floor Plan tab with devices visible, then regenerate.', planX + planW / 2, planY + planH / 2, { align: 'center' });
+    // Visible, useful placeholder instead of a tiny grey caption that reads as
+    // "blank sheet" to the user. Tells them exactly what to do to populate it.
+    const banner = {
+      x: planX + planW * 0.1,
+      y: planY + planH * 0.35,
+      w: planW * 0.8,
+      h: planH * 0.3,
+    };
+    doc.setFillColor(254, 243, 199); doc.setDrawColor(217, 119, 6); doc.setLineWidth(0.6);
+    doc.rect(banner.x, banner.y, banner.w, banner.h, 'FD');
+    setFont(doc, 14, 'bold', [146, 64, 14]);
+    doc.text('NO FLOOR PLAN AVAILABLE FOR THIS FLOOR', banner.x + banner.w / 2, banner.y + 14, { align: 'center' });
+    setFont(doc, 9, 'normal', [120, 53, 15]);
+    const help = [
+      `Floor ${activeFloor} has no uploaded plan image (or it is a PDF that has not been rendered).`,
+      'To populate this sheet, do ONE of the following:',
+      '   1. Open the Floor Plan tab on Floor ' + activeFloor + ' before clicking Generate, OR',
+      '   2. Upload an image plan (PNG/JPG) for this floor in Project Setup, OR',
+      '   3. Assign a PDF page to this floor in the Plans tab.',
+      'The submittal will regenerate with the drawing as soon as one of the above is in place.',
+    ];
+    help.forEach((line, i) => {
+      doc.text(line, banner.x + 8, banner.y + 30 + i * 6.5);
+    });
   }
 
   // Floor plan title below
@@ -484,7 +707,17 @@ export async function generateFloorPlanSheet(doc, project, _rooms, _devices, _la
   if (fpLabelY < DRAW_Y + DRAW_H) {
     setFont(doc, 8, 'bold', C_DARK);
     const floorLabel = activeFloor === 1 ? '1ST' : activeFloor === 2 ? '2ND' : `${activeFloor}TH`;
-    doc.text(`\u25b3 FIRE ALARM ${floorLabel} FLOOR PLAN`, planX + planW / 2, fpLabelY, { align: 'center' });
+    // Detail-bubble drawn with primitives — Unicode triangle doesn't render in jsPDF Helvetica.
+    const bubbleX = planX + planW / 2 - 50;
+    const bubbleY = fpLabelY - 3;
+    doc.setDrawColor(...C_DARK); doc.setLineWidth(0.4);
+    doc.circle(bubbleX, bubbleY, 3, 'S');
+    doc.line(bubbleX - 3, bubbleY, bubbleX + 3, bubbleY);
+    setFont(doc, 5, 'bold', C_DARK);
+    doc.text('1', bubbleX, bubbleY - 0.5, { align: 'center' });
+    doc.text('FA', bubbleX, bubbleY + 2, { align: 'center' });
+    setFont(doc, 8, 'bold', C_DARK);
+    doc.text(`FIRE ALARM ${floorLabel} FLOOR PLAN`, planX + planW / 2 + 6, fpLabelY, { align: 'left' });
     setFont(doc, 6, 'normal', C_GRAY);
     doc.text('SCALE: 3/32"=1\'-0" (verify)', planX + planW / 2, fpLabelY + 4, { align: 'center' });
   }
@@ -631,8 +864,8 @@ function drawFacpIOMatrix(doc, x, y, w, _h, project, devices, _meta) {
   // Group header
   doc.setFillColor(200, 210, 220); doc.rect(x, sy, w, rowH, 'F');
   setFont(doc, 5, 'bold', C_DARK);
-  doc.text('SYSTEM INPUTS ↓', x + 2, sy + 3.5);
-  doc.text('SYSTEM OUTPUTS →', x + 50, sy + 3.5);
+  doc.text('SYSTEM INPUTS  v', x + 2, sy + 3.5);
+  doc.text('SYSTEM OUTPUTS  >', x + 50, sy + 3.5);
   sy += rowH;
 
   // Data rows — derive from actual devices
@@ -814,8 +1047,16 @@ function drawOneLineRiser(doc, x, y, w, h, project, devices) {
 
   // Riser diagram title label
   const lblY = drawArea.y + drawArea.h + 3;
+  const bubbleX = x + w / 2 - 70;
+  const bubbleY = lblY - 3;
+  doc.setDrawColor(...C_DARK); doc.setLineWidth(0.4);
+  doc.circle(bubbleX, bubbleY, 3, 'S');
+  doc.line(bubbleX - 3, bubbleY, bubbleX + 3, bubbleY);
+  setFont(doc, 5, 'bold', C_DARK);
+  doc.text('A', bubbleX, bubbleY - 0.5, { align: 'center' });
+  doc.text('FA', bubbleX, bubbleY + 2, { align: 'center' });
   setFont(doc, 7, 'bold', C_DARK);
-  doc.text('\u25b3 FIRE ALARM SYSTEM ONE-LINE DIAGRAM', x + w / 2, lblY, { align: 'center' });
+  doc.text('FIRE ALARM SYSTEM ONE-LINE DIAGRAM', x + w / 2 + 6, lblY, { align: 'left' });
   setFont(doc, 5.5, 'normal', C_GRAY);
   doc.text(`NFPA 72 §7.3.1 · ${devices.length} devices total`, x + w / 2, lblY + 4, { align: 'center' });
 }
@@ -862,7 +1103,7 @@ export async function runConstructionDrawingPdf({
   devices = [],
   rooms = [],
   wires: _wires = [],
-  floorPlans: _floorPlans = [],
+  floorPlans = [],
   analysisResults,
   captureRef,
   canvasRef,
@@ -872,19 +1113,62 @@ export async function runConstructionDrawingPdf({
   const meta = { ...submittalMeta };
   const pName = project?.name || 'Fire Alarm System';
 
-  // Capture the floor plan image
+  // ── Capture the floor plan image ──
+  // Priority order:
+  //  1. captureRef.getLayoutDataURL() — full vector render the designer set up
+  //  2. canvasRef.current.toDataURL() — what's on screen right now
+  //  3. project.floor_plans[activeFloor].image_url — the uploaded plan as a
+  //     last-resort raster fallback. Without (3) the sheet renders blank when
+  //     the user generates from the Documents tab (canvas not mounted).
   let floorImgData = null;
   let floorImgDims = { width: 4, height: 3 };
 
   const captureFloorPlan = async () => {
-    const hi = captureRef?.current && typeof captureRef.current.getLayoutDataURL === 'function'
-      ? captureRef.current.getLayoutDataURL({ mimeType: 'image/png', fitContent: true, maxOutputEdge: 8192, exportMarginPx: 48 })
-      : null;
-    if (hi) return hi;
-    return canvasRef?.current?.toDataURL?.('image/png') || null;
+    try {
+      const hi = captureRef?.current && typeof captureRef.current.getLayoutDataURL === 'function'
+        ? captureRef.current.getLayoutDataURL({ mimeType: 'image/png', fitContent: true, maxOutputEdge: 8192, exportMarginPx: 48 })
+        : null;
+      if (hi) return hi;
+    } catch { /* swallow capture errors and fall through to next strategy */ }
+    try {
+      const fromCanvas = canvasRef?.current?.toDataURL?.('image/png') || null;
+      if (fromCanvas) return fromCanvas;
+    } catch { /* canvas may be tainted by cross-origin floor plan; fall through */ }
+    return null;
+  };
+
+  const fetchPlanImageAsDataUrl = async (url) => {
+    if (!url) return null;
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
   };
 
   floorImgData = await captureFloorPlan();
+  if (!floorImgData) {
+    // Pull the uploaded plan straight from project.floor_plans for the active
+    // floor — but only if it's actually an image (PDFs would need a render
+    // pipeline we don't have here without dragging pdfjs into the PDF export).
+    const fallback = (floorPlans || []).find(
+      (fp) =>
+        Number(fp?.floor_number) === Number(activeFloor) &&
+        (fp?.image_url || fp?.file_url) &&
+        (!fp?.file_type || /image\//i.test(fp.file_type))
+    );
+    const fallbackUrl = fallback?.image_url || fallback?.file_url || '';
+    floorImgData = await fetchPlanImageAsDataUrl(fallbackUrl);
+  }
+
   if (floorImgData) {
     floorImgDims = await new Promise(resolve => {
       const img = new Image();
