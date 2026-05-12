@@ -129,7 +129,7 @@ export async function renderPdfPagesToDataUrls(fileUrl, scale = 2) {
   };
 }
 
-export async function renderPdfPageToDataUrl(fileUrl, pageNumber = 1, scale = 2) {
+export async function renderPdfPageToDataUrl(fileUrl, pageNumber = 1, scale = 2, { forceWhiteBackground = true } = {}) {
   const pdfjsLib = await loadPdfjs();
   const source = fileUrl?.startsWith?.('data:')
     ? { data: Uint8Array.from(atob(fileUrl.split(',')[1]), char => char.charCodeAt(0)) }
@@ -140,14 +140,23 @@ export async function renderPdfPageToDataUrl(fileUrl, pageNumber = 1, scale = 2)
   const page = await pdf.getPage(safePageNumber);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement('canvas');
-  canvas.width = viewport.width;
+  canvas.width  = viewport.width;
   canvas.height = viewport.height;
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  const ctx = canvas.getContext('2d');
+
+  // White background — eliminates beige/blue blueprint tint from PDFs
+  if (forceWhiteBackground) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  await page.render({ canvasContext: ctx, viewport, background: 'white' }).promise;
+
   return {
     dataUrl: canvas.toDataURL('image/png'),
-    width: canvas.width,
-    height: canvas.height,
-    pageCount: pdf.numPages,
+    width:   canvas.width,
+    height:  canvas.height,
+    pageCount:  pdf.numPages,
     pageNumber: safePageNumber,
   };
 }

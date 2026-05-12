@@ -19,6 +19,7 @@ import {
 import { dataUrlImageFormat } from '@/lib/submittalBranding';
 import { pickFloorPlanForPdfExport, loadPlanUrlAsPngDataUrl } from '@/lib/planImageExport';
 import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
+import { renderCadComposite } from '@/lib/cadRenderer';
 
 // ─── Sheet dimensions (mm) ───────────────────────────────────────────────────
 const SHEET_W = 914.4;  // 36"
@@ -1164,6 +1165,30 @@ export async function runConstructionDrawingPdf({
     return null;
   };
 
+  /**
+   * Given a raw plan data URL and a floor number, apply the CAD composite:
+   * white background + monochrome threshold + vector device symbols.
+   * Returns a new data URL (PNG) of the composited canvas.
+   */
+  const applyCADComposite = async (rawDataUrl, floor, imgW, imgH) => {
+    if (!rawDataUrl) return rawDataUrl;
+    try {
+      const symbolRadius = Math.max(10, Math.round(Math.min(imgW, imgH) / 80));
+      const cadCanvas = await renderCadComposite(rawDataUrl, {
+        devices,
+        floor,
+        planNaturalW: imgW,
+        planNaturalH: imgH,
+        symbolRadius,
+        threshold: 210,
+      });
+      return cadCanvas.toDataURL('image/png');
+    } catch (err) {
+      console.warn('[PDF] CAD composite failed, using raw plan image:', err?.message);
+      return rawDataUrl;
+    }
+  };
+
   const fetchPlanImageAsDataUrl = async (url) => {
     if (!url) return null;
     try {
@@ -1215,6 +1240,8 @@ export async function runConstructionDrawingPdf({
       img.onerror = () => resolve({ width: 4, height: 3 });
       img.src = floorImgData;
     });
+    // Apply CAD composite: monochrome threshold + vector device symbols
+    floorImgData = await applyCADComposite(floorImgData, activeFloor, floorImgDims.width, floorImgDims.height);
   }
 
   // Load logo: prefer hosted URL (small DB field); optional legacy data URL.
@@ -1275,6 +1302,8 @@ export async function runConstructionDrawingPdf({
               img.onerror = () => resolve({ width: 4, height: 3 });
               img.src = thisFloorImg;
             });
+            // Apply CAD composite: white bg + monochrome threshold + vector symbols
+            thisFloorImg = await applyCADComposite(thisFloorImg, floor, thisFloorDims.width, thisFloorDims.height);
           }
         }
       }
