@@ -172,9 +172,13 @@ export function routeCircuits(devices, rooms, currentFloor) {
 export function drawCircuitRoutes(ctx, routes, showLabels = true) {
   routes.forEach(route => {
     ctx.save();
-    ctx.strokeStyle = route.color + "cc";
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([]);
+    const ct = String(route.circuitType || 'SLC').toUpperCase();
+    const isNac = ct === 'NAC' || ct.includes('NAC');
+    ctx.strokeStyle = route.color + 'cc';
+    ctx.lineWidth = isNac ? 1.85 : 1.55;
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
+    ctx.setLineDash(isNac ? [] : [7, 4]);
 
     route.segments.forEach(seg => {
       const pts = seg.points;

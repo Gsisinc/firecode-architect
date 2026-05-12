@@ -268,7 +268,7 @@ export default function DocumentWorkspace({
             busy={pdfBusy === 'plan'}
             onClick={() =>
               runPdf('plan', () =>
-                exportFloorPlanLayoutPdf({ project, canvasRef, captureRef })
+                exportFloorPlanLayoutPdf({ project, canvasRef, captureRef, floorPlans, activeFloor })
               )
             }
           />

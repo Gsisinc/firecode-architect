@@ -27,6 +27,7 @@ import {
   formatRequirementValue,
   drawSectionTitle,
 } from "@/lib/submittalPdfTheme";
+import { loadPlanUrlAsPngDataUrl, pickFloorPlanForPdfExport } from "@/lib/planImageExport";
 
 const DEVICE_TYPE_LABELS = {
   smoke_detector: "Smoke Detector",
@@ -125,6 +126,13 @@ export async function runSubmittalPackagePdf({
     let floorImgDims = { width: 4, height: 3 };
     if (sections.floorPlanSnapshot) {
       floorImgData = captureCanvas();
+      if (!floorImgData) {
+        const fp = pickFloorPlanForPdfExport(floorPlans, activeFloor);
+        const rasterUrl = fp?.image_url || fp?.file_url;
+        if (rasterUrl) {
+          floorImgData = await loadPlanUrlAsPngDataUrl(rasterUrl);
+        }
+      }
       if (floorImgData) {
         floorImgDims = await loadDataUrlImageSize(floorImgData);
       }

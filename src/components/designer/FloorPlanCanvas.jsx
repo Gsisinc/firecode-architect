@@ -803,14 +803,28 @@ function drawFloorPlanScene(ctx, scene) {
     const b = devices.find((device) => device.id === wire.to);
     if (!a || !b || a.x == null || b.x == null) return;
     const meta = getCircuitMetaFrom(circuitTypes, wire.type || wire.circuit_type);
+    const ct = String(wire.type || wire.circuit_type || 'SLC').toUpperCase();
+    const dashStyle =
+      ct === 'NAC' || ct.includes('NAC')
+        ? []
+        : ct === 'AUX' || ct.includes('AUX')
+          ? [2, 2.5]
+          : ct === 'IDC' || ct === 'SLC' || ct.includes('SLC')
+            ? [9, 4]
+            : [6, 4];
+    const lw = ct === 'NAC' || ct.includes('NAC') ? 2.15 : 1.85;
+    ctx.save();
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.strokeStyle = meta.color;
-    ctx.lineWidth = 2.4;
-    ctx.setLineDash(wire.type === 'AUX' ? [2, 3] : [7, 4]);
+    ctx.lineWidth = lw;
+    ctx.setLineDash(dashStyle);
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.restore();
 
     const ft = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / Math.max(pxPerFt || 10, 1));
     const mx = (a.x + b.x) / 2;

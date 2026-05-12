@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { determineSystemRequirements } from '@/lib/codeEngine';
 import { CODE_SAFETY_DISCLAIMER } from '@/lib/productInfo';
+import { DISCIPLINE_SETUP_FIELD_DEFAULTS, isFireAlarmDiscipline } from '@/lib/disciplineSetupDefaults';
+import DisciplineDesignFields from '@/components/project-setup/DisciplineDesignFields';
 import { Flame, ArrowLeft, Upload, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -30,6 +32,7 @@ export default function ProjectSetup() {
   const { toast } = useToast();
 
   const [form, setForm] = useState({
+    ...DISCIPLINE_SETUP_FIELD_DEFAULTS,
     name: '',
     address: '',
     primary_discipline: DISCIPLINE_IDS.FIRE_ALARM,
@@ -189,11 +192,13 @@ export default function ProjectSetup() {
   };
 
   const f = form;
-  const liveCodeAnalysis = determineSystemRequirements(f);
+  const isFire = isFireAlarmDiscipline(f.primary_discipline);
+  const liveCodeAnalysis = isFire ? determineSystemRequirements(f) : null;
   const chNum = Number(f.default_ceiling_height);
   const ceilingInvalid = !Number.isFinite(chNum) || chNum <= 0;
   const ceilingNeedsDesigner =
-    !!liveCodeAnalysis.fireAlarmRequired &&
+    isFire &&
+    !!liveCodeAnalysis?.fireAlarmRequired &&
     (ceilingInvalid || f.ceiling_height_confirmed === false);
 
   if (!isNew && isLoadingProject) {
@@ -242,7 +247,7 @@ export default function ProjectSetup() {
 
             {/* Project Info */}
             <Section title="Project Information">
-              <ComplianceNotice />
+              {isFire && <ComplianceNotice />}
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Project Name" required>
                   <Input value={f.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Oak Creek Office Building" className="bg-white border-slate-200" required />
@@ -262,25 +267,49 @@ export default function ProjectSetup() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-[11px] text-slate-500 mt-1">Used for the dashboard badge and which designer opens first after save.</p>
+                  <p className="text-[11px] text-slate-500 mt-1">Sets the designer workspace and the design questions below.</p>
                 </Field>
                 <Field label="Owner Name">
                   <Input value={f.owner_name} onChange={e => setForm(p => ({ ...p, owner_name: e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
-                <Field label="Installer Name">
+                <Field label="Installer / integrator">
                   <Input value={f.installer_name} onChange={e => setForm(p => ({ ...p, installer_name: e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
-                <Field label="AHJ Contact">
-                  <Input value={f.ahj_contact} onChange={e => setForm(p => ({ ...p, ahj_contact: e.target.value }))} className="bg-white border-slate-200" />
-                </Field>
-                <Field label="Adopted Code Edition">
-                  <Input value={f.adopted_code_edition} onChange={e => setForm(p => ({ ...p, adopted_code_edition: e.target.value }))} className="bg-white border-slate-200" />
-                </Field>
+                {isFire ? (
+                  <>
+                    <Field label="AHJ / code official contact">
+                      <Input value={f.ahj_contact} onChange={e => setForm(p => ({ ...p, ahj_contact: e.target.value }))} className="bg-white border-slate-200" />
+                    </Field>
+                    <Field label="Adopted code edition (IBC / NFPA)">
+                      <Input value={f.adopted_code_edition} onChange={e => setForm(p => ({ ...p, adopted_code_edition: e.target.value }))} className="bg-white border-slate-200" />
+                    </Field>
+                  </>
+                ) : (
+                  <Field label="Site contact / project manager" hint="Day-to-day contact for this system scope (not AHJ).">
+                    <Input value={f.ahj_contact} onChange={e => setForm(p => ({ ...p, ahj_contact: e.target.value }))} className="bg-white border-slate-200" />
+                  </Field>
+                )}
               </div>
             </Section>
 
-            {/* Building Data */}
-            <Section title="Building Data">
+            {!isFire && (
+              <Section title="Site layout">
+                <p className="text-sm text-slate-600 mb-4">How many floor plans you will upload for this discipline.</p>
+                <Field label="Number of floors" required>
+                  <Input type="number" min={1} max={50} value={f.num_floors} onChange={e => setFloorCount(e.target.value)} className="bg-white border-slate-200 max-w-xs" />
+                </Field>
+              </Section>
+            )}
+
+            <DisciplineDesignFields form={f} setForm={setForm} />
+
+            {isFire && (
+            <>
+            {/* Building Data — fire alarm / code scope only */}
+            <Section title="Building & code data">
+              <p className="text-sm text-slate-600 mb-4">
+                IBC / NFPA inputs drive code analysis and detector spacing — only for fire alarm projects.
+              </p>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Occupancy Group" required>
                   <Select value={f.occupancy_group} onValueChange={v => setForm(p => ({ ...p, occupancy_group: v }))}>
@@ -409,8 +438,7 @@ export default function ProjectSetup() {
               </div>
             </Section>
 
-            {/* Per-Floor Data */}
-            <Section title="Per-Floor Data">
+            <Section title="Per-floor loads & area (code analysis)">
               <div className="space-y-3">
                 {Array.from({ length: f.num_floors }).map((_, i) => (
                   <div key={i} className="grid grid-cols-3 gap-3 items-center p-3 bg-slate-50 border border-slate-100 rounded-lg">
@@ -488,18 +516,23 @@ export default function ProjectSetup() {
               </div>
             </Section>
 
+            </>
+            )}
+
             <div className="flex gap-3 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={runAnalysisPreview}
-                className="border-slate-200 text-slate-700 hover:bg-slate-50"
-              >
-                Preview Code Analysis
-              </Button>
+              {isFire && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={runAnalysisPreview}
+                  className="border-slate-200 text-slate-700 hover:bg-slate-50"
+                >
+                  Preview Code Analysis
+                </Button>
+              )}
               <Button
                 type="submit"
-                disabled={saveMutation.isPending || !f.name || !f.occupancy_group}
+                disabled={saveMutation.isPending || !f.name || (isFire && !f.occupancy_group)}
                 className="bg-red-600 hover:bg-red-700 text-white gap-2 flex-1"
               >
                 {saveMutation.isPending ? 'Saving...' : 'Save & Open Designer'}

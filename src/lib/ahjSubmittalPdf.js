@@ -11,6 +11,7 @@ import {
   addGsisLogoTopRight,
   GSIS_LOGO_ASPECT,
 } from '@/lib/submittalBranding';
+import { drawCadVerticalTitleBlock, drawCadBottomTitleBlockFa0, drawCircuitLineLegend } from '@/lib/cadTitleBlockPdf';
 import { drawRossSooMatrix, drawFa0RightSidebar } from '@/lib/submittalFa0Ross';
 
 export const SHEET_36_24_LANDSCAPE_MM = [914.4, 609.6];
@@ -34,102 +35,6 @@ export function loadDataUrlImageSize(dataUrl) {
     img.onerror = () => resolve({ width: 4, height: 3 });
     img.src = dataUrl;
   });
-}
-
-function drawTitleBlock(
-  doc,
-  W,
-  H,
-  project,
-  sheetNo = 'FA-0',
-  logoDataUrl = null,
-  sheetDetail = null,
-  logoAspect = GSIS_LOGO_ASPECT,
-  meta = {}
-) {
-  const m = meta || {};
-  const isFa0 = sheetNo === 'FA-0';
-  const tbH = isFa0 ? 44 : 28;
-  const y0 = H - tbH - (isFa0 ? 7 : 8);
-
-  doc.setDrawColor(20);
-  doc.setLineWidth(0.25);
-  doc.rect(8, y0, W - 16, tbH);
-
-  let textLeft = 12;
-  if (logoDataUrl) {
-    try {
-      const maxW = isFa0 ? 22 : 26;
-      const maxH = isFa0 ? 12 : 13;
-      const { w, h } = fitLogoSizeMm(maxW, maxH, logoAspect);
-      doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), 10, y0 + (isFa0 ? 3 : 2), w, h);
-      textLeft = 10 + w + (isFa0 ? 4 : 5);
-    } catch {
-      /* ignore bad image */
-    }
-  }
-
-  if (isFa0) {
-    doc.line(8, y0 + 20, W - 8, y0 + 20);
-    const prep = m.prepared_by || m.drawn_by || '—';
-    const subDate = m.submittal_date || new Date().toLocaleDateString();
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    doc.setTextColor(40);
-    doc.text(`PREPARED BY: ${prep}`, textLeft, y0 + 7);
-    doc.text(`CHECKED BY: ${m.checked_by || '—'}`, textLeft, y0 + 13);
-    doc.text(`PROJECT MANAGER: ${m.project_manager || '—'}`, textLeft, y0 + 18);
-    doc.text(`DATE: ${subDate}`, W * 0.42, y0 + 7);
-    doc.text(`PROJECT NO: ${m.project_number || project?.project_number || '—'}`, W * 0.42, y0 + 13);
-    const tl = (() => {
-      if (Array.isArray(m.cover_title_lines)) return m.cover_title_lines;
-      if (typeof m.cover_title_lines === 'string' && m.cover_title_lines.trim()) {
-        return m.cover_title_lines.split(/\r?\n/).filter(Boolean);
-      }
-      return ['COVER SHEET', 'LEGEND, BATTERY CALC & OPS MATRIX'];
-    })();
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6);
-    doc.text('TITLE:', W * 0.42, y0 + 24);
-    doc.setFont('helvetica', 'normal');
-    let tly = y0 + 29;
-    tl.slice(0, 3).forEach((line) => {
-      doc.text(String(line).slice(0, 52), W * 0.42, tly);
-      tly += 3.5;
-    });
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`SHEET  ${sheetNo}`, W - 14, y0 + 14, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
-    doc.setTextColor(100);
-    doc.text('SCALE: NTS (floor plans as noted)', W - 14, y0 + 24, { align: 'right' });
-    doc.setTextColor(184, 134, 11);
-    doc.text('GOLDEN STATE INTEGRATED SYSTEMS', W - 14, y0 + 32, { align: 'right' });
-    doc.setTextColor(100);
-    doc.text('Preliminary — verify with AHJ. Licensed contractor / EOR responsible for permit.', W / 2, y0 + tbH - 2, { align: 'center' });
-    return;
-  }
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(40);
-  doc.text(`PROJECT: ${project?.name || '—'}`, textLeft, y0 + 6);
-  doc.text(`ADDRESS: ${project?.address || '—'}`, textLeft, y0 + 12);
-  doc.text(`DATE: ${new Date().toLocaleDateString()}`, textLeft, y0 + 18);
-  doc.text(`PROJ. NO.: ${m.project_number || project?.project_number || '—'}`, textLeft, y0 + 24);
-  doc.text(`DRAWN: ${m.drawn_by || '—'}    CHECKED: ${m.checked_by || '—'}`, W / 2 - 40, y0 + 24);
-  const sheetLine =
-    sheetDetail ||
-    (sheetNo === 'FA-1' ? 'FLOOR PLAN — DEVICES & CIRCUITS' : 'COVER · LEGEND · CALCS · OPS MATRIX');
-  doc.text(`SHEET: ${sheetNo}  ${sheetLine}`, W / 2, y0 + 10, { align: 'center' });
-  doc.text(`SCALE: AS NOTED (floor plans min. 1/8" = 1'-0" where shown)`, W - 12, y0 + 10, { align: 'right' });
-  doc.setFontSize(6);
-  doc.setTextColor(184, 134, 11);
-  doc.text('GOLDEN STATE INTEGRATED SYSTEMS', W - 12, y0 + 18, { align: 'right' });
-  doc.setTextColor(100);
-  doc.text('Preliminary — verify with AHJ. Licensed contractor / EOR responsible for permit.', W / 2, H - 6, { align: 'center' });
 }
 
 /**
@@ -231,77 +136,50 @@ export function drawAhjFloorPlanSheet(doc, opts) {
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, W, H, 'F');
 
-  const headerH = 24;
-  doc.setFillColor(252, 252, 253);
-  doc.rect(0, 0, W, headerH, 'F');
-  doc.setDrawColor(218, 165, 32);
-  doc.setLineWidth(0.55);
-  doc.line(0, headerH, W, headerH);
-  addGsisLogoTopRight(doc, logoDataUrl, W, {
-    maxWidthMm: 72,
-    maxHeightMm: 32,
-    rightMarginMm: 10,
-    topMm: 4,
-    aspectRatio: logoAspect,
-  });
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.setTextColor(30, 41, 59);
-  doc.text('FA-1  FLOOR PLAN — FIRE ALARM DEVICE LAYOUT', 12, 14);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(100, 116, 139);
-  doc.text(pName || project?.name || 'Project', 12, 21);
-  if (exportFloor != null && exportFloor !== '') {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.setTextColor(30, 41, 59);
-    doc.text(`Floor ${exportFloor} — full sheet export (not viewport zoom)`, 12, 27);
-  }
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
-  doc.text(`Sheet date: ${now}  ·  Vector layout from device coordinates + base plan`, W - 12, 16, { align: 'right' });
+  const margin = 10;
+  const headerH = 14;
+  doc.setDrawColor(30, 41, 59);
+  doc.setLineWidth(0.45);
+  doc.line(margin, headerH, W - margin, headerH);
 
-  const notesW = 72;
-  const tbReserve = 36;
-  const margin = 12;
-  const areaTop = headerH + 6;
-  const areaBottom = H - tbReserve - 12;
-  const areaH = Math.max(40, areaBottom - areaTop);
-  const planW = W - 2 * margin - notesW - 6;
-  const planLeft = margin;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text('FIRE ALARM  ·  FLOOR DEVICE LAYOUT', margin, 9);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(71, 85, 105);
+  const floorLine =
+    exportFloor != null && exportFloor !== ''
+      ? `Level ${exportFloor}  ·  ${pName || project?.name || 'Project'}`
+      : pName || project?.name || 'Project';
+  doc.text(floorLine, margin, 13);
+  doc.text(`Issued ${now}`, W - margin, 10, { align: 'right' });
+
+  if (logoDataUrl) {
+    try {
+      const { w, h } = fitLogoSizeMm(30, 11, logoAspect);
+      doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), W - margin - w - 1, 2, w, h);
+    } catch {
+      /* optional */
+    }
+  }
+
+  const tbW = 42;
+  const notesW = 58;
+  const gutter = 5;
+  const y0 = headerH + 5;
+  const y1 = H - margin;
+  const stripX = W - margin - tbW;
+  const notesX = stripX - gutter - notesW;
+  const planX = margin;
+  const planW = Math.max(50, notesX - gutter - planX);
+  const areaH = y1 - y0;
 
   doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.25);
-  doc.rect(planLeft, areaTop, planW, areaH, 'S');
-
-  doc.setFillColor(252, 252, 253);
-  doc.rect(planLeft + planW + 6, areaTop, notesW, areaH, 'F');
-  doc.setDrawColor(186, 199, 216);
-  doc.rect(planLeft + planW + 6, areaTop, notesW, areaH, 'S');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(30, 41, 59);
-  doc.text('GENERAL NOTES', planLeft + planW + 10, areaTop + 6);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.8);
-  doc.setTextColor(71, 85, 105);
-  const noteLines = [
-    '1. Work per NFPA 72 (adopted), NEC Art. 760, and AHJ.',
-    '2. Device locations graphic — verify against contract drawings.',
-    '3. Wire type & circuit class per riser / spec sections.',
-    '4. EOL only at last device on Class B; Class A per detail.',
-    '5. Coordinate ceiling smoke with HVAC & architectural.',
-    '6. North arrow & scale: refer to architectural base if not shown.',
-  ];
-  let ny = areaTop + 11;
-  noteLines.forEach((ln) => {
-    doc.splitTextToSize(ln, notesW - 10).forEach((seg) => {
-      doc.text(seg, planLeft + planW + 8, ny);
-      ny += 3.8;
-    });
-  });
+  doc.setLineWidth(0.22);
+  doc.rect(planX, y0, planW, areaH, 'S');
 
   if (imgData) {
     const iw = Math.max(1, imgWidth);
@@ -309,30 +187,96 @@ export function drawAhjFloorPlanSheet(doc, opts) {
     const scale = Math.min(planW / iw, areaH / ih);
     const dw = iw * scale;
     const dh = ih * scale;
-    const dx = planLeft + (planW - dw) / 2;
-    const dy = areaTop + (areaH - dh) / 2;
+    const dx = planX + (planW - dw) / 2;
+    const dy = y0 + (areaH - dh) / 2;
     try {
       doc.addImage(imgData, dataUrlImageFormat(imgData), dx, dy, dw, dh);
     } catch {
-      doc.setFontSize(10);
+      doc.setFontSize(9);
       doc.setTextColor(220, 38, 38);
-      doc.text('Floor plan image failed to embed. Regenerate from Floor Plan tab.', planLeft + 8, areaTop + 24);
+      doc.text('Floor plan image failed to embed. Re-export from the Floor Plan tab.', planX + 6, y0 + 20);
     }
   } else {
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setTextColor(71, 85, 105);
     const lines = doc.splitTextToSize(
-      'No floor plan capture was available. Open the Floor Plan tab, display the drawing with devices, then generate the submittal again.',
-      planW - 20
+      'No raster export was available. Open the Floor Plan tab with the sheet loaded, or ensure a floor-plan image is saved on the project — then generate again.',
+      planW - 12
     );
-    let ty = areaTop + 16;
+    let ty = y0 + 14;
     lines.forEach((ln) => {
-      doc.text(ln, planLeft + 8, ty);
+      doc.text(ln, planX + 6, ty);
       ty += 5;
     });
   }
 
-  drawTitleBlock(doc, W, H, project, 'FA-1', logoDataUrl, 'FLOOR PLAN — DEVICES & CIRCUITS', logoAspect, submittalMeta);
+  doc.setFillColor(252, 252, 253);
+  doc.rect(notesX, y0, notesW, areaH, 'F');
+  doc.setDrawColor(186, 199, 216);
+  doc.rect(notesX, y0, notesW, areaH, 'S');
+
+  const legendH = 34;
+  const legendY = y1 - legendH - 1;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(30, 41, 59);
+  doc.text('GENERAL NOTES', notesX + 3, y0 + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.8);
+  doc.setTextColor(71, 85, 105);
+  const noteLines = [
+    '1. Install per NFPA 72 (adopted), NEC Art. 760, and the AHJ.',
+    '2. Symbols follow NFPA 170 conventions as modeled in software.',
+    '3. SLC shown long-dash; NAC solid; AUX short-dash on plan export.',
+    '4. Class B EOL at last appliance unless Class A is noted on details.',
+    '5. Verify pull spacing, stair re-entry, and ceiling height with arch. base.',
+    '6. Phasing / demo (RE) vs remain (R) per contract documents.',
+    '7. Full-sheet plot — not a zoomed viewport.',
+  ];
+  let ny = y0 + 10;
+  const notesMaxY = legendY - 3;
+  for (const ln of noteLines) {
+    if (ny > notesMaxY) break;
+    for (const seg of doc.splitTextToSize(ln, notesW - 6)) {
+      if (ny > notesMaxY) break;
+      doc.text(seg, notesX + 3, ny);
+      ny += 3.7;
+    }
+  }
+
+  drawCircuitLineLegend(doc, notesX + 1, legendY, notesW - 2, legendH, [
+    { label: 'SLC / IDC initiating', color: [37, 99, 235], dash: [1.4, 1.1] },
+    { label: 'NAC / notification', color: [234, 88, 12], dash: [] },
+    { label: 'AUX / power-limited', color: [100, 116, 139], dash: [0.8, 0.8] },
+    { label: 'Data / fiber (if used)', color: [124, 58, 237], dash: [2.5, 0.9, 0.5, 0.9] },
+  ]);
+
+  const fNum = Number(exportFloor) > 0 ? Number(exportFloor) : 1;
+  const sheetNo = `FA-1.${String(fNum).padStart(2, '0')}`;
+  drawCadVerticalTitleBlock(doc, stripX, y0, tbW, areaH, {
+    project,
+    meta: submittalMeta,
+    sheetNo,
+    sheetTitle: `FIRE ALARM ${fNum}${nthFloorSuffix(fNum)} FLOOR PLAN`,
+    scaleText: 'MATCH ARCH. (min. 1/8" = 1\'-0" typical)',
+    firmLine: project?.installer_name || 'FIRE ALARM SYSTEM DESIGN',
+    issueText: 'CONSTRUCTION DOCUMENTS',
+  });
+
+  doc.setDrawColor(30, 41, 59);
+  doc.setLineWidth(0.35);
+  doc.rect(margin * 0.4, margin * 0.4, W - margin * 0.8, H - margin * 0.8, 'S');
+}
+
+function nthFloorSuffix(n) {
+  const k = n % 10;
+  const j = n % 100;
+  if (j >= 11 && j <= 13) return 'TH';
+  if (k === 1) return 'ST';
+  if (k === 2) return 'ND';
+  if (k === 3) return 'RD';
+  return 'TH';
 }
 
 /**
@@ -391,8 +335,8 @@ export function drawAhjCoverPage(
     }
   }
 
-  const titleBlockH = 44;
-  const titleTop = H - titleBlockH - 7;
+  const titleBlockReserve = 48;
+  const titleTop = H - titleBlockReserve;
   const sidebarW = 100;
   const sidebarX = W - 12 - sidebarW;
 
@@ -724,5 +668,5 @@ export function drawAhjCoverPage(
   const matrixH = Math.max(52, titleTop - yR - 4);
   drawRossSooMatrix(doc, legLeft, yR, legW, matrixH, reqs);
 
-  drawTitleBlock(doc, W, H, project, 'FA-0', logoDataUrl, null, logoAspect, m);
+  drawCadBottomTitleBlockFa0(doc, W, H, project, 'FA-0', logoDataUrl, logoAspect, m, dataUrlImageFormat, fitLogoSizeMm);
 }

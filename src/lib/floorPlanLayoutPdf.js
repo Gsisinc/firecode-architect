@@ -5,18 +5,19 @@ import {
   dataUrlImageFormat,
   GSIS_LOGO_ASPECT,
 } from '@/lib/submittalBranding';
+import { loadPlanUrlAsPngDataUrl, pickFloorPlanForPdfExport } from '@/lib/planImageExport';
 
 /**
  * Landscape PDF with live canvas capture (floor plan + devices). Falls back to a note page if no canvas.
- * @param {{ project?: object, canvasRef?: React.RefObject<HTMLCanvasElement|null>, captureRef?: React.RefObject<{ getLayoutDataURL?: (o?: object) => string|null }|null> }} opts
+ * @param {{ project?: object, canvasRef?: React.RefObject<HTMLCanvasElement|null>, captureRef?: React.RefObject<{ getLayoutDataURL?: (o?: object) => string|null }|null>, floorPlans?: object[], activeFloor?: number }} opts
  */
-export async function exportFloorPlanLayoutPdf({ project, canvasRef, captureRef }) {
+export async function exportFloorPlanLayoutPdf({ project, canvasRef, captureRef, floorPlans = [], activeFloor = 1 }) {
   const pName = project?.name || 'Fire Alarm System';
   const now = new Date().toLocaleDateString();
   const { dataUrl: logoDataUrl, aspect: logoAspectRaw } = await loadSubmittalLogoWithMetrics();
   const logoAspect = logoAspectRaw > 0 ? logoAspectRaw : GSIS_LOGO_ASPECT;
 
-  const imgData =
+  let imgData =
     (captureRef?.current &&
       typeof captureRef.current.getLayoutDataURL === 'function' &&
       captureRef.current.getLayoutDataURL({
@@ -28,6 +29,14 @@ export async function exportFloorPlanLayoutPdf({ project, canvasRef, captureRef 
     (canvasRef?.current && typeof canvasRef.current.toDataURL === 'function'
       ? canvasRef.current.toDataURL('image/png')
       : null);
+
+  if (!imgData) {
+    const fp = pickFloorPlanForPdfExport(floorPlans, activeFloor);
+    const rasterUrl = fp?.image_url || fp?.file_url;
+    if (rasterUrl) {
+      imgData = await loadPlanUrlAsPngDataUrl(rasterUrl);
+    }
+  }
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
