@@ -1206,8 +1206,16 @@ export async function runConstructionDrawingPdf({
     }
   };
 
+  // Track whether the active floor image came from the live canvas capture.
+  // If it did, it already contains all devices + wires rendered correctly —
+  // do NOT run applyCADComposite on it (that would strip wires and re-draw
+  // only devices using the cadRenderer, losing circuit lines).
+  let activeFloorFromCapture = false;
+
   floorImgData = await captureFloorPlan();
-  if (!floorImgData) {
+  if (floorImgData) {
+    activeFloorFromCapture = true;
+  } else {
     const plan = pickFloorPlanForPdfExport(floorPlans, activeFloor);
     if (plan) {
       const imageUrl = (plan.image_url || '').trim();
@@ -1216,7 +1224,6 @@ export async function runConstructionDrawingPdf({
       const isPdf    = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl || imageUrl);
 
       if (isPdf && (fileUrl || imageUrl)) {
-        // Render at scale 4 (~288 DPI from 72pt PDF baseline) — high-res extraction
         try {
           const rendered = await renderPdfPageToDataUrl(fileUrl || imageUrl, pageNum, 4);
           floorImgData = rendered?.dataUrl || null;
@@ -1240,8 +1247,12 @@ export async function runConstructionDrawingPdf({
       img.onerror = () => resolve({ width: 4, height: 3 });
       img.src = floorImgData;
     });
-    // Apply CAD composite: monochrome threshold + vector device symbols
-    floorImgData = await applyCADComposite(floorImgData, activeFloor, floorImgDims.width, floorImgDims.height);
+    // Only apply CAD composite when using a raw plan image fallback.
+    // When the image came from captureRef (live canvas), it already has
+    // devices + wires correctly rendered — skip composite to avoid losing them.
+    if (!activeFloorFromCapture) {
+      floorImgData = await applyCADComposite(floorImgData, activeFloor, floorImgDims.width, floorImgDims.height);
+    }
   }
 
   // Load logo: prefer hosted URL (small DB field); optional legacy data URL.
