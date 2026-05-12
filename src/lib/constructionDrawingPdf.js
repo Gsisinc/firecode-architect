@@ -1151,12 +1151,12 @@ export async function runConstructionDrawingPdf({
     let dataUrl = null;
     if (isPdf && (fileUrl || imageUrl)) {
       try {
-        const rendered = await renderPdfPageToDataUrl(fileUrl || imageUrl, pageNum, 4);
+        const rendered = await renderPdfPageToDataUrl(fileUrl || imageUrl, pageNum, 2);
         dataUrl = rendered?.dataUrl || null;
       } catch { /* fall through */ }
     }
-    if (!dataUrl && imageUrl && !isPdf) dataUrl = await loadPlanUrlAsPngDataUrl(imageUrl, { maxEdge: 12000 });
-    if (!dataUrl && fileUrl  && !isPdf) dataUrl = await loadPlanUrlAsPngDataUrl(fileUrl,  { maxEdge: 12000 });
+    if (!dataUrl && imageUrl && !isPdf) dataUrl = await loadPlanUrlAsPngDataUrl(imageUrl, { maxEdge: 4096 });
+    if (!dataUrl && fileUrl  && !isPdf) dataUrl = await loadPlanUrlAsPngDataUrl(fileUrl,  { maxEdge: 4096 });
     if (!dataUrl) return null;
 
     const dims = await new Promise(resolve => {

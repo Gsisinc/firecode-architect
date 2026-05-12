@@ -327,9 +327,19 @@ export async function renderCadComposite(planDataUrl, opts = {}) {
     threshold    = 210,
   } = opts;
 
+  // Cap canvas size to prevent "invalid string length" on toDataURL for huge plans
+  const MAX_EDGE = 4096;
+  const aspect = planNaturalW / Math.max(planNaturalH, 1);
+  let cw = planNaturalW;
+  let ch = planNaturalH;
+  if (cw > MAX_EDGE || ch > MAX_EDGE) {
+    if (aspect >= 1) { cw = MAX_EDGE; ch = Math.round(MAX_EDGE / aspect); }
+    else             { ch = MAX_EDGE; cw = Math.round(MAX_EDGE * aspect); }
+  }
+
   const canvas = document.createElement('canvas');
-  canvas.width  = planNaturalW;
-  canvas.height = planNaturalH;
+  canvas.width  = cw;
+  canvas.height = ch;
   const ctx = canvas.getContext('2d');
 
   // 1. White background (kills any alpha / beige tint)
@@ -350,12 +360,16 @@ export async function renderCadComposite(planDataUrl, opts = {}) {
     ctx.putImageData(applyMonochromeThreshold(imageData, threshold), 0, 0);
   }
 
+  // Scale factors: device coords are in planNatural space, canvas may be smaller
+  const scaleX = cw / Math.max(planNaturalW, 1);
+  const scaleY = ch / Math.max(planNaturalH, 1);
+
   // 4. Draw circuit wires first (under devices)
   ctx.imageSmoothingEnabled = false;
-  drawCadWires(ctx, devices, wires, floor, 1, 1);
+  drawCadWires(ctx, devices, wires, floor, scaleX, scaleY);
 
   // 5. Draw CAD device symbols on top
-  drawCadDevices(ctx, devices, floor, 1, 1, symbolRadius);
+  drawCadDevices(ctx, devices, floor, scaleX, scaleY, symbolRadius);
 
   return canvas;
 }
