@@ -17,6 +17,8 @@ import {
   calculateNacLoading,
 } from '@/lib/codeEngine';
 import { dataUrlImageFormat } from '@/lib/submittalBranding';
+import { pickFloorPlanForPdfExport, loadPlanUrlAsPngDataUrl } from '@/lib/planImageExport';
+import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
 
 // ─── Sheet dimensions (mm) ───────────────────────────────────────────────────
 const SHEET_W = 914.4;  // 36"
@@ -1117,9 +1119,8 @@ export async function runConstructionDrawingPdf({
   // Priority order:
   //  1. captureRef.getLayoutDataURL() — full vector render the designer set up
   //  2. canvasRef.current.toDataURL() — what's on screen right now
-  //  3. project.floor_plans[activeFloor].image_url — the uploaded plan as a
-  //     last-resort raster fallback. Without (3) the sheet renders blank when
-  //     the user generates from the Documents tab (canvas not mounted).
+  //  3. pickFloorPlanForPdfExport + loadPlanUrlAsPngDataUrl / renderPdfPageToDataUrl
+  //     — uploaded plan for the active floor when the canvas is unavailable.
   let floorImgData = null;
   let floorImgDims = { width: 4, height: 3 };
 
@@ -1156,17 +1157,30 @@ export async function runConstructionDrawingPdf({
 
   floorImgData = await captureFloorPlan();
   if (!floorImgData) {
-    // Pull the uploaded plan straight from project.floor_plans for the active
-    // floor — but only if it's actually an image (PDFs would need a render
-    // pipeline we don't have here without dragging pdfjs into the PDF export).
-    const fallback = (floorPlans || []).find(
-      (fp) =>
-        Number(fp?.floor_number) === Number(activeFloor) &&
-        (fp?.image_url || fp?.file_url) &&
-        (!fp?.file_type || /image\//i.test(fp.file_type))
-    );
-    const fallbackUrl = fallback?.image_url || fallback?.file_url || '';
-    floorImgData = await fetchPlanImageAsDataUrl(fallbackUrl);
+    const plan = pickFloorPlanForPdfExport(floorPlans, activeFloor);
+    if (plan) {
+      const imageUrl = (plan.image_url || '').trim();
+      const fileUrl = (plan.file_url || '').trim();
+      const pageNum = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
+
+      if (imageUrl && !/\.pdf($|\?)/i.test(imageUrl)) {
+        floorImgData = await loadPlanUrlAsPngDataUrl(imageUrl);
+      }
+      if (!floorImgData && fileUrl) {
+        const looksPdf =
+          plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl);
+        if (looksPdf) {
+          try {
+            const rendered = await renderPdfPageToDataUrl(fileUrl, pageNum, 2);
+            floorImgData = rendered?.dataUrl || null;
+          } catch {
+            /* PDF render failed (CORS, corrupt file, etc.) */
+          }
+        } else {
+          floorImgData = await loadPlanUrlAsPngDataUrl(fileUrl);
+        }
+      }
+    }
   }
 
   if (floorImgData) {
@@ -1178,9 +1192,12 @@ export async function runConstructionDrawingPdf({
     });
   }
 
-  // Load logo
+  // Load logo: prefer hosted URL (small DB field); optional legacy data URL.
   let logoDataUrl = null;
-  if (meta?.logo_data_url) {
+  if (meta?.logo_url) {
+    logoDataUrl = await fetchPlanImageAsDataUrl(meta.logo_url.trim());
+  }
+  if (!logoDataUrl && meta?.logo_data_url && String(meta.logo_data_url).startsWith('data:')) {
     logoDataUrl = meta.logo_data_url;
   }
 

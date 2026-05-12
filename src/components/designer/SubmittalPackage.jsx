@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Download, Loader2, FileText, Building2, FileImage } from "lucide-react";
+import { toast } from "sonner";
+import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -21,6 +23,8 @@ const DEFAULT_FA0_META = {
   company_address: "",
   company_phone: "",
   company_license: "",
+  /** Hosted file URL from UploadFile — never store multi‑MB base64 in the DB. */
+  logo_url: "",
   logo_data_url: "",
   designer_name: "",
   designer_nicet: "",
@@ -38,6 +42,9 @@ const DEFAULT_FA0_META = {
 
 function packSubmittalMetaForSave(raw) {
   const m = { ...raw };
+  if (typeof m.logo_data_url === "string" && m.logo_data_url.length > 2000) {
+    delete m.logo_data_url;
+  }
   if (typeof m.drawing_index_lines === "string") {
     m.drawing_index_lines = m.drawing_index_lines.split(/\r?\n/).filter(Boolean);
   }
@@ -61,6 +68,7 @@ export default function SubmittalPackage({
   onSaveSubmittalMeta,
 }) {
   const [generating, setGenerating] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
   const [submittalMeta, setSubmittalMeta] = useState(() => ({ ...DEFAULT_FA0_META }));
 
   // Sync from server only when the *project record* changes. Do NOT depend on
@@ -73,9 +81,13 @@ export default function SubmittalPackage({
       setSubmittalMeta({ ...DEFAULT_FA0_META });
       return;
     }
+    const hugeLogo =
+      typeof m.logo_data_url === "string" && m.logo_data_url.length > 2000;
     setSubmittalMeta({
       ...DEFAULT_FA0_META,
       ...m,
+      logo_data_url: hugeLogo ? "" : (m.logo_data_url || ""),
+      logo_url: m.logo_url || "",
       drawing_index_lines: Array.isArray(m.drawing_index_lines)
         ? m.drawing_index_lines.join("\n")
         : m.drawing_index_lines ?? DEFAULT_FA0_META.drawing_index_lines,
@@ -92,6 +104,30 @@ export default function SubmittalPackage({
     revs[i] = { ...revs[i], [field]: value };
     return { ...s, revisions: revs };
   });
+
+  const handleLogoFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose an image file (PNG, JPG, WebP, …).");
+      return;
+    }
+    setLogoUploading(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      setSubmittalMeta((prev) => {
+        const next = { ...prev, logo_url: file_url || "", logo_data_url: "" };
+        onSaveSubmittalMeta?.(packSubmittalMetaForSave(next));
+        return next;
+      });
+      toast.success("Logo saved to project (hosted URL).");
+    } catch (err) {
+      toast.error(err?.message || "Logo upload failed.");
+    } finally {
+      setLogoUploading(false);
+    }
+  };
 
   const generate = async () => {
     const packed = packSubmittalMetaForSave(submittalMeta);
@@ -172,19 +208,37 @@ export default function SubmittalPackage({
                   <Input className="text-xs h-8" placeholder="e.g. CSLB #123456 / C-10"
                     value={submittalMeta.company_license} onChange={set("company_license")} />
                 </F>
-                <F label="Company Logo (appears in title block on every sheet)">
-                  <Input type="file" accept="image/*" className="text-xs h-8 file:mr-2 file:text-xs"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0]; if (!f) return;
-                      const reader = new FileReader();
-                      reader.onload = () => setSubmittalMeta((m) => ({ ...m, logo_data_url: reader.result }));
-                      reader.readAsDataURL(f);
-                    }} />
-                  {submittalMeta.logo_data_url && (
+                <F label="Company Logo (upload — stored as URL, not base64 in the database)">
+                  <Input
+                    type="file"
+                    accept="image/*"
+                    disabled={logoUploading}
+                    className="text-xs h-8 file:mr-2 file:text-xs"
+                    onChange={handleLogoFile}
+                  />
+                  {logoUploading && (
+                    <p className="text-[10px] text-slate-500 mt-1">Uploading…</p>
+                  )}
+                  {(submittalMeta.logo_url || submittalMeta.logo_data_url) && (
                     <div className="flex items-center gap-2 mt-1">
-                      <img src={submittalMeta.logo_data_url} alt="Logo preview" className="h-10 object-contain border rounded bg-white p-1" />
-                      <Button type="button" variant="ghost" size="sm" className="text-[10px] h-7 text-red-500"
-                        onClick={() => setSubmittalMeta((m) => ({ ...m, logo_data_url: "" }))}>
+                      <img
+                        src={submittalMeta.logo_url || submittalMeta.logo_data_url}
+                        alt="Logo preview"
+                        className="h-10 max-w-[160px] object-contain border rounded bg-white p-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-[10px] h-7 text-red-500"
+                        onClick={() => {
+                          setSubmittalMeta((prev) => {
+                            const next = { ...prev, logo_url: "", logo_data_url: "" };
+                            onSaveSubmittalMeta?.(packSubmittalMetaForSave(next));
+                            return next;
+                          });
+                        }}
+                      >
                         Remove
                       </Button>
                     </div>
