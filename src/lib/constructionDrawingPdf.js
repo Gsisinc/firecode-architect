@@ -492,6 +492,17 @@ const GENERAL_NOTES_SOW = [
 ];
 
 export async function generateLegendSheet(doc, project, devices, meta, logoDataUrl) {
+  // Use user-edited general notes from meta when available
+  const customNotes = (meta?.general_notes || '').trim();
+  const notesArray = customNotes
+    ? customNotes.split('\n').filter(Boolean).map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean)
+    : GENERAL_NOTES_FA0;
+
+  const customSeq = (meta?.sequence_of_ops || '').trim();
+  const seqArray = customSeq
+    ? customSeq.split('\n').filter(Boolean).slice(0, 8)
+    : GENERAL_NOTES_SOW;
+
   const W = DRAW_W;
   const baseX = DRAW_X + 2;
 
@@ -598,7 +609,7 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
   doc.text('GENERAL NOTES', col3X + colW3 / 2, gy + 5, { align: 'center' });
   gy += headerH + 1;
 
-  GENERAL_NOTES_FA0.forEach((note, i) => {
+  notesArray.forEach((note, i) => {
     if (gy > DRAW_Y + DRAW_H - 24) return;
     const numStr = String(i + 1) + '.';
     const lines = doc.splitTextToSize(note, colW3 - 12);
@@ -617,7 +628,7 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
   doc.setFillColor(255, 251, 235); doc.rect(col3X, gy - 1, colW3, 6, 'F');
   setFont(doc, 6.5, 'bold', [146, 64, 14]);
   doc.text('GENERAL SEQUENCE NOTES', col3X + 2, gy + 4); gy += 7;
-  GENERAL_NOTES_SOW.slice(0, 6).forEach((note, i) => {
+  seqArray.slice(0, 6).forEach((note, i) => {
     if (gy > DRAW_Y + DRAW_H - 10) return;
     const lines = doc.splitTextToSize(`${i + 1}. ${note}`, colW3 - 8);
     setFont(doc, 5, 'normal', C_DARK);
@@ -1126,15 +1137,21 @@ export async function runConstructionDrawingPdf({
 
   const captureFloorPlan = async () => {
     try {
-      const hi = captureRef?.current && typeof captureRef.current.getLayoutDataURL === 'function'
-        ? captureRef.current.getLayoutDataURL({ mimeType: 'image/png', fitContent: true, maxOutputEdge: 8192, exportMarginPx: 48 })
-        : null;
-      if (hi) return hi;
-    } catch { /* swallow capture errors and fall through to next strategy */ }
-    try {
-      const fromCanvas = canvasRef?.current?.toDataURL?.('image/png') || null;
-      if (fromCanvas) return fromCanvas;
-    } catch { /* canvas may be tainted by cross-origin floor plan; fall through */ }
+      if (captureRef?.current && typeof captureRef.current.getLayoutDataURL === 'function') {
+        // MUST await — getLayoutDataURL is async (re-fetches blueprint as blob to avoid taint)
+        const hi = await captureRef.current.getLayoutDataURL({
+          mimeType: 'image/png',
+          fitContent: true,
+          maxOutputEdge: 8192,
+          exportMarginPx: 48,
+          pixelRatio: 3,
+        });
+        if (hi && hi.length > 1000) return hi;
+      }
+    } catch (err) {
+      console.warn('[PDF] captureRef.getLayoutDataURL failed:', err?.message || err);
+    }
+    // Never fall back to canvas.toDataURL — cross-origin blueprint taints the canvas
     return null;
   };
 
@@ -1160,25 +1177,24 @@ export async function runConstructionDrawingPdf({
     const plan = pickFloorPlanForPdfExport(floorPlans, activeFloor);
     if (plan) {
       const imageUrl = (plan.image_url || '').trim();
-      const fileUrl = (plan.file_url || '').trim();
-      const pageNum = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
+      const fileUrl  = (plan.file_url  || '').trim();
+      const pageNum  = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
+      const isPdf    = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl || imageUrl);
 
-      if (imageUrl && !/\.pdf($|\?)/i.test(imageUrl)) {
-        floorImgData = await loadPlanUrlAsPngDataUrl(imageUrl);
+      if (isPdf && (fileUrl || imageUrl)) {
+        // Render at scale 4 (~288 DPI from 72pt PDF baseline) — high-res extraction
+        try {
+          const rendered = await renderPdfPageToDataUrl(fileUrl || imageUrl, pageNum, 4);
+          floorImgData = rendered?.dataUrl || null;
+        } catch { /* fall through to image fetch */ }
       }
-      if (!floorImgData && fileUrl) {
-        const looksPdf =
-          plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl);
-        if (looksPdf) {
-          try {
-            const rendered = await renderPdfPageToDataUrl(fileUrl, pageNum, 2);
-            floorImgData = rendered?.dataUrl || null;
-          } catch {
-            /* PDF render failed (CORS, corrupt file, etc.) */
-          }
-        } else {
-          floorImgData = await loadPlanUrlAsPngDataUrl(fileUrl);
-        }
+
+      if (!floorImgData && imageUrl && !isPdf) {
+        floorImgData = await loadPlanUrlAsPngDataUrl(imageUrl, { maxEdge: 12000 });
+      }
+
+      if (!floorImgData && fileUrl && !isPdf) {
+        floorImgData = await loadPlanUrlAsPngDataUrl(fileUrl, { maxEdge: 12000 });
       }
     }
   }
