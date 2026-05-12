@@ -54,6 +54,18 @@ function packSubmittalMetaForSave(raw) {
   return m;
 }
 
+/** Module-scope wrapper — defining inside SubmittalPackage would recreate the component type every render and remount inputs (lost focus while typing). */
+function SubmittalField({ label, required, children }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-[10px] text-slate-600">
+        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+      </Label>
+      {children}
+    </div>
+  );
+}
+
 export default function SubmittalPackage({
   project,
   devices,
@@ -143,15 +155,6 @@ export default function SubmittalPackage({
     }
   };
 
-  const F = ({ label, required, children }) => (
-    <div className="space-y-1">
-      <Label className="text-[10px] text-slate-600">
-        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
-      </Label>
-      {children}
-    </div>
-  );
-
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <Card
@@ -190,25 +193,25 @@ export default function SubmittalPackage({
                 <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-800">
                   This information fills the <strong>right title block column</strong> on every sheet — matching the reference drawings with company logo, address, and engineer stamp box.
                 </div>
-                <F label="Company / Firm Name">
+                <SubmittalField label="Company / Firm Name">
                   <Input className="text-xs h-8" placeholder="e.g. Golden State Integrated Systems"
                     value={submittalMeta.company_name} onChange={set("company_name")} />
-                </F>
+                </SubmittalField>
                 <div className="grid grid-cols-2 gap-2">
-                  <F label="Company Address">
+                  <SubmittalField label="Company Address">
                     <Input className="text-xs h-8" placeholder="123 Main St, City, ST 00000"
                       value={submittalMeta.company_address} onChange={set("company_address")} />
-                  </F>
-                  <F label="Company Phone">
+                  </SubmittalField>
+                  <SubmittalField label="Company Phone">
                     <Input className="text-xs h-8" placeholder="(555) 000-0000"
                       value={submittalMeta.company_phone} onChange={set("company_phone")} />
-                  </F>
+                  </SubmittalField>
                 </div>
-                <F label="Contractor License #">
+                <SubmittalField label="Contractor License #">
                   <Input className="text-xs h-8" placeholder="e.g. CSLB #123456 / C-10"
                     value={submittalMeta.company_license} onChange={set("company_license")} />
-                </F>
-                <F label="Company Logo (upload — stored as URL, not base64 in the database)">
+                </SubmittalField>
+                <SubmittalField label="Company Logo (upload — stored as URL, not base64 in the database)">
                   <Input
                     type="file"
                     accept="image/*"
@@ -243,17 +246,17 @@ export default function SubmittalPackage({
                       </Button>
                     </div>
                   )}
-                </F>
+                </SubmittalField>
                 <div className="grid grid-cols-3 gap-2">
-                  <F label="Designer Name">
+                  <SubmittalField label="Designer Name">
                     <Input className="text-xs h-8" value={submittalMeta.designer_name} onChange={set("designer_name")} />
-                  </F>
-                  <F label="NICET #">
+                  </SubmittalField>
+                  <SubmittalField label="NICET #">
                     <Input className="text-xs h-8" value={submittalMeta.designer_nicet} onChange={set("designer_nicet")} />
-                  </F>
-                  <F label="Designer Phone">
+                  </SubmittalField>
+                  <SubmittalField label="Designer Phone">
                     <Input className="text-xs h-8" value={submittalMeta.designer_phone} onChange={set("designer_phone")} />
-                  </F>
+                  </SubmittalField>
                 </div>
               </TabsContent>
 
@@ -263,45 +266,45 @@ export default function SubmittalPackage({
                   <strong>Battery calcs, NAC loading, and riser diagram</strong> are auto-generated from your placed devices. The floor plan sheet embeds the full-resolution drawing — not a screenshot.
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <F label="Prepared By" required>
+                  <SubmittalField label="Prepared By" required>
                     <Input className="text-xs h-8" placeholder="e.g. M.A. Johnson"
                       value={submittalMeta.prepared_by} onChange={set("prepared_by")} />
-                  </F>
-                  <F label="Checked By">
+                  </SubmittalField>
+                  <SubmittalField label="Checked By">
                     <Input className="text-xs h-8" value={submittalMeta.checked_by} onChange={set("checked_by")} />
-                  </F>
-                  <F label="Project Manager">
+                  </SubmittalField>
+                  <SubmittalField label="Project Manager">
                     <Input className="text-xs h-8" value={submittalMeta.project_manager} onChange={set("project_manager")} />
-                  </F>
-                  <F label="Project Number">
+                  </SubmittalField>
+                  <SubmittalField label="Project Number">
                     <Input className="text-xs h-8" value={submittalMeta.project_number} onChange={set("project_number")} />
-                  </F>
-                  <F label="Submittal Date">
+                  </SubmittalField>
+                  <SubmittalField label="Submittal Date">
                     <Input className="text-xs h-8" placeholder="Defaults to today"
                       value={submittalMeta.submittal_date} onChange={set("submittal_date")} />
-                  </F>
-                  <F label="Battery Override (optional)">
+                  </SubmittalField>
+                  <SubmittalField label="Battery Override (optional)">
                     <Input className="text-xs h-8" placeholder="Auto-calculated if blank"
                       value={submittalMeta.battery_callout} onChange={set("battery_callout")} />
-                  </F>
+                  </SubmittalField>
                 </div>
-                <F label="Scope of Work">
+                <SubmittalField label="Scope of Work">
                   <Textarea className="text-xs min-h-[60px]"
                     placeholder="e.g. Tenant improvement — new addressable devices, duct smoke per mechanical…"
                     value={submittalMeta.scope_of_work} onChange={set("scope_of_work")} />
-                </F>
-                <F label="Monitoring Notes (optional override)">
+                </SubmittalField>
+                <SubmittalField label="Monitoring Notes (optional override)">
                   <Textarea className="text-xs min-h-[40px]"
                     value={submittalMeta.monitoring_notes} onChange={set("monitoring_notes")} />
-                </F>
+                </SubmittalField>
               </TabsContent>
 
               {/* ── REVISIONS & INDEX TAB ── */}
               <TabsContent value="revisions" className="mx-4 mt-3 mb-4 flex-1 min-h-0 overflow-y-auto space-y-3 outline-none">
-                <F label="Drawing Index (one line per sheet — appears on FA0.01)">
+                <SubmittalField label="Drawing Index (one line per sheet — appears on FA0.01)">
                   <Textarea className="text-xs min-h-[72px] font-mono"
                     value={submittalMeta.drawing_index_lines} onChange={set("drawing_index_lines")} />
-                </F>
+                </SubmittalField>
                 <div>
                   <Label className="text-[10px] text-slate-600">Revisions (up to 5 — appear in title block)</Label>
                   <div className="mt-1 space-y-1">
