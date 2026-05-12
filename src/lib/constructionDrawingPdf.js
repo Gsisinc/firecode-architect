@@ -234,164 +234,208 @@ function drawLegendSymbol(doc, row, x, y, w, h) {
   doc.setLineDashPattern([], 0);
 }
 
-/** Draw the right-side title block (vertical band). */
+/**
+ * Draw the right-side title block — strict black-on-white CAD engineering style
+ * matching professional AHJ submittal drawings (hairline rules, Helvetica,
+ * no colour fills, same look as the reference FA5.02 drawing).
+ */
 function drawTitleBlock(doc, project, meta, logoDataUrl, sheetNo, sheetTitle, sheetScale = 'NTS') {
   const x = TB_X;
   const y = 0;
   const w = TB_W;
   const h = SHEET_H;
 
-  // Background
-  doc.setFillColor(250, 251, 252);
-  doc.rect(x, y, w, h, 'F');
-  doc.setDrawColor(...C_DARK);
-  doc.setLineWidth(0.6);
-  doc.line(x, y, x, h);        // left border
-  doc.setLineWidth(0.4);
-  doc.line(x, y + 0.3, x + w, y + 0.3);   // top
-  doc.line(x, h - 0.3, x + w, h - 0.3);   // bottom
-  doc.line(x + w - 0.3, y, x + w - 0.3, h); // right
+  const BLK  = [0, 0, 0];        // pure black — all lines/text
+  const WHT  = [255, 255, 255];
+  const LGT  = [240, 240, 240];   // light fill for header rows only
+  const rule = (y1) => {
+    doc.setDrawColor(...BLK); doc.setLineWidth(0.18);
+    doc.line(x, y1, x + w, y1);
+  };
 
-  let ty = y + 6;
+  // Outer border — thick left edge (matches the reference double-border)
+  doc.setFillColor(...WHT); doc.rect(x, y, w, h, 'F');
+  doc.setDrawColor(...BLK);
+  doc.setLineWidth(0.8); doc.line(x, y, x, h);           // left — thicker separator
+  doc.setLineWidth(0.25);
+  doc.line(x, y, x + w, y);                               // top
+  doc.line(x, h, x + w, h);                               // bottom
+  doc.line(x + w, y, x + w, h);                           // right
 
-  // Logo area
-  const logoH = 22;
-  doc.setFillColor(255, 255, 255);
-  doc.setDrawColor(...C_LGRAY);
-  doc.setLineWidth(0.2);
-  doc.rect(x + 2, ty, w - 4, logoH, 'FD');
+  let ty = y;
+
+  // ── LOGO / COMPANY NAME ───────────────────────────────────────────────────
+  const logoZoneH = 28;
+  doc.setFillColor(...WHT); doc.rect(x, ty, w, logoZoneH, 'F');
   if (logoDataUrl) {
     try {
-      const aspect = 2;
-      const { lw, lh } = { lw: Math.min(w - 8, logoH * aspect), lh: logoH - 4 };
-      const fx = x + 2 + (w - 4 - lw) / 2;
-      doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), fx, ty + 2, lw, lh);
-    } catch { /* fallback */ }
-  } else {
-    setFont(doc, 7, 'bold', C_GOLD);
-    doc.text(meta?.company_name || 'COMPANY NAME', x + w / 2, ty + logoH / 2 + 1, { align: 'center' });
-    setFont(doc, 5, 'normal', C_GRAY);
-    doc.text('Upload logo in submittal dialog', x + w / 2, ty + logoH / 2 + 5, { align: 'center' });
+      const lw = w - 6; const lh = logoZoneH - 4;
+      doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), x + 3, ty + 2, lw, lh);
+    } catch { /* fallback text */ }
   }
-  ty += logoH + 2;
+  // Company name always rendered (over logo or as fallback)
+  if (!logoDataUrl) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...BLK);
+    doc.text((meta?.company_name || 'FIRE PROTECTION CONTRACTOR').toUpperCase(), x + w / 2, ty + logoZoneH / 2 + 1.5, { align: 'center' });
+  }
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(5); doc.setTextColor(...BLK);
+  if (meta?.company_address) doc.text(meta.company_address, x + w / 2, ty + logoZoneH - 7, { align: 'center' });
+  if (meta?.company_phone)   doc.text(meta.company_phone,   x + w / 2, ty + logoZoneH - 3.5, { align: 'center' });
+  ty += logoZoneH; rule(ty);
 
-  // Divider + company info
-  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty);
-  ty += 3;
-  setFont(doc, 5.5, 'bold', C_DARK);
-  doc.text(meta?.company_name || '—', x + w / 2, ty, { align: 'center' }); ty += 4;
-  setFont(doc, 5, 'normal', C_GRAY);
-  if (meta?.company_address) { doc.text(meta.company_address, x + w / 2, ty, { align: 'center' }); ty += 3.5; }
-  if (meta?.company_phone)   { doc.text(meta.company_phone,   x + w / 2, ty, { align: 'center' }); ty += 3.5; }
-  if (meta?.company_license) { doc.text(`Lic: ${meta.company_license}`, x + w / 2, ty, { align: 'center' }); ty += 3.5; }
-  ty += 2;
+  // ── COMPANY LICENSE / CERT ────────────────────────────────────────────────
+  if (meta?.company_license) {
+    ty += 0.5;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(5); doc.setTextColor(...BLK);
+    doc.text(`LIC: ${meta.company_license}`, x + 3, ty + 3.5);
+    ty += 5; rule(ty);
+  }
 
-  // Project info block
-  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
+  // ── PROJECT INFO ROWS ─────────────────────────────────────────────────────
   const infoRows = [
-    ['PROJECT', project?.name || '—'],
-    ['OWNER',   project?.owner_name || '—'],
-    ['ADDRESS', project?.address || '—'],
-    ['AHJ',     project?.ahj_contact || '—'],
-    ['OCC. GRP',`Group ${project?.occupancy_group || '—'}`],
-    ['FLOORS',  String(project?.num_floors || '—')],
-    ['SPRINKLER', project?.sprinkler_status || 'None'],
+    ['PROJECT:', project?.name || '—'],
+    ['OWNER:',   project?.owner_name || '—'],
+    ['ADDRESS:', project?.address || '—'],
+    ['AHJ:',     project?.ahj_contact || '—'],
+    ['OCC GRP:', `GROUP ${project?.occupancy_group || '—'}`],
+    ['SPRINKLER:', project?.sprinkler_status || 'NONE'],
   ];
-  infoRows.forEach(([label, value]) => {
-    setFont(doc, 5, 'bold', C_GRAY);
-    doc.text(label, x + 3, ty + 3);
-    setFont(doc, 5, 'normal', C_DARK);
-    const val = doc.splitTextToSize(value, w - 22);
-    doc.text(val[0] || '', x + 20, ty + 3);
-    ty += 4.5;
+  infoRows.forEach(([lbl, val]) => {
+    ty += 0.5;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(4.5); doc.setTextColor(...BLK);
+    doc.text(lbl, x + 2, ty + 3.2);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5);
+    const wrapped = doc.splitTextToSize(String(val), w - 24);
+    doc.text(wrapped[0] || '', x + 22, ty + 3.2);
+    if (wrapped[1]) { ty += 3.5; doc.text(wrapped[1], x + 22, ty + 3.2); }
+    ty += 5; rule(ty);
   });
-  ty += 1;
 
-  // Revision block
-  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
-  setFont(doc, 5.5, 'bold', C_DARK);
-  doc.text('REVISIONS', x + w / 2, ty + 3, { align: 'center' }); ty += 5;
-  // Header
-  doc.setFillColor(230, 235, 242);
-  doc.rect(x + 2, ty - 1, w - 4, 5, 'F');
-  setFont(doc, 4.5, 'bold', C_DARK);
-  doc.text('NO', x + 4, ty + 2.5);
-  doc.text('DATE', x + 11, ty + 2.5);
-  doc.text('BY', x + 30, ty + 2.5);
-  doc.text('DESCRIPTION', x + 40, ty + 2.5);
+  // ── STAMP / SEAL BOX ─────────────────────────────────────────────────────
+  ty += 1;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(5); doc.setTextColor(...BLK);
+  doc.text('ENGINEER / DESIGNER STAMP', x + w / 2, ty + 3.5, { align: 'center' });
   ty += 5;
+  const stampH = 26;
+  doc.setDrawColor(...BLK); doc.setLineWidth(0.18); doc.rect(x + 3, ty, w - 6, stampH, 'S');
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(5); doc.setTextColor(100, 100, 100);
+  doc.text('SEAL / NICET STAMP', x + w / 2, ty + 8, { align: 'center' });
+  if (meta?.designer_name)  { doc.setFont('helvetica', 'bold'); doc.setFontSize(5); doc.setTextColor(...BLK); doc.text(meta.designer_name,  x + w / 2, ty + 15, { align: 'center' }); }
+  if (meta?.designer_nicet) { doc.setFont('helvetica', 'normal'); doc.setFontSize(4.5); doc.text(`NICET ${meta.designer_nicet}`, x + w / 2, ty + 20, { align: 'center' }); }
+  ty += stampH + 1; rule(ty);
+
+  // ── REVISIONS TABLE ───────────────────────────────────────────────────────
+  ty += 1;
+  doc.setFillColor(...LGT); doc.rect(x, ty, w, 5.5, 'F');
+  rule(ty);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(5); doc.setTextColor(...BLK);
+  doc.text('REVISIONS', x + w / 2, ty + 3.8, { align: 'center' });
+  ty += 5.5; rule(ty);
+
+  // Rev header row
+  doc.setFillColor(...LGT); doc.rect(x, ty, w, 5, 'F');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(4); doc.setTextColor(...BLK);
+  doc.text('NO', x + 2,    ty + 3.5);
+  doc.text('DATE', x + 9,  ty + 3.5);
+  doc.text('BY', x + 28,   ty + 3.5);
+  doc.text('DESC', x + 38, ty + 3.5);
+  ty += 5; rule(ty);
+
   const revs = meta?.revisions || [];
   for (let i = 0; i < 5; i++) {
-    const r = revs[i] || {};
-    doc.setFillColor(i % 2 === 0 ? 248 : 243, 248, 252);
-    doc.rect(x + 2, ty - 1, w - 4, 5, 'F');
-    setFont(doc, 4.5, 'normal', C_DARK);
-    doc.text(r.no || String(i + 1), x + 4, ty + 2.5);
-    doc.text(r.date || '', x + 11, ty + 2.5);
-    doc.text(r.by || '', x + 30, ty + 2.5);
-    const desc = (r.text || '').slice(0, 14);
-    doc.text(desc, x + 40, ty + 2.5);
-    ty += 5;
+    const rv = revs[i] || {};
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(4.5); doc.setTextColor(...BLK);
+    doc.text(rv.no   || String(i + 1), x + 2, ty + 3.5);
+    doc.text(rv.date || '',            x + 9, ty + 3.5);
+    doc.text(rv.by   || '',            x + 28, ty + 3.5);
+    doc.text((rv.text || '').slice(0, 14), x + 38, ty + 3.5);
+    ty += 4.5; rule(ty);
   }
-  ty += 2;
 
-  // Stamp box
-  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
-  setFont(doc, 5.5, 'bold', C_DARK);
-  doc.text('ENGINEER / DESIGNER STAMP', x + w / 2, ty + 3, { align: 'center' }); ty += 5;
-  doc.setDrawColor(...C_RED); doc.setLineWidth(0.3);
-  doc.rect(x + 4, ty, w - 8, 28, 'S');
-  setFont(doc, 5, 'normal', C_GRAY);
-  doc.text('Stamp / Seal', x + w / 2, ty + 10, { align: 'center' });
-  doc.text('(NICET / EOR / AHJ)', x + w / 2, ty + 15, { align: 'center' });
-  if (meta?.designer_name)  { setFont(doc, 5, 'bold', C_DARK); doc.text(meta.designer_name, x + w / 2, ty + 21, { align: 'center' }); }
-  if (meta?.designer_nicet) { setFont(doc, 4.5, 'normal', C_GRAY); doc.text(`NICET ${meta.designer_nicet}`, x + w / 2, ty + 25, { align: 'center' }); }
-  ty += 30;
+  // ── DRAWN / CHECKED / DATE ────────────────────────────────────────────────
+  ty += 0.5;
+  const subDate = meta?.submittal_date || new Date().toLocaleDateString();
+  const drawn   = meta?.prepared_by || meta?.drawn_by || '—';
+  const checked = meta?.checked_by || '—';
+  const jobNo   = meta?.project_number || project?.project_number || '—';
 
-  // Bottom title panel
-  const bottomH = SHEET_H - ty - 4;
-  const bottomY = ty;
-  doc.setFillColor(15, 23, 42);
-  doc.rect(x + 2, bottomY, w - 4, bottomH, 'F');
-  setFont(doc, 5, 'normal', [150, 160, 180]);
-  doc.text('PROJECT TITLE', x + w / 2, bottomY + 5, { align: 'center' });
-  setFont(doc, 6.5, 'bold', [255, 255, 255]);
-  const titleLines = doc.splitTextToSize((project?.name || '').toUpperCase(), w - 10);
-  titleLines.slice(0, 2).forEach((ln, i) => doc.text(ln, x + w / 2, bottomY + 10 + i * 5, { align: 'center' }));
-  const subtitleY = bottomY + 10 + Math.min(titleLines.length, 2) * 5 + 2;
-  setFont(doc, 5, 'normal', [150, 160, 180]);
-  if (project?.address) { doc.text(project.address.slice(0, 30), x + w / 2, subtitleY, { align: 'center' }); }
+  doc.setFont('helvetica', 'bold');   doc.setFontSize(4.5); doc.setTextColor(...BLK);
+  doc.text('DRAWN:', x + 2, ty + 4);
+  doc.setFont('helvetica', 'normal'); doc.text(drawn.slice(0, 10),   x + 18, ty + 4);
+  doc.setFont('helvetica', 'bold');   doc.text('CHK:',               x + 2,  ty + 8.5);
+  doc.setFont('helvetica', 'normal'); doc.text(checked.slice(0, 10), x + 18, ty + 8.5);
+  doc.setFont('helvetica', 'bold');   doc.text('DATE:',              x + 2,  ty + 13);
+  doc.setFont('helvetica', 'normal'); doc.text(subDate,              x + 18, ty + 13);
+  doc.setFont('helvetica', 'bold');   doc.text('JOB NO:',            x + 2,  ty + 17.5);
+  doc.setFont('helvetica', 'normal'); doc.text(jobNo.slice(0, 12),   x + 18, ty + 17.5);
+  ty += 19.5; rule(ty);
 
-  // Sheet number / title at very bottom
-  const snY = SHEET_H - 18;
-  doc.setFillColor(37, 99, 235);
-  doc.rect(x + 2, snY, w - 4, 14, 'F');
-  setFont(doc, 5.5, 'bold', C_WHITE);
-  doc.text(sheetTitle.toUpperCase(), x + w / 2, snY + 5, { align: 'center' });
-  setFont(doc, 5, 'normal', [180, 200, 240]);
-  doc.text(`SHEET SCALE: ${sheetScale}`, x + w / 2, snY + 9, { align: 'center' });
-  setFont(doc, 12, 'bold', C_WHITE);
-  doc.text(sheetNo, x + w / 2, snY + 13.5, { align: 'center' });
+  // ── PROJECT TITLE ─────────────────────────────────────────────────────────
+  ty += 1;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(5); doc.setTextColor(...BLK);
+  doc.text('PROJECT TITLE', x + w / 2, ty + 3.5, { align: 'center' });
+  ty += 5; rule(ty);
+
+  ty += 1;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.setTextColor(...BLK);
+  const titleLines = doc.splitTextToSize((project?.name || '—').toUpperCase(), w - 6);
+  titleLines.slice(0, 3).forEach((ln, i) => {
+    doc.text(ln, x + w / 2, ty + 5 + i * 5, { align: 'center' });
+  });
+  ty += Math.min(titleLines.length, 3) * 5 + 3;
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(5); doc.setTextColor(...BLK);
+  if (project?.address) {
+    doc.splitTextToSize(project.address, w - 6).slice(0, 2).forEach((ln, i) => {
+      doc.text(ln, x + w / 2, ty + i * 4, { align: 'center' });
+    });
+    ty += 8;
+  }
+  rule(ty);
+
+  // ── SHEET TITLE & NUMBER (bottom of column, matching FA5.02 style) ────────
+  // Fill remaining space
+  const remaining = h - ty - 1;
+  const sheetNoBoxH = Math.max(22, remaining);
+  const sheetNoBoxY = h - sheetNoBoxH;
+
+  // Thin top rule already drawn; draw a slightly bolder separator
+  doc.setDrawColor(...BLK); doc.setLineWidth(0.5);
+  doc.line(x, sheetNoBoxY, x + w, sheetNoBoxY);
+
+  // Sheet title (small caps label)
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(5); doc.setTextColor(...BLK);
+  const titleWrapped = doc.splitTextToSize(sheetTitle.toUpperCase(), w - 4);
+  titleWrapped.slice(0, 2).forEach((ln, i) => {
+    doc.text(ln, x + w / 2, sheetNoBoxY + 5 + i * 4.5, { align: 'center' });
+  });
+
+  // Scale
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.5); doc.setTextColor(...BLK);
+  doc.text(`SCALE: ${sheetScale}`, x + w / 2, sheetNoBoxY + 15, { align: 'center' });
+
+  // Sheet number — large, centered, exactly like "FA5.02" in the reference
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...BLK);
+  doc.text(sheetNo, x + w / 2, sheetNoBoxY + sheetNoBoxH - 4, { align: 'center' });
 
   // Draw border around full drawing area
-  doc.setDrawColor(...C_DARK);
-  doc.setLineWidth(0.6);
+  doc.setDrawColor(...BLK);
+  doc.setLineWidth(0.5);
   doc.rect(DRAW_X, DRAW_Y, DRAW_W, DRAW_H, 'S');
 }
 
-/** Border / outer frame of the sheet */
+/** Border / outer frame of the sheet — pure black hairline, CAD engineering style */
 function drawSheetBorder(doc, meta) {
-  doc.setDrawColor(...C_DARK);
-  doc.setLineWidth(1.0);
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.7);
   doc.rect(4, 4, SHEET_W - 8, SHEET_H - 8, 'S');
-  doc.setLineWidth(0.3);
+  doc.setLineWidth(0.2);
   doc.rect(6, 6, SHEET_W - 12, SHEET_H - 12, 'S');
-  // Date bottom-left
-  setFont(doc, 5, 'normal', C_GRAY);
-  doc.text(`DATE: ${meta?.submittal_date || new Date().toLocaleDateString()}`, 10, SHEET_H - 4);
-  if (meta?.project_number) doc.text(`PROJECT NO: ${meta.project_number}`, 70, SHEET_H - 4);
-  setFont(doc, 5, 'normal', C_GRAY);
-  doc.text('100% BID SET', SHEET_W / 2, SHEET_H - 4, { align: 'center' });
+  // Date / project number — bottom strip, small black text
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.5); doc.setTextColor(0, 0, 0);
+  doc.text(`DATE: ${meta?.submittal_date || new Date().toLocaleDateString()}`, 10, SHEET_H - 3);
+  if (meta?.project_number) doc.text(`PROJECT NO: ${meta.project_number}`, 70, SHEET_H - 3);
+  doc.text('100% BID SET', SHEET_W / 2, SHEET_H - 3, { align: 'center' });
 }
 
 // ─── FA-0.01: Legend / Abbreviations / General Notes / Drawing Index ─────────
@@ -1182,96 +1226,20 @@ export async function runConstructionDrawingPdf({
   };
 
   /**
-   * Crop the original architect's title block from a plan image.
-   * Standard arch drawings have a title block on the right ~18% and/or bottom ~10%.
-   * We detect large white/gray banded regions on those edges and crop them off,
-   * keeping only the actual floor plan drawing area.
-   */
-  const cropTitleBlock = async (dataUrl, imgW, imgH) => {
-    if (!dataUrl || imgW < 10 || imgH < 10) return { dataUrl, w: imgW, h: imgH };
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = imgW;
-        tmpCanvas.height = imgH;
-        const tmpCtx = tmpCanvas.getContext('2d');
-        tmpCtx.drawImage(img, 0, 0, imgW, imgH);
-
-        // Sample columns from the right edge to find where the title block starts.
-        // A title block is mostly light (avg luminance > 220) in a vertical strip.
-        // Walk inward from right until we hit a column that isn't all-light.
-        const SAMPLE_ROWS = 20;
-        const rowStep = Math.max(1, Math.floor(imgH / SAMPLE_ROWS));
-        let cropRightAt = imgW; // x where we cut (exclusive)
-
-        for (let cx = imgW - 1; cx > imgW * 0.6; cx -= Math.max(1, Math.floor(imgW / 200))) {
-          let totalLum = 0;
-          for (let ry = 0; ry < imgH; ry += rowStep) {
-            const p = tmpCtx.getImageData(cx, ry, 1, 1).data;
-            totalLum += (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]);
-          }
-          const avgLum = totalLum / SAMPLE_ROWS;
-          // If this column is NOT uniformly light, the title block starts here
-          if (avgLum < 230) {
-            cropRightAt = cx + Math.max(1, Math.floor(imgW / 200));
-            break;
-          }
-        }
-
-        // Similarly crop bottom — title block note strips at bottom
-        let cropBottomAt = imgH;
-        const COL_SAMPLE = 20;
-        const colStep = Math.max(1, Math.floor(imgW / COL_SAMPLE));
-        for (let cy = imgH - 1; cy > imgH * 0.75; cy -= Math.max(1, Math.floor(imgH / 150))) {
-          let totalLum = 0;
-          for (let rx = 0; rx < cropRightAt; rx += colStep) {
-            const p = tmpCtx.getImageData(rx, cy, 1, 1).data;
-            totalLum += (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]);
-          }
-          const avgLum = totalLum / COL_SAMPLE;
-          if (avgLum < 230) {
-            cropBottomAt = cy + Math.max(1, Math.floor(imgH / 150));
-            break;
-          }
-        }
-
-        // If crop didn't help much (< 5% gain), skip it — the plan might not have a detectable block
-        const cropW = Math.max(Math.round(imgW * 0.5), cropRightAt);
-        const cropH = Math.max(Math.round(imgH * 0.7), cropBottomAt);
-
-        const out = document.createElement('canvas');
-        out.width = cropW;
-        out.height = cropH;
-        const outCtx = out.getContext('2d');
-        outCtx.fillStyle = '#ffffff';
-        outCtx.fillRect(0, 0, cropW, cropH);
-        outCtx.drawImage(tmpCanvas, 0, 0, cropW, cropH, 0, 0, cropW, cropH);
-        resolve({ dataUrl: out.toDataURL('image/png'), w: cropW, h: cropH });
-      };
-      img.onerror = () => resolve({ dataUrl, w: imgW, h: imgH });
-      img.src = dataUrl;
-    });
-  };
-
-  /**
-   * Apply CAD composite: title-block crop + white bg + monochrome threshold + vector device symbols + wires.
-   * Always used — consistent for every floor, no live-canvas dependency.
+   * Apply CAD composite: white bg + monochrome threshold + vector device symbols + wires.
+   * The uploaded plan is used as-is (no title block cropping) — the app's own right-side
+   * title block column covers project information.
    */
   const applyCADComposite = async (rawDataUrl, floor, imgW, imgH) => {
     if (!rawDataUrl) return rawDataUrl;
     try {
-      // First strip the architect's title block from the uploaded plan
-      const { dataUrl: croppedUrl, w: croppedW, h: croppedH } = await cropTitleBlock(rawDataUrl, imgW, imgH);
-
-      // Symbol radius: small enough to be professional, big enough to be legible
-      const symbolRadius = Math.max(8, Math.round(Math.min(croppedW, croppedH) / 100));
-      const cadCanvas = await renderCadComposite(croppedUrl, {
+      const symbolRadius = Math.max(8, Math.round(Math.min(imgW, imgH) / 100));
+      const cadCanvas = await renderCadComposite(rawDataUrl, {
         devices,
         wires,
         floor,
-        planNaturalW: croppedW,
-        planNaturalH: croppedH,
+        planNaturalW: imgW,
+        planNaturalH: imgH,
         symbolRadius,
         threshold: 210,
       });
@@ -1304,9 +1272,7 @@ export async function runConstructionDrawingPdf({
   let floorImgDims = { width: 4, height: 3 };
   const activePlan = await loadRawPlanForFloor(activeFloor);
   if (activePlan) {
-    const { w: cw, h: ch } = await cropTitleBlock(activePlan.dataUrl, activePlan.dims.width, activePlan.dims.height);
-    floorImgDims = { width: cw, height: ch };
-    // applyCADComposite internally also crops — so just pass raw dims
+    floorImgDims = activePlan.dims;
     floorImgData = await applyCADComposite(activePlan.dataUrl, activeFloor, activePlan.dims.width, activePlan.dims.height);
   }
 
@@ -1346,8 +1312,7 @@ export async function runConstructionDrawingPdf({
       } else {
         const rawPlan = await loadRawPlanForFloor(floor);
         if (rawPlan) {
-          const { dataUrl: croppedUrl, w: cw, h: ch } = await cropTitleBlock(rawPlan.dataUrl, rawPlan.dims.width, rawPlan.dims.height);
-          thisFloorDims = { width: cw, height: ch };
+          thisFloorDims = rawPlan.dims;
           thisFloorImg  = await applyCADComposite(rawPlan.dataUrl, floor, rawPlan.dims.width, rawPlan.dims.height);
         }
       }
