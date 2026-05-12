@@ -300,9 +300,223 @@ export function applyMonochromeThreshold(imageData, threshold = 210) {
   return imageData;
 }
 
+// ─── Title-block overlay (drawn directly on canvas at detected location) ──────
+
+/**
+ * Detect where the existing architectural title block lives on the image.
+ * Returns { tbX, tbY, tbW, tbH } — the pixel rect of the title block.
+ *
+ * Strategy: scan inward from the RIGHT edge for a vertical light strip (right title block),
+ * then scan inward from the BOTTOM for a horizontal light strip.
+ * Whichever region is larger is the title block; both may exist.
+ */
+function detectTitleBlockRegion(ctx, cw, ch) {
+  // Sample many rows to get an average luminance per column from the right edge.
+  // Title blocks are uniformly light (high avg lum), drawing areas have dark lines (lower avg lum).
+  const SAMPLE = 32;
+  const LUM_THRESH = 200; // pre-threshold image — title block bg is ~240, drawing has lines ~0-180
+
+  const rowStep = Math.max(1, Math.floor(ch / SAMPLE));
+  const colStride = Math.max(1, Math.floor(cw / 400));
+
+  // --- Scan right edge inward to find left boundary of right title block ---
+  // Start at right edge, walk left. Stop when a column's avg lum drops — that's drawing content.
+  let tbRightStart = Math.round(cw * 0.82); // default: rightmost 18%
+  for (let x = cw - 1; x > cw * 0.50; x -= colStride) {
+    let sumLum = 0;
+    for (let y = 0; y < ch; y += rowStep) {
+      const d = ctx.getImageData(x, y, 1, 1).data;
+      sumLum += 0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2];
+    }
+    const avgLum = sumLum / SAMPLE;
+    if (avgLum < LUM_THRESH) {
+      // This column has drawing content — title block starts one step to the right
+      tbRightStart = x + colStride;
+      break;
+    }
+  }
+
+  // Use the full column height — right-side title blocks run top to bottom
+  return {
+    tbX: tbRightStart,
+    tbY: 0,
+    tbW: cw - tbRightStart,
+    tbH: ch,
+  };
+}
+
+/**
+ * Paint the CAD-style title block directly onto the canvas at the detected region.
+ * Covers the architect's existing title block with a white fill, then writes
+ * the same black-on-white engineering text in the same location.
+ */
+function paintTitleBlockOverlay(ctx, region, project, meta, sheetNo, sheetTitle) {
+  const { tbX, tbY, tbW, tbH } = region;
+  if (tbW < 20 || tbH < 40) return; // too small to be useful
+
+  const m   = meta || {};
+  const p   = project || {};
+  const px  = tbX;
+  const py  = tbY;
+  const pw  = tbW;
+  const ph  = tbH;
+
+  // Scale fonts relative to the title block width (arch drawings vary wildly in pixel size)
+  const scale     = pw / 72;  // 72 mm is our "standard" TB width
+  const fs        = (mm) => Math.max(6, Math.round(mm * scale * 3.78)); // mm→px at ~96dpi equivalent
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+
+  // 1. White fill — erase original title block
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(px, py, pw, ph);
+
+  // 2. Outer border
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = Math.max(1, scale * 2);
+  ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+
+  // Helper: horizontal rule
+  const rule = (y, lw = 0.5) => {
+    ctx.save();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = Math.max(0.5, scale * lw);
+    ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px + pw, y); ctx.stroke();
+    ctx.restore();
+  };
+
+  // Helper: text cell
+  const text = (str, tx, ty, fontPx, bold = false, align = 'left') => {
+    ctx.save();
+    ctx.fillStyle = '#000000';
+    ctx.font = `${bold ? 'bold' : 'normal'} ${fontPx}px Arial, sans-serif`;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'top';
+    ctx.fillText(String(str || '').slice(0, 80), tx, ty);
+    ctx.restore();
+  };
+
+  let cy = py;
+  const pad = Math.max(2, scale * 2);
+  const rowH = (mm) => Math.round(ph * (mm / 609)); // proportional to sheet height
+
+  // ── Logo / Company Name ──
+  const logoH = rowH(28);
+  const companyName = (m.company_name || 'FIRE PROTECTION CONTRACTOR').toUpperCase();
+  text(companyName, px + pw / 2, cy + pad, fs(7), true, 'center');
+  if (m.company_address) text(m.company_address, px + pw / 2, cy + logoH - fs(5) * 2.4, fs(5), false, 'center');
+  if (m.company_phone)   text(m.company_phone,   px + pw / 2, cy + logoH - fs(5) * 1.2, fs(5), false, 'center');
+  cy += logoH; rule(cy);
+
+  // ── Project Info Rows ──
+  const infoRows = [
+    ['PROJECT:',   (p.name || '—').toUpperCase()],
+    ['OWNER:',     p.owner_name || '—'],
+    ['ADDRESS:',   p.address || '—'],
+    ['AHJ:',       p.ahj_contact || '—'],
+    ['OCC GRP:',   `GROUP ${p.occupancy_group || '—'}`],
+    ['SPRINKLER:', p.sprinkler_status || 'NONE'],
+    ['FLOORS:',    String(p.num_floors || '—')],
+  ];
+  const infoRowH = rowH(5);
+  infoRows.forEach(([lbl, val]) => {
+    cy += 1;
+    text(lbl, px + pad, cy + 1, fs(4.5), true);
+    text(val, px + pw * 0.33, cy + 1, fs(5), false);
+    cy += infoRowH; rule(cy);
+  });
+
+  // ── Drawn / Checked / Date ──
+  cy += 2;
+  const subDate = m.submittal_date || new Date().toLocaleDateString();
+  const drawn   = m.prepared_by || m.drawn_by || '—';
+  const checked = m.checked_by || '—';
+  const jobNo   = m.project_number || p.project_number || '—';
+  const dRowH   = rowH(4.8);
+  [
+    ['DRAWN:', drawn],
+    ['CHK:',   checked],
+    ['DATE:',  subDate],
+    ['JOB NO:', jobNo],
+  ].forEach(([lbl, val]) => {
+    text(lbl, px + pad, cy, fs(4.5), true);
+    text(val, px + pw * 0.4, cy, fs(4.8), false);
+    cy += dRowH;
+  });
+  rule(cy);
+
+  // ── Stamp box ──
+  cy += 2;
+  text('ENGINEER / DESIGNER STAMP', px + pw / 2, cy + 1, fs(5), true, 'center');
+  cy += fs(5) + 4;
+  const stampH = rowH(26);
+  ctx.save();
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = Math.max(0.5, scale * 0.5);
+  ctx.strokeRect(px + pad * 1.5, cy, pw - pad * 3, stampH);
+  ctx.restore();
+  if (m.designer_name) text(m.designer_name, px + pw / 2, cy + stampH * 0.5, fs(5), true, 'center');
+  if (m.designer_nicet) text(`NICET ${m.designer_nicet}`, px + pw / 2, cy + stampH * 0.7, fs(4.5), false, 'center');
+  cy += stampH + 2; rule(cy);
+
+  // ── Project Title ──
+  cy += 2;
+  text('PROJECT TITLE', px + pw / 2, cy, fs(5), true, 'center');
+  cy += fs(5) + 4; rule(cy);
+  cy += 3;
+  const titleName = (p.name || '—').toUpperCase();
+  ctx.save();
+  ctx.fillStyle = '#000000';
+  ctx.font = `bold ${fs(6.5)}px Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  // Word-wrap manually
+  const words = titleName.split(' ');
+  let line = '';
+  let lineY = cy;
+  words.forEach(word => {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > pw - pad * 2 && line) {
+      ctx.fillText(line, px + pw / 2, lineY);
+      line = word;
+      lineY += fs(6.5) * 1.3;
+    } else {
+      line = test;
+    }
+  });
+  if (line) ctx.fillText(line, px + pw / 2, lineY);
+  cy = lineY + fs(6.5) * 1.5;
+  ctx.restore();
+
+  if (p.address) {
+    text(p.address.slice(0, 35), px + pw / 2, cy, fs(5), false, 'center');
+    cy += fs(5) * 1.5;
+  }
+  rule(cy);
+
+  // ── Sheet Number (bottom, large — fills remaining space) ──
+  const remaining = (py + ph) - cy;
+  const sheetFontPx = Math.max(fs(14), Math.round(remaining * 0.35));
+  text(sheetTitle.toUpperCase(), px + pw / 2, cy + 4, fs(5), true, 'center');
+  text(`SCALE: NTS`, px + pw / 2, cy + 4 + fs(5) * 1.4, fs(4.5), false, 'center');
+  ctx.save();
+  ctx.fillStyle = '#000000';
+  ctx.font = `bold ${sheetFontPx}px Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(sheetNo, px + pw / 2, cy + remaining * 0.72);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
 /**
  * Render a floor plan image + CAD device overlay into a new canvas,
  * applying monochrome thresholding to the base plan for the clean CAD look.
+ * Detects and replaces the existing architectural title block in-place.
  *
  * Returns the composite canvas element (caller converts to dataURL).
  *
@@ -314,6 +528,10 @@ export function applyMonochromeThreshold(imageData, threshold = 210) {
  *   @param {number} opts.planNaturalH
  *   @param {number} [opts.symbolRadius=16]
  *   @param {number} [opts.threshold=210]
+ *   @param {object} [opts.project]     – project entity (for title block overlay)
+ *   @param {object} [opts.meta]        – submittal meta (company name, dates, etc.)
+ *   @param {string} [opts.sheetNo]     – e.g. "FA5.01"
+ *   @param {string} [opts.sheetTitle]  – e.g. "FIRE ALARM 1ST FLOOR PLAN"
  * @returns {Promise<HTMLCanvasElement>}
  */
 export async function renderCadComposite(planDataUrl, opts = {}) {
@@ -325,6 +543,10 @@ export async function renderCadComposite(planDataUrl, opts = {}) {
     planNaturalH,
     symbolRadius = 16,
     threshold    = 210,
+    project,
+    meta,
+    sheetNo    = 'FA5.01',
+    sheetTitle = 'FIRE ALARM FLOOR PLAN',
   } = opts;
 
   // Cap canvas size to prevent "invalid string length" on toDataURL for huge plans
@@ -347,6 +569,7 @@ export async function renderCadComposite(planDataUrl, opts = {}) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // 2. Draw the base plan
+  let titleBlockRegion = null;
   if (planDataUrl) {
     await new Promise((resolve, reject) => {
       const img = new Image();
@@ -355,20 +578,30 @@ export async function renderCadComposite(planDataUrl, opts = {}) {
       img.src     = planDataUrl;
     });
 
-    // 3. Apply monochrome threshold to the base layer
+    // 3. Detect title block BEFORE thresholding — original colors give better signal
+    if (project || meta) {
+      titleBlockRegion = detectTitleBlockRegion(ctx, cw, ch);
+    }
+
+    // 4. Apply monochrome threshold to the base layer
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     ctx.putImageData(applyMonochromeThreshold(imageData, threshold), 0, 0);
+  }
+
+  // 5. Paint our title block info over the detected region (on the now-thresholded canvas)
+  if (titleBlockRegion) {
+    paintTitleBlockOverlay(ctx, titleBlockRegion, project, meta, sheetNo, sheetTitle);
   }
 
   // Scale factors: device coords are in planNatural space, canvas may be smaller
   const scaleX = cw / Math.max(planNaturalW, 1);
   const scaleY = ch / Math.max(planNaturalH, 1);
 
-  // 4. Draw circuit wires first (under devices)
+  // 6. Draw circuit wires first (under devices)
   ctx.imageSmoothingEnabled = false;
   drawCadWires(ctx, devices, wires, floor, scaleX, scaleY);
 
-  // 5. Draw CAD device symbols on top
+  // 7. Draw CAD device symbols on top
   drawCadDevices(ctx, devices, floor, scaleX, scaleY, symbolRadius);
 
   return canvas;
