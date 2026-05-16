@@ -407,21 +407,16 @@ export default function ProjectDesigner() {
       if (uploadedSheets[0]) setSelectedSheetId(uploadedSheets[0].id);
       setActiveTab('plans');
       try {
-        // Force immediate save for PDF uploads (no debounce)
+        // Save ONLY the plan_sheets + floor_plans fields — omit large rooms/devices
+        // to prevent the payload from being too large and silently dropping floor plan data.
         clearTimeout(autoSaveTimerRef.current);
-        await saveMutation.mutateAsync({
-          rooms,
-          devices: storedDevices,
-          markups,
-          layout_zones: layoutZones,
+        await base44.entities.Project.update(projectId, {
           floor_plans: floorPlans,
           plan_sheets: nextSheets,
           plan_categories: planCategories,
-          document_workspace: documentWorkspace,
-          wires: storedWires,
-          analysis_results: analysisResults,
-          status: storedDevices.length > 0 ? "in_progress" : "draft",
         });
+        queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+        writeProjectBackup(projectId, { floor_plans: floorPlans, plan_sheets: nextSheets, plan_categories: planCategories });
         toast.success(`Uploaded ${uploadedSheets.length} PDF sheets. Assign floor-plan pages in the Plans tab.`);
       } catch (error) {
         toast.error(`Sheets failed to save: ${error?.message || 'Unknown error'}`);
@@ -442,21 +437,15 @@ export default function ProjectDesigner() {
     const updated = upsertFloorPlan(floorPlans, imagePlan);
     setLocalFloorPlans(updated);
     try {
-      // Force immediate save for image uploads (no debounce)
+      // Save ONLY floor_plans field — omit large rooms/devices to prevent data loss
       clearTimeout(autoSaveTimerRef.current);
-      await saveMutation.mutateAsync({
-        rooms,
-        devices: storedDevices,
-        markups,
-        layout_zones: layoutZones,
+      await base44.entities.Project.update(projectId, {
         floor_plans: updated,
         plan_sheets: planSheets,
         plan_categories: planCategories,
-        document_workspace: documentWorkspace,
-        wires: storedWires,
-        analysis_results: analysisResults,
-        status: storedDevices.length > 0 ? "in_progress" : "draft",
       });
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      writeProjectBackup(projectId, { floor_plans: updated, plan_sheets: planSheets, plan_categories: planCategories });
       toast.success(`Floor ${activeFloor} plan uploaded and saved`);
     } catch (error) {
       toast.error(`Plan failed to save: ${error?.message || 'Unknown error'}`);
@@ -1150,7 +1139,18 @@ Return only zones that are clearly the same kind of object. Do not include the o
       setLocalFloorPlans(nextFloorPlans);
     }
     setLocalPlanSheets(nextSheets);
-    await saveProjectPatch({ floor_plans: nextFloorPlans, plan_sheets: nextSheets, plan_categories: nextCategories });
+    // Save ONLY the plan/sheet fields — omit large rooms/devices to prevent floor_plans from being dropped
+    try {
+      await base44.entities.Project.update(projectId, {
+        floor_plans: nextFloorPlans,
+        plan_sheets: nextSheets,
+        plan_categories: nextCategories,
+      });
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      writeProjectBackup(projectId, { floor_plans: nextFloorPlans, plan_sheets: nextSheets, plan_categories: nextCategories });
+    } catch (e) {
+      toast.error(`Failed to save assignment: ${e?.message || 'Unknown error'}`);
+    }
     if (assignedFloor) {
       setActiveFloor(Number(assignedFloor));
       setActiveTab('canvas');
