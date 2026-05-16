@@ -12,6 +12,8 @@
  * on top of the rendered (grayscale) floor plan before embedding in the PDF.
  */
 
+import { routeCircuits } from './circuitRouter.js';
+
 // ─── Symbol library ──────────────────────────────────────────────────────────
 // Each symbol is drawn at a normalized unit size (radius = 1).
 // The caller passes (ctx, cx, cy, r) and we scale internally.
@@ -361,9 +363,10 @@ function paintTitleBlockOverlay(ctx, region, project, meta, sheetNo, sheetTitle)
   const pw  = tbW;
   const ph  = tbH;
 
-  // Scale fonts relative to the title block width (arch drawings vary wildly in pixel size)
-  const scale     = pw / 72;  // 72 mm is our "standard" TB width
-  const fs        = (mm) => Math.max(6, Math.round(mm * scale * 3.78)); // mm→px at ~96dpi equivalent
+  // Scale fonts proportionally to the title block height.
+  // 609.6 mm = standard 24" sheet height — keeps fonts consistent regardless of canvas DPI.
+  const fs  = (mm) => Math.max(6, Math.round(ph * mm / 609.6));
+  const pad = Math.max(2, Math.round(ph * 2 / 609.6));
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
@@ -374,14 +377,14 @@ function paintTitleBlockOverlay(ctx, region, project, meta, sheetNo, sheetTitle)
 
   // 2. Outer border
   ctx.strokeStyle = '#000000';
-  ctx.lineWidth = Math.max(1, scale * 2);
+  ctx.lineWidth = Math.max(1, Math.round(ph * 2 / 609.6));
   ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
 
   // Helper: horizontal rule
   const rule = (y, lw = 0.5) => {
     ctx.save();
     ctx.strokeStyle = '#000000';
-    ctx.lineWidth = Math.max(0.5, scale * lw);
+    ctx.lineWidth = Math.max(0.5, Math.round(ph * lw / 609.6));
     ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px + pw, y); ctx.stroke();
     ctx.restore();
   };
@@ -398,7 +401,6 @@ function paintTitleBlockOverlay(ctx, region, project, meta, sheetNo, sheetTitle)
   };
 
   let cy = py;
-  const pad = Math.max(2, scale * 2);
   const rowH = (mm) => Math.round(ph * (mm / 609)); // proportional to sheet height
 
   // ── Logo / Company Name ──
@@ -453,7 +455,7 @@ function paintTitleBlockOverlay(ctx, region, project, meta, sheetNo, sheetTitle)
   const stampH = rowH(26);
   ctx.save();
   ctx.strokeStyle = '#000000';
-  ctx.lineWidth = Math.max(0.5, scale * 0.5);
+  ctx.lineWidth = Math.max(0.5, Math.round(ph * 0.5 / 609.6));
   ctx.strokeRect(px + pad * 1.5, cy, pw - pad * 3, stampH);
   ctx.restore();
   if (m.designer_name) text(m.designer_name, px + pw / 2, cy + stampH * 0.5, fs(5), true, 'center');
@@ -497,7 +499,11 @@ function paintTitleBlockOverlay(ctx, region, project, meta, sheetNo, sheetTitle)
 
   // ── Sheet Number (bottom, large — fills remaining space) ──
   const remaining = (py + ph) - cy;
-  const sheetFontPx = Math.max(fs(14), Math.round(remaining * 0.35));
+  // Cap by title block width so the number never overflows the column.
+  const sheetFontPx = Math.min(
+    Math.max(fs(14), Math.round(remaining * 0.35)),
+    Math.round(pw * 0.3),
+  );
   text(sheetTitle.toUpperCase(), px + pw / 2, cy + 4, fs(5), true, 'center');
   text(`SCALE: NTS`, px + pw / 2, cy + 4 + fs(5) * 1.4, fs(4.5), false, 'center');
   ctx.save();
@@ -538,6 +544,7 @@ export async function renderCadComposite(planDataUrl, opts = {}) {
   const {
     devices,
     wires,
+    rooms,
     floor,
     planNaturalW,
     planNaturalH,
@@ -597,11 +604,42 @@ export async function renderCadComposite(planDataUrl, opts = {}) {
   const scaleX = cw / Math.max(planNaturalW, 1);
   const scaleY = ch / Math.max(planNaturalH, 1);
 
-  // 6. Draw circuit wires first (under devices)
   ctx.imageSmoothingEnabled = false;
+
+  // 6. Draw auto-routed circuits (MST-based, same as canvas designer view)
+  try {
+    const routes = routeCircuits(devices || [], rooms || [], floor);
+    if (routes.length > 0) {
+      ctx.save();
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      routes.forEach(route => {
+        const ct = String(route.circuitType || 'SLC').toUpperCase();
+        const isNac = ct.includes('NAC');
+        const isAux = ct.includes('AUX');
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = isNac ? 2 : 1.4;
+        ctx.setLineDash(isAux ? [4, 3] : isNac ? [] : [8, 4]);
+        route.segments.forEach(seg => {
+          const pts = seg.points;
+          if (pts.length < 2) return;
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x * scaleX, pts[0].y * scaleY);
+          for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x * scaleX, pts[i].y * scaleY);
+          }
+          ctx.stroke();
+        });
+      });
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  } catch { /* circuit routing is optional */ }
+
+  // 7. Draw any explicit manual wires on top of auto-routes
   drawCadWires(ctx, devices, wires, floor, scaleX, scaleY);
 
-  // 7. Draw CAD device symbols on top
+  // 8. Draw CAD device symbols on top of all wiring
   drawCadDevices(ctx, devices, floor, scaleX, scaleY, symbolRadius);
 
   return canvas;
