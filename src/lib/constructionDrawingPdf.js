@@ -973,11 +973,13 @@ export async function runConstructionDrawingPdf({
   const applyCADComposite = async (rawDataUrl, floor, imgW, imgH) => {
     if (!rawDataUrl) return rawDataUrl;
     try {
-      const symbolRadius = Math.max(8, Math.round(Math.min(imgW, imgH) / 100));
+      // Use /200 so symbols match the DEVICE_RADIUS=14 used in the canvas designer.
+      const symbolRadius = Math.max(8, Math.round(Math.min(imgW, imgH) / 200));
       const floorLabel = floor === 1 ? '1ST' : floor === 2 ? '2ND' : floor === 3 ? '3RD' : `${floor}TH`;
       const cadCanvas = await renderCadComposite(rawDataUrl, {
         devices,
         wires,
+        rooms,
         floor,
         planNaturalW: imgW,
         planNaturalH: imgH,
