@@ -35,6 +35,7 @@ import {
   drawBasisOfDesignSheet,
   drawZoneScheduleSheet,
 } from '@/lib/submittalSheets';
+import { renderComposedSheets } from '@/lib/composedSheetPdf';
 
 // ─── Sheet dimensions (mm) ───────────────────────────────────────────────────
 const SHEET_W = 914.4;  // 36"
@@ -1159,6 +1160,7 @@ export async function runConstructionDrawingPdf({
   activeFloor = 1,
   submittalMeta = {},
   template,
+  sheetComposition,
 }) {
   const meta = { ...submittalMeta };
   const tpl = getTemplate(template?.id || template);
@@ -1293,6 +1295,35 @@ export async function runConstructionDrawingPdf({
   if (!meta.company_name) meta.company_name = 'GOLDEN STATE INTEGRATED SYSTEMS';
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [SHEET_W, SHEET_H] });
+
+  if (sheetComposition?.pages?.length) {
+    await renderComposedSheets(doc, sheetComposition, {
+      project,
+      meta,
+      logoDataUrl,
+      devices,
+      rooms,
+      wires,
+      markups,
+      template: tpl,
+      pxPerFt,
+      activeFloor,
+      scaleReliable,
+      imgW,
+      imgH,
+      vectorBackgrounds: vectorBackground ? { [activeFloor]: vectorBackground } : {},
+      generalNotes: Array.isArray(meta.general_notes) ? meta.general_notes : null,
+      drawTitleBlock,
+    });
+
+    const cutSheets = Array.isArray(meta.cut_sheets) ? meta.cut_sheets : [];
+    if (cutSheets.length) {
+      await appendCutSheets(doc, cutSheets);
+    }
+    const fileName = `${(pName).replace(/\s+/g, '_')}_Construction_Drawings.pdf`;
+    doc.save(fileName);
+    return;
+  }
 
   // ── Sheet 1: Legend / Abbreviations / General Notes / Drawing Index ──
   await generateLegendSheet(doc, project, devices, meta, logoDataUrl, tpl);
