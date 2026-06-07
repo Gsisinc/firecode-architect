@@ -41,6 +41,8 @@ const FA_FULL_SYMBOLS = {
   annunciator:      { shape: 'labelRect', label: 'RAR' },
   facp:             { shape: 'labelRect', label: 'FACP' },
   nac_panel:        { shape: 'labelRect', label: 'NAC' },
+  nac_booster:      { shape: 'labelRect', label: 'NAC' },
+  gateway_module:   { shape: 'labelRect', label: 'GW' },
 };
 
 /** CSC Fire Sprinkler Monitoring symbol vocabulary (matches FA1.2 equipment list). */

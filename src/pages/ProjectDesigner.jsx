@@ -491,6 +491,12 @@ export default function ProjectDesigner() {
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
 
+    // The AI rejects data: URLs ("Invalid file attachment"). For PDF plans, send
+    // the HOSTED url instead — prompts use 0–1 ratios, so the AI's own render
+    // resolution doesn't matter. Image plans already use a hosted url.
+    const planIsPdf = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(String(plan.file_url || plan.image_url || ''));
+    const visionUrl = planIsPdf ? (plan.file_url || plan.image_url) : (plan.image_url || plan.file_url || analysisImageUrl);
+
     const applyDetectedRooms = (detectedRooms, detectedLayoutZones, geometryPatch, successMessage, devicesForSaveOverride = null) => {
       const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
       const newLayoutZones = [...layoutZones.filter(z => z.floor !== activeFloor), ...detectedLayoutZones];
@@ -533,7 +539,7 @@ STEP B — Overall building dimensions (outer walls / major grids only): horiz_d
 STEP C — Building outline: building.left_ratio = left_px/${imgW}, right_ratio, top_ratio, bottom_ratio for occupied footprint only (no sheet border).
 
 Use decimal ratios (e.g. 0.184). Omit a field if unreadable.`,
-        file_urls: [analysisImageUrl],
+        file_urls: [visionUrl],
         response_json_schema: {
           type: "object",
           properties: {
@@ -662,7 +668,7 @@ Exclude: title block, sheet border, north arrow, exterior areas outside walls.`;
     const invokeRoomsPass = (modelSlug) =>
       base44.integrations.Core.InvokeLLM({
         prompt: buildRoomPassPrompt(),
-        file_urls: [analysisImageUrl],
+        file_urls: [visionUrl],
         ...(modelSlug ? { model: modelSlug } : {}),
         response_json_schema: roomPassSchema,
       });
@@ -734,7 +740,7 @@ smoke_detector, heat_detector, pull_station, horn_strobe, horn, strobe, speaker,
 
 Skip: generic electrical outlets, luminaires, plumbing, CCTV, WIFI, unrelated MEP legends. Skip title block ornament.
 If unreadable — omit that marker.`,
-          file_urls: [analysisImageUrl],
+          file_urls: [visionUrl],
           response_json_schema: {
             type: "object",
             properties: {

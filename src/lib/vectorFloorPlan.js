@@ -223,11 +223,13 @@ export function drawVectorFloorPlan(doc, area, opts) {
     }
   }
 
-  // ── Screened architectural background (redrawn from the PDF's own vectors) ──
+  // ── Architectural background (redrawn from the PDF's own vectors) ──
+  // Drawn as crisp dark-gray linework (not a faint screen) so walls read like
+  // real CAD; FA devices sit on top in full ink.
   if (Array.isArray(vectorBackground) && vectorBackground.length) {
     doc.setLineCap('butt');
     doc.setLineJoin('miter');
-    doc.setDrawColor(165, 165, 165);
+    doc.setDrawColor(78, 78, 82);
     for (const p of vectorBackground) {
       const pts = p.pts;
       if (!pts || pts.length < 2) continue;
@@ -243,7 +245,7 @@ export function drawVectorFloorPlan(doc, area, opts) {
         px = nx;
         py = ny;
       }
-      doc.setLineWidth(Math.max(0.08, Math.min(0.45, (p.lineWidth || 1) * fit)));
+      doc.setLineWidth(Math.max(0.2, Math.min(0.7, (p.lineWidth || 1) * fit * 1.4)));
       try {
         doc.lines(deltas, x0, y0, [1, 1], 'S', p.closed === true);
       } catch {
@@ -294,23 +296,24 @@ export function drawVectorFloorPlan(doc, area, opts) {
   // ── Markups ──
   fMarkups.forEach((mu) => drawMarkup(doc, mu, X, Y, fit));
 
-  // ── Devices ──
-  const symSize = Math.max(2.6, Math.min(5.5, 14 * fit));
+  // ── Devices ── (drawn larger and in FA red so they pop on the plan)
+  const FA_RED = [193, 18, 31];
+  const symSize = Math.max(4.5, Math.min(9, 20 * fit));
   fDevices.forEach((device) => {
     const sym = symbolForDevice(template, device.type, device.subtype);
     const isNotif = NOTIFICATION_TYPES.includes(device.type);
-    drawDeviceSymbol(doc, sym, X(device.x), Y(device.y), symSize, DEVICE_INK);
+    drawDeviceSymbol(doc, sym, X(device.x), Y(device.y), symSize, FA_RED);
     // candela tag for notification devices
     if (showLabels && isNotif && device.candela) {
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(3.6);
-      doc.setTextColor(...DEVICE_INK);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(4.4);
+      doc.setTextColor(...FA_RED);
       doc.text(`${device.candela}cd`, X(device.x) + symSize * 0.6, Y(device.y) - symSize * 0.5);
     }
     if (showLabels && device.address) {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(3.4);
-      doc.setTextColor(...MUTED);
+      doc.setFontSize(4);
+      doc.setTextColor(...DEVICE_INK);
       doc.text(String(device.address), X(device.x), Y(device.y) + symSize * 0.55 + 2.4, { align: 'center' });
     }
   });

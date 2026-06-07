@@ -240,10 +240,13 @@ export default function ScaleVerificationOverlay({
     toast.info('AI is reading the graphic scale bar / dimension callouts…');
     try {
       let analysisImageUrl = plan.rendered_image_url || plan.image_url || plan.file_url;
-      if (plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(analysisImageUrl || '')) {
+      const planIsPdf = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(analysisImageUrl || '');
+      if (planIsPdf) {
         const rendered = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
         analysisImageUrl = rendered.dataUrl;
       }
+      // The AI rejects data: URLs. For PDFs send the hosted url (prompt uses ratios).
+      const visionUrl = planIsPdf ? (plan.file_url || plan.image_url) : (plan.image_url || plan.file_url || analysisImageUrl);
 
       // Load image dimensions
       const imgEl = new window.Image();
@@ -266,7 +269,7 @@ For each measurement found return:
 
 All ratio fields = pixel / image_dimension, range 0–1.
 If a field is not found, omit it or set to null.`,
-        file_urls: [analysisImageUrl],
+        file_urls: [visionUrl],
         response_json_schema: {
           type: 'object',
           properties: {
