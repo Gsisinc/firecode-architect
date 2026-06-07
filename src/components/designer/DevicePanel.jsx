@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { isVideoCameraType } from '@/lib/disciplines';
+import { DEVICE_LIBRARY } from '@/lib/deviceLibrary';
 
 const STATUS_OPTIONS = ['Proposed', 'In Place', 'To Be Replaced', 'To Be Upgraded', 'To Be Removed'];
 const COLOR_OPTIONS = ['#d40b15', '#2563eb', '#ea580c', '#059669', '#7c3aed', '#0f172a'];
@@ -166,6 +167,30 @@ export default function DevicePanel({
               </Field>
               <Field label="Cable / media type">
                 <PanelInput value={form.cable_type || ''} onChange={event => handleChange('cable_type', event.target.value)} placeholder="Cat6A, fiber, etc." />
+              </Field>
+              <Field label="Catalog Model (drives schedule & calcs)">
+                <PanelSelect
+                  value={form.model || ''}
+                  placeholder="Select listed model…"
+                  onValueChange={(v) => {
+                    const spec = Object.values(DEVICE_LIBRARY).find((d) => d.model === v);
+                    const updated = {
+                      ...form,
+                      model: v,
+                      manufacturer: spec?.maker || form.manufacturer,
+                      model_number: v,
+                      ...(spec?.csfm ? { csfm: spec.csfm } : {}),
+                    };
+                    setForm(updated);
+                    onUpdate(device.id, updated);
+                  }}
+                >
+                  {Object.values(DEVICE_LIBRARY)
+                    .filter((d) => d.key === (form.subtype || form.type))
+                    .map((d) => (
+                      <SelectItem key={d.model} value={d.model}>{d.maker} {d.model}</SelectItem>
+                    ))}
+                </PanelSelect>
               </Field>
               <Field label="Component Manufacturer" required>
                 <PanelInput value={form.manufacturer || ''} onChange={event => handleChange('manufacturer', event.target.value)} />

@@ -5,6 +5,9 @@ import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
 import { getDisciplineConfig } from '@/lib/disciplines';
 import { getLayoutZoneMeta, isLayoutZoneTool } from '@/lib/layoutZones';
 import { fillColorForRoom } from '@/lib/manualRoomTypes';
+import { polygonBounds, polygonCentroid, isPolygonRoom } from '@/lib/polygonRooms';
+import { detectorCoverageCircles } from '@/lib/coverageModel';
+import { roomEdgeSegments, snapPointToWalls } from '@/lib/wallSnap';
 import { Copy, Edit3, MoreVertical, Trash2, Unplug, Wrench, X } from 'lucide-react';
 
 const DEVICE_RADIUS = 14;
@@ -656,6 +659,7 @@ function drawFloorPlanScene(ctx, scene) {
     drawingRoom,
     drawingLayoutZone,
     drawingMarkup,
+    drawingPolygon,
     dropPreview,
     markups,
     pxPerFt,
@@ -710,27 +714,53 @@ function drawFloorPlanScene(ctx, scene) {
 
   if (layers.rooms !== false) {
     rooms.filter((room) => sameFloor(room.floor, currentFloor)).forEach((room) => {
+      const poly = isPolygonRoom(room);
       ctx.strokeStyle = 'rgba(249,115,22,0.7)';
       ctx.fillStyle = fillColorForRoom(room);
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 3]);
       ctx.beginPath();
-      ctx.rect(room.x, room.y, room.width, room.height);
+      if (poly) {
+        room.points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.closePath();
+      } else {
+        ctx.rect(room.x, room.y, room.width, room.height);
+      }
       ctx.fill();
       ctx.stroke();
       ctx.setLineDash([]);
       if (layers.labels !== false) {
+        const c = poly ? polygonCentroid(room.points) : null;
+        const lx = poly ? c.x : room.x + 6;
+        const ly = poly ? c.y - 6 : room.y + 6;
         ctx.fillStyle = 'rgba(234,88,12,0.9)';
         ctx.font = 'bold 11px Inter, sans-serif';
-        ctx.textAlign = 'left';
+        ctx.textAlign = poly ? 'center' : 'left';
         ctx.textBaseline = 'top';
-        ctx.fillText(room.name || 'Room', room.x + 6, room.y + 6);
+        ctx.fillText(room.name || 'Room', lx, ly);
         if (room.sqft) {
           ctx.font = '9px Inter, sans-serif';
           ctx.fillStyle = 'rgba(234,88,12,0.6)';
-          ctx.fillText(`${room.sqft} sf`, room.x + 6, room.y + 20);
+          ctx.fillText(`${room.sqft} sf`, lx, ly + 14);
         }
+        ctx.textAlign = 'left';
       }
+    });
+  }
+
+  if (layers.coverage) {
+    const circles = detectorCoverageCircles(devices, pxPerFt, currentFloor);
+    circles.forEach((c) => {
+      const heat = c.type === 'heat_detector';
+      ctx.beginPath();
+      ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2);
+      ctx.fillStyle = heat ? 'rgba(234,88,12,0.10)' : 'rgba(37,99,235,0.10)';
+      ctx.fill();
+      ctx.strokeStyle = heat ? 'rgba(234,88,12,0.45)' : 'rgba(37,99,235,0.45)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
     });
   }
 
@@ -764,6 +794,27 @@ function drawFloorPlanScene(ctx, scene) {
     if (w > 20 && h > 20) {
       drawLabel(ctx, `${Math.round(w)}x${Math.round(h)}px`, Math.min(x, ex) + w / 2, Math.min(y, ey) + h / 2, '#f97316');
     }
+  }
+
+  if (drawingPolygon && drawingPolygon.length > 0) {
+    ctx.strokeStyle = '#f97316';
+    ctx.fillStyle = 'rgba(249,115,22,0.08)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    drawingPolygon.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    if (mouseWorld) ctx.lineTo(mouseWorld.x, mouseWorld.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    drawingPolygon.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, i === 0 ? 5 : 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 ? '#16a34a' : '#f97316';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    });
   }
 
   if (layers.layout_zones !== false) {
@@ -975,6 +1026,7 @@ export default function FloorPlanCanvas({
   const [drawingMarkup, setDrawingMarkup] = useState(null);
   const [wireStart, setWireStart] = useState(null);
   const [mouseWorld, setMouseWorld] = useState(null);
+  const [polygonPts, setPolygonPts] = useState([]);
   const [floorImg, setFloorImg] = useState(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
   const [hoveredDeviceId, setHoveredDeviceId] = useState(null);
@@ -1015,12 +1067,19 @@ export default function FloorPlanCanvas({
     const label = makeDeviceLabel(devType, devices, devicePalette);
     const isCam = typeof devType === 'string' && devType.startsWith('cam_');
     const slcLikeCount = devices.filter((device) => device.circuit_type === 'SLC').length;
+    // Wall-mounted devices (pull stations, notification appliances) snap to the
+    // nearest room wall so placement is "on the wall," not free-floating.
+    let place = { x: snapToGrid(world.x, snapGrid), y: snapToGrid(world.y, snapGrid) };
+    if (NOTIFICATION_TYPES.includes(devType) || devType === 'pull_station') {
+      const snap = snapPointToWalls(world.x, world.y, roomEdgeSegments(rooms, currentFloor), 20);
+      if (snap.snapped) place = { x: snap.x, y: snap.y };
+    }
     const newDevice = {
       id: `${devType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       type: devType,
       subtype: devType,
-      x: snapToGrid(world.x, snapGrid),
-      y: snapToGrid(world.y, snapGrid),
+      x: place.x,
+      y: place.y,
       floor: currentFloor,
       label,
       element_name: palette?.label || devType.replace(/_/g, ' '),
@@ -1067,6 +1126,7 @@ export default function FloorPlanCanvas({
     onCircuitTypeChange,
     onDeviceSelect,
     onDevicesChange,
+    rooms,
     selectedCableType,
     snapGrid,
   ]);
@@ -1191,6 +1251,42 @@ export default function FloorPlanCanvas({
     onCircuitIdChange?.(device.circuit || defaultCircuitId(circuitType, currentFloor));
   }, [currentFloor, devicePalette, onCircuitIdChange, onCircuitTypeChange]);
 
+  const finishPolygon = useCallback((pts) => {
+    if (!pts || pts.length < 3) { setPolygonPts([]); return; }
+    const b = polygonBounds(pts);
+    const rect = {
+      x: Math.round(b.x), y: Math.round(b.y),
+      width: Math.round(b.width), height: Math.round(b.height),
+      points: pts.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+    };
+    if (onRoomNameRequest) {
+      onRoomNameRequest(rect);
+    } else {
+      onRoomsChange([...rooms, {
+        id: `room-${Date.now()}`, floor: currentFloor, name: 'Room',
+        ...rect, sqft: 0, ceiling_height: 9, ceiling_type: 'smooth_flat',
+      }]);
+    }
+    setPolygonPts([]);
+  }, [currentFloor, onRoomNameRequest, onRoomsChange, rooms]);
+
+  const handleCanvasDoubleClick = useCallback(() => {
+    if (selectedTool === 'room_polygon' && polygonPts.length >= 3) finishPolygon(polygonPts);
+  }, [finishPolygon, polygonPts, selectedTool]);
+
+  useEffect(() => {
+    if (selectedTool !== 'room_polygon') {
+      if (polygonPts.length) setPolygonPts([]);
+      return undefined;
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') setPolygonPts([]);
+      else if (e.key === 'Enter') finishPolygon(polygonPts);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedTool, polygonPts, finishPolygon]);
+
   const handleMouseDown = useCallback((event) => {
     const world = toWorld(event);
     setStatusMenuOpen(false);
@@ -1207,6 +1303,16 @@ export default function FloorPlanCanvas({
 
     if (selectedTool === 'room') {
       setDrawingRoom({ x: world.x, y: world.y, ex: world.x, ey: world.y });
+      return;
+    }
+
+    if (selectedTool === 'room_polygon') {
+      const first = polygonPts[0];
+      if (polygonPts.length >= 3 && first && Math.hypot(world.x - first.x, world.y - first.y) < 12 / scale) {
+        finishPolygon(polygonPts);
+      } else {
+        setPolygonPts([...polygonPts, { x: world.x, y: world.y }]);
+      }
       return;
     }
 
@@ -1306,11 +1412,11 @@ export default function FloorPlanCanvas({
         setDragging({ type: 'pan', start: { x: event.clientX - offset.x, y: event.clientY - offset.y } });
       }
     }
-  }, [addDeviceAt, currentFloor, deleteDevice, devices, disciplineId, markups, offset, onDeviceSelect, onDevicesChange, onMarkupsChange, onWiresChange, pxPerFt, selectedCableType, selectedCircuitId, selectedCircuitType, selectedDevice, selectedTool, snapGrid, toWorld, wireStart, wires]);
+  }, [addDeviceAt, currentFloor, deleteDevice, devices, disciplineId, finishPolygon, markups, offset, onDeviceSelect, onDevicesChange, onMarkupsChange, onWiresChange, polygonPts, pxPerFt, scale, selectedCableType, selectedCircuitId, selectedCircuitType, selectedDevice, selectedTool, snapGrid, toWorld, wireStart, wires]);
 
   const handleMouseMove = useCallback((event) => {
     const world = toWorld(event);
-    if (selectedTool === 'wire') setMouseWorld(world);
+    if (selectedTool === 'wire' || selectedTool === 'room_polygon') setMouseWorld(world);
     if (!dragging) {
       if (selectedTool === 'select' || !selectedTool || selectedTool === 'wire') {
         const hit = deviceHitTest(devices, currentFloor, world, 8);
@@ -1491,6 +1597,7 @@ export default function FloorPlanCanvas({
     drawingRoom,
     drawingLayoutZone,
     drawingMarkup,
+    drawingPolygon: polygonPts,
     dropPreview,
     markups,
     pxPerFt,
@@ -1508,7 +1615,7 @@ export default function FloorPlanCanvas({
     drawFloorPlanScene(ctx, sceneProps);
     // Expose current transform so overlay components can align with world coords
     canvas.dataset.transform = JSON.stringify({ scale, offsetX: offset.x, offsetY: offset.y });
-  }, [canvasRef, circuitTypes, currentFloor, devicePalette, devices, disciplineId, drawingLayoutZone, drawingMarkup, drawingRoom, drawingScaleLine, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
+  }, [canvasRef, circuitTypes, currentFloor, devicePalette, devices, disciplineId, drawingLayoutZone, drawingMarkup, drawingRoom, drawingScaleLine, dropPreview, floorImg, hoveredDeviceId, layers, layoutZones, markups, mouseWorld, offset, polygonPts, pxPerFt, rooms, scale, selectedCircuitType, selectedDevice, wireStart, wires, canvasSize]);
 
   useImperativeHandle(
     captureRef,
@@ -1620,7 +1727,7 @@ export default function FloorPlanCanvas({
   const getCursor = () => {
     if (dragging?.type === 'fov_aim') return 'grabbing';
     if (selectedTool === 'pan' || dragging?.type === 'pan') return dragging ? 'grabbing' : 'grab';
-    if (selectedTool === 'scale_line' || selectedTool === 'room' || isMarkupTool(selectedTool) || isLayoutZoneTool(selectedTool)) return 'crosshair';
+    if (selectedTool === 'scale_line' || selectedTool === 'room' || selectedTool === 'room_polygon' || isMarkupTool(selectedTool) || isLayoutZoneTool(selectedTool)) return 'crosshair';
     if (selectedTool === 'delete') return 'not-allowed';
     if (selectedTool === 'wire') return wireStart ? 'cell' : 'crosshair';
     if (selectedTool?.startsWith('place_device_')) return 'copy';
@@ -1645,6 +1752,7 @@ export default function FloorPlanCanvas({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onDoubleClick={handleCanvasDoubleClick}
         onMouseLeave={() => {
           setDragging(null);
           setDrawingRoom(null);
@@ -1692,6 +1800,7 @@ export default function FloorPlanCanvas({
         {selectedTool === 'wire' && <><span className="text-gray-300">|</span><span className="font-semibold" style={{ color: getCircuitMetaFrom(circuitTypes, selectedCircuitType).color }}>{wireStart ? `WIRE ${selectedCircuitId} - click target` : `WIRE ${selectedCircuitId} - click source`}</span></>}
         {selectedTool === 'scale_line' && <><span className="text-gray-300">|</span><span className="text-sky-500 font-semibold">SET SCALE — drag a reference line</span></>}
         {selectedTool === 'room' && <><span className="text-gray-300">|</span><span className="text-orange-500 font-semibold">DRAW ROOM</span></>}
+        {selectedTool === 'room_polygon' && <><span className="text-gray-300">|</span><span className="text-orange-500 font-semibold">POLYGON ROOM — click vertices · double-click or click the green start point to close · Esc to cancel</span></>}
         {isLayoutZoneTool(selectedTool) && (
           <><span className="text-gray-300">|</span><span className="text-violet-600 font-semibold">{detectingSimilarLayoutZones ? 'AI FINDING SIMILAR...' : 'DRAW LAYOUT ZONE'}</span></>
         )}

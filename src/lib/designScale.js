@@ -1,3 +1,5 @@
+import { polygonAreaSqft, isPolygonRoom } from './polygonRooms';
+
 export const DEFAULT_PX_PER_FT = 10;
 
 export function getFloorPlan(floorPlans = [], floor = 1) {
@@ -24,6 +26,7 @@ export function ftToPx(ft, pxPerFt = DEFAULT_PX_PER_FT) {
 
 export function roomSqft(room, pxPerFt = DEFAULT_PX_PER_FT) {
   if (Number(room?.sqft) > 0) return Math.round(Number(room.sqft));
+  if (isPolygonRoom(room)) return polygonAreaSqft(room.points, pxPerFt);
   return Math.max(1, Math.round(pxToFt(room?.width || 0, pxPerFt) * pxToFt(room?.height || 0, pxPerFt)));
 }
 

@@ -180,7 +180,7 @@ export default function FloorPlanUploader({ floorNumber, currentUrl, onUploaded,
           )}
         </div>
         <p className="text-xs text-slate-400 mt-3 max-w-xs">
-          After uploading, use <span className="text-purple-600 font-medium">AI: Detect Rooms</span> to automatically identify rooms and place devices
+          After uploading, use <span className="text-rose-500 font-semibold">AI: Detect Rooms</span> (Base44) to read rooms and fire alarm symbols on the sheet
         </p>
         {input}
       </div>

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan, Ruler } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan, Ruler, ShieldCheck } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -18,6 +18,7 @@ import CalculationsPanel from "@/components/designer/CalculationsPanel";
 import BillOfMaterials from "@/components/designer/BillOfMaterials";
 
 import ComplianceChecklist from "@/components/designer/ComplianceChecklist";
+import CodeAuditPanel from "@/components/designer/CodeAuditPanel";
 import BatteryPanel from "@/components/designer/BatteryPanel";
 import FloorPlanUploader from "@/components/designer/FloorPlanUploader";
 import SubmittalPackage from "@/components/designer/SubmittalPackage";
@@ -34,6 +35,8 @@ import {
   expandLayoutZonesFromDetectionPass,
   remapThumbnailCoordinatesToImageSpace,
 } from "@/lib/floorPlanDetection";
+import { normalizeBlueprintExtractedEquipment } from "@/lib/blueprintEquipmentExtraction";
+import { detectRoomsFromImage } from "@/lib/roomAutoDetect";
 import { getFloorScale, roomSqft, updateFloorPlanScale, updateFloorPlanManualCalibration } from "@/lib/designScale";
 import { MANUAL_ROOM_TYPE_OPTIONS, normalizeManualRoomType } from "@/lib/manualRoomTypes";
 import { placeFireAlarmDevicesWithOpenAI } from "@/lib/openaiDevicePlacement";
@@ -63,6 +66,9 @@ import {
   calculateDoorReleasePlacement,
 } from "@/lib/codeEngine";
 
+/** Retry room mapping with Gemini Flash via Base44 when the app default model yields no usable rooms. */
+const BASE44_ROOM_FALLBACK_MODEL = "gemini_3_flash";
+
 const DocumentWorkspace = lazy(() => import("@/components/designer/DocumentWorkspace"));
 
 export default function ProjectDesigner() {
@@ -83,6 +89,7 @@ export default function ProjectDesigner() {
     rooms: true,
     circuits: true,
     labels: true,
+    coverage: false,
     markups: true,
     markup_Review: true,
     markup_Measurements: true,
@@ -482,23 +489,26 @@ export default function ProjectDesigner() {
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
 
-    const applyDetectedRooms = (detectedRooms, detectedLayoutZones, geometryPatch, successMessage) => {
+    const applyDetectedRooms = (detectedRooms, detectedLayoutZones, geometryPatch, successMessage, devicesForSaveOverride = null) => {
       const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
       const newLayoutZones = [...layoutZones.filter(z => z.floor !== activeFloor), ...detectedLayoutZones];
       const updatedFloorPlans = updateFloorPlanScale(floorPlans, activeFloor, geometryPatch);
+      const nextDevices = devicesForSaveOverride ?? storedDevices;
+
       setLocalRooms(newRooms);
       setLocalLayoutZones(newLayoutZones);
       setLocalFloorPlans(updatedFloorPlans);
+      setLocalDevices(nextDevices);
       saveMutation.mutate({
         rooms: newRooms,
-        devices,
+        devices: nextDevices,
         markups,
         layout_zones: newLayoutZones,
         floor_plans: updatedFloorPlans,
         wires,
         document_workspace: documentWorkspace,
         analysis_results: analysisResults,
-        status: devices.length > 0 ? "in_progress" : "draft",
+        status: nextDevices.length > 0 ? "in_progress" : "draft",
       });
       toast.success(successMessage);
     };
@@ -548,9 +558,9 @@ Use decimal ratios (e.g. 0.184). Omit a field if unreadable.`,
         }
       });
     } catch (err) {
-      toast.error(`AI scale detection failed: ${err?.message || "Unknown error"}`);
-      setAnalyzingFloor(false);
-      return;
+      console.warn("[ProjectDesigner] AI scale detection unavailable; using estimated scale", err);
+      toast.info("AI scale detection unavailable — estimating scale and detecting rooms on-device.");
+      pass1 = {};
     }
 
     console.log("Pass 1 (scale):", JSON.stringify(pass1, null, 2));
@@ -568,11 +578,54 @@ Use decimal ratios (e.g. 0.184). Omit a field if unreadable.`,
 
     toast.info(`Scale detected: ~${pxPerFt.toFixed(1)}px/ft (${scaleSource}). Mapping rooms — step 2 of 2...`);
 
-    // ── PASS 2: Read each room's real-world dimensions in FEET from the drawing ──
-    let pass2;
-    try {
-      pass2 = await base44.integrations.Core.InvokeLLM({
-        prompt: `You are analyzing a floor plan image that is exactly ${imgW} pixels wide by ${imgH} pixels tall.
+    const roomPassSchema = {
+      type: "object",
+      properties: {
+        rooms: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              room_type: { type: "string" },
+              x1_ratio: { type: "number" },
+              y1_ratio: { type: "number" },
+              x2_ratio: { type: "number" },
+              y2_ratio: { type: "number" },
+              x1_px: { type: "number" },
+              y1_px: { type: "number" },
+              x2_px: { type: "number" },
+              y2_px: { type: "number" },
+              width_ft: { type: "number" },
+              height_ft: { type: "number" },
+              area_sqft: { type: "number" },
+            },
+          },
+        },
+        layout_zones: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              zone_type: { type: "string" },
+              name: { type: "string" },
+              x1_ratio: { type: "number" },
+              y1_ratio: { type: "number" },
+              x2_ratio: { type: "number" },
+              y2_ratio: { type: "number" },
+              x1_px: { type: "number" },
+              y1_px: { type: "number" },
+              x2_px: { type: "number" },
+              y2_px: { type: "number" },
+              confidence: { type: "number" },
+              reason: { type: "string" },
+            },
+          },
+        },
+      },
+    };
+
+    const buildRoomPassPrompt = () => `You are analyzing a floor plan image that is exactly ${imgW} pixels wide by ${imgH} pixels tall.
 Scale already established: ${pxPerFt.toFixed(2)} px/ft.
 
 YOUR GOAL: For EVERY labeled enclosed space, return:
@@ -602,94 +655,148 @@ kitchen, laundry, community_room, common_area, office, conference_room, sales_fl
 stockroom, storage, mechanical_room, electrical, it_room, janitor, garage
 
 Also identify layout_zones for aisles, rack rows, or large obstructions.
-Exclude: title block, sheet border, north arrow, exterior areas outside walls.`,
+Exclude: title block, sheet border, north arrow, exterior areas outside walls.`;
+
+    const invokeRoomsPass = (modelSlug) =>
+      base44.integrations.Core.InvokeLLM({
+        prompt: buildRoomPassPrompt(),
         file_urls: [analysisImageUrl],
-        model: "claude_sonnet_4_6",
-        response_json_schema: {
-          type: "object",
-          properties: {
-            rooms: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  name: { type: "string" },
-                  room_type: { type: "string" },
-                  x1_ratio: { type: "number" },
-                  y1_ratio: { type: "number" },
-                  x2_ratio: { type: "number" },
-                  y2_ratio: { type: "number" },
-                  x1_px: { type: "number" },
-                  y1_px: { type: "number" },
-                  x2_px: { type: "number" },
-                  y2_px: { type: "number" },
-                  width_ft: { type: "number" },
-                  height_ft: { type: "number" },
-                  area_sqft: { type: "number" }
-                }
-              }
-            },
-            layout_zones: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  zone_type: { type: "string" },
-                  name: { type: "string" },
-                  x1_ratio: { type: "number" },
-                  y1_ratio: { type: "number" },
-                  x2_ratio: { type: "number" },
-                  y2_ratio: { type: "number" },
-                  x1_px: { type: "number" },
-                  y1_px: { type: "number" },
-                  x2_px: { type: "number" },
-                  y2_px: { type: "number" },
-                  confidence: { type: "number" },
-                  reason: { type: "string" }
-                }
-              }
-            }
-          }
-        }
+        ...(modelSlug ? { model: modelSlug } : {}),
+        response_json_schema: roomPassSchema,
       });
+
+    const detectionFromRoomPass = (p2, geomBase) => {
+      const detectedRoomsRaw = normalizeDetectedRooms({
+        pass2: p2,
+        activeFloor,
+        project,
+        geometry: geomBase,
+        imgW,
+        imgH,
+      });
+      const zonesExpanded = expandLayoutZonesFromDetectionPass(p2?.layout_zones || [], imgW, imgH);
+      const detectedLayoutZonesRaw = normalizeDetectedLayoutZones(zonesExpanded, activeFloor);
+      const remapped = remapThumbnailCoordinatesToImageSpace({
+        rooms: detectedRoomsRaw,
+        layoutZones: detectedLayoutZonesRaw,
+        buildingBounds: geomBase.buildingBounds,
+        imgW,
+        imgH,
+      });
+      return {
+        detectedRooms: remapped.rooms,
+        detectedLayoutZones: remapped.layoutZones,
+        geometryForSave: { ...geomBase, buildingBounds: remapped.buildingBounds },
+      };
+    };
+
+    let pass2;
+    try {
+      pass2 = await invokeRoomsPass();
     } catch (err) {
-      toast.error(`Room mapping failed: ${err?.message || "Unknown error"}`);
-      setAnalyzingFloor(false);
-      return;
+      console.warn("[ProjectDesigner] AI room mapping unavailable; will try geometric fallback", err);
+      pass2 = { rooms: [] };
     }
 
     console.log("Pass 2 (rooms):", JSON.stringify(pass2, null, 2));
 
-    const detectedRoomsRaw = normalizeDetectedRooms({
-      pass2,
-      activeFloor,
-      project,
-      geometry,
-      imgW,
-      imgH,
-    });
-    const zonesExpanded = expandLayoutZonesFromDetectionPass(pass2?.layout_zones || [], imgW, imgH);
-    const detectedLayoutZonesRaw = normalizeDetectedLayoutZones(zonesExpanded, activeFloor);
-
-    const remapped = remapThumbnailCoordinatesToImageSpace({
-      rooms: detectedRoomsRaw,
-      layoutZones: detectedLayoutZonesRaw,
-      buildingBounds: geometry.buildingBounds,
-      imgW,
-      imgH,
-    });
-    const detectedRooms = remapped.rooms;
-    const detectedLayoutZones = remapped.layoutZones;
-    const geometryForSave = { ...geometry, buildingBounds: remapped.buildingBounds };
+    let { detectedRooms, detectedLayoutZones, geometryForSave } = detectionFromRoomPass(pass2, geometry);
 
     if (detectedRooms.length === 0) {
-      toast.error("AI did not return any real rooms. No room overlays were saved.");
+      toast.info(`No rooms yet — retrying once with fallback Base44 model (${BASE44_ROOM_FALLBACK_MODEL})…`);
+      try {
+        pass2 = await invokeRoomsPass(BASE44_ROOM_FALLBACK_MODEL);
+        console.log("Pass 2b (fallback rooms):", JSON.stringify(pass2, null, 2));
+        ({ detectedRooms, detectedLayoutZones, geometryForSave } = detectionFromRoomPass(pass2, geometry));
+      } catch (err2) {
+        console.warn("[ProjectDesigner] room fallback InvokeLLM failed", err2);
+      }
+    }
+
+    let mergedDevicesAfterVision = storedDevices;
+    let blueprintSymbolExtractions = 0;
+    if (detectedRooms.length > 0 && disciplineId === "fire_alarm") {
+      try {
+        toast.info("Scanning sheet for fire alarm symbols (Base44 AI)…");
+        const equipPass = await base44.integrations.Core.InvokeLLM({
+          prompt: `Fire alarm layout assistant — floor plan raster ${imgW}px × ${imgH}px.
+
+Locate NFPA-style / industry-standard FIRE ALARM symbols already drawn ON THE PLAN IMAGE (circles marked S/smoke or dot detectors, heats, rectangles for manual pulls, horns/strobes, speakers, FACP/control rectangles, duct detector icons).
+
+Output each distinct symbol as ONE entry with normalized center coordinates ONLY (preferred):
+- cx_ratio = center_x / ${imgW} (0–1)
+- cy_ratio = center_y / ${imgH} (0–1)
+
+equipment_type MUST be ONE of these exact identifiers:
+smoke_detector, heat_detector, pull_station, horn_strobe, horn, strobe, speaker, duct_detector, facp, annunciator, monitor_module, control_module.
+
+Skip: generic electrical outlets, luminaires, plumbing, CCTV, WIFI, unrelated MEP legends. Skip title block ornament.
+If unreadable — omit that marker.`,
+          file_urls: [analysisImageUrl],
+          response_json_schema: {
+            type: "object",
+            properties: {
+              devices: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    equipment_type: { type: "string" },
+                    cx_ratio: { type: "number" },
+                    cy_ratio: { type: "number" },
+                  },
+                  required: ["equipment_type"],
+                },
+              },
+            },
+            required: ["devices"],
+          },
+        });
+        const extractedEq = normalizeBlueprintExtractedEquipment(
+          equipPass,
+          disciplineConfig,
+          imgW,
+          imgH,
+          activeFloor,
+        );
+        if (extractedEq.length > 0) {
+          blueprintSymbolExtractions = extractedEq.length;
+          const stripped = storedDevices.filter(
+            (d) => !(Number(d.floor) === Number(activeFloor) && d.source === "base44_blueprint_extraction"),
+          );
+          mergedDevicesAfterVision = [...stripped, ...extractedEq];
+        }
+      } catch (visionSymErr) {
+        console.warn("[ProjectDesigner] symbol extraction InvokeLLM failed", visionSymErr);
+      }
+    }
+
+    if (detectedRooms.length === 0) {
+      try {
+        toast.info("Detecting rooms on-device from the plan image…");
+        const geoRooms = await detectRoomsFromImage(analysisImageUrl, imgW, imgH, pxPerFt, activeFloor);
+        if (geoRooms.length > 0) {
+          detectedRooms = geoRooms;
+          geometryForSave = geometry;
+        }
+      } catch (geoErr) {
+        console.warn("[ProjectDesigner] geometric room detection failed", geoErr);
+      }
+    }
+
+    if (detectedRooms.length === 0) {
+      toast.error("Could not detect rooms automatically. Draw them with the Room or Polygon tool, or calibrate the scale and retry.");
     } else {
+      const equipNote =
+        disciplineId === "fire_alarm" && blueprintSymbolExtractions > 0
+          ? ` Also placed ${blueprintSymbolExtractions} device marker(s) from blueprint symbols.`
+          : "";
       applyDetectedRooms(
         detectedRooms,
         detectedLayoutZones,
         geometryForSave,
-        `Detected ${detectedRooms.length} rooms and ${detectedLayoutZones.length} layout zones at ${pxPerFt.toFixed(1)}px/ft (${scaleSource}).`
+        `Detected ${detectedRooms.length} rooms and ${detectedLayoutZones.length} layout zones at ${pxPerFt.toFixed(1)}px/ft (${scaleSource}).${equipNote}`,
+        mergedDevicesAfterVision,
       );
     }
     setAnalyzingFloor(false);
@@ -1474,6 +1581,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
                     <ToolbarBtn active={rightPanel === 'checklist'} onClick={() => setRightPanel(p => p === 'checklist' ? null : 'checklist')} icon={<ClipboardList className="h-3 w-3" />} label="Checklist" />
                     <ToolbarBtn active={rightPanel === 'battery'} onClick={() => setRightPanel(p => p === 'battery' ? null : 'battery')} icon={<Battery className="h-3 w-3" />} label="Battery" />
                     <ToolbarBtn active={rightPanel === 'voltagedrop'} onClick={() => setRightPanel(p => p === 'voltagedrop' ? null : 'voltagedrop')} icon={<Zap className="h-3 w-3" />} label="V-Drop" />
+                    <ToolbarBtn active={rightPanel === 'codeaudit'} onClick={() => setRightPanel(p => p === 'codeaudit' ? null : 'codeaudit')} icon={<ShieldCheck className="h-3 w-3" />} label="Code" />
                     <ToolbarBtn active={rightPanel === 'markups'} onClick={() => setRightPanel(p => p === 'markups' ? null : 'markups')} icon={<MessageSquare className="h-3 w-3" />} label="Markups" />
                     <ToolbarBtn onClick={() => downloadDXF(project, rooms, canvasDevices, activeFloor, { wires })} icon={<FileDown className="h-3 w-3" />} label="DXF" blue />
                     <ToolbarBtn onClick={() => setShowSubmittal(true)} icon={<BookOpen className="h-3 w-3" />} label="Submittal PDF" orange />
@@ -1534,6 +1642,14 @@ Return only zones that are clearly the same kind of object. Do not include the o
               {rightPanel === 'voltagedrop' && (
                 <VoltageDropCalculator devices={devices} floorPlans={floorPlans} wires={wires} />
               )}
+              {rightPanel === 'codeaudit' && (
+                <CodeAuditPanel
+                  rooms={rooms}
+                  devices={devices}
+                  floorPlans={floorPlans}
+                  activeFloor={activeFloor}
+                />
+              )}
               {rightPanel === 'markups' && (
                 <MarkupsList
                   project={project}
@@ -1574,6 +1690,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
           devices={devices}
           rooms={rooms}
           wires={wires}
+          markups={markups}
           floorPlans={floorPlans}
           analysisResults={analysisResults}
           canvasRef={canvasRef}

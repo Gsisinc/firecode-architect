@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import {
   Layers, Zap, Download, ChevronDown, ChevronRight,
   Eye, EyeOff, LayoutList, AlertTriangle, CheckCircle2,
-  MousePointer, Square, Hand, Trash2, Settings2, Cable, MessageSquare, Network, Ruler, Sparkles, Loader2,
+  MousePointer, Square, Pentagon, Hand, Trash2, Settings2, Cable, MessageSquare, Network, Ruler, Sparkles, Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -76,7 +76,7 @@ export default function DesignerSidebar({
   const toggle = (s) => setOpenSection(p => p === s ? null : s);
 
   return (
-    <div className="w-56 bg-[hsl(222,47%,6%)] border-r border-white/10 flex flex-col h-full overflow-hidden">
+    <div className="w-56 bg-gradient-to-b from-[#2a0a0c] via-[#1f080a] to-[#140709] border-r border-white/10 shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)] flex flex-col h-full overflow-hidden">
       {/* Floor Selector */}
       <div className="p-3 border-b border-white/10 shrink-0">
         <p className="text-[10px] text-white/40 mb-2 font-semibold uppercase tracking-widest">Floor</p>
@@ -106,6 +106,7 @@ export default function DesignerSidebar({
             <ToolBtn active={selectedTool === 'pan'} onClick={() => onToolSelect('pan')} icon={<Hand className="w-3 h-3" />} label="Pan" />
             <ToolBtn active={selectedTool === 'scale_line'} onClick={() => onToolSelect('scale_line')} icon={<Ruler className="w-3 h-3" />} label="Set Scale" />
             <ToolBtn active={selectedTool === 'room'} onClick={() => onToolSelect('room')} icon={<Square className="w-3 h-3" />} label="Draw Room" />
+            <ToolBtn active={selectedTool === 'room_polygon'} onClick={() => onToolSelect('room_polygon')} icon={<Pentagon className="w-3 h-3" />} label="Polygon Room" />
             <ToolBtn active={selectedTool === 'wire'} onClick={() => onToolSelect('wire')} icon={<Cable className="w-3 h-3" />} label="Wire" />
             <ToolBtn active={selectedTool === 'delete'} onClick={() => onToolSelect('delete')} icon={<Trash2 className="w-3 h-3" />} label="Delete" danger />
           </div>
@@ -113,8 +114,8 @@ export default function DesignerSidebar({
 
         {showFireAlarmWorkflow && onAiDevicePlacement && (
           <SidebarSection title="AI placement" icon={Sparkles} open={openSection === 'ai_place'} onToggle={() => toggle('ai_place')}>
-            <p className="text-[10px] text-white/35 px-1 leading-snug mb-2">
-              Uses OpenAI (GPT-4 class) when <code className="text-white/50">VITE_OPENAI_API_KEY</code> is set; otherwise a 30×30 ft grid fallback inside drawn rooms.
+            <p className="text-[10px] text-white/40 px-1 leading-snug mb-2">
+              Room outlines and symbols use <strong className="text-white/65">Base44 InvokeLLM</strong> automatically. Optional OpenAI boosts grid placement when <code className="text-white/55">VITE_OPENAI_API_KEY</code> is set; otherwise a 30×30 ft grid fills rooms inside your outlines.
             </p>
             <button
               type="button"

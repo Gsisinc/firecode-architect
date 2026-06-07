@@ -27,10 +27,13 @@ const DISCIPLINE_NAV = [
 ];
 
 const SIDEBAR = {
-  bg: '#1e293b',
-  bgElevated: '#243548',
-  border: 'rgba(255,255,255,0.08)',
-  muted: 'rgba(255,255,255,0.55)',
+  gradientFrom: '#4a0710',
+  gradientVia: '#6b0f17',
+  gradientTo: '#2d0609',
+  /** Header strip over gradient */
+  headerBg: 'rgba(0,0,0,0.22)',
+  border: 'rgba(255,255,255,0.12)',
+  muted: 'rgba(255,255,255,0.58)',
 };
 
 function displayFirstName(user) {
@@ -67,15 +70,18 @@ export default function SystemsAppShell({
   return (
     <div className="min-h-screen flex bg-[#f1f5f9] text-slate-900">
       <aside
-        className="w-[260px] shrink-0 flex flex-col border-r text-white"
-        style={{ backgroundColor: SIDEBAR.bg, borderColor: SIDEBAR.border }}
+        className="w-[260px] shrink-0 flex flex-col border-r text-white shadow-[4px_0_24px_rgba(139,27,43,0.15)]"
+        style={{
+          background: `linear-gradient(165deg, ${SIDEBAR.gradientFrom} 0%, ${SIDEBAR.gradientVia} 52%, ${SIDEBAR.gradientTo} 100%)`,
+          borderColor: SIDEBAR.border,
+        }}
       >
         <Link
           to="/"
           className="px-5 py-5 flex items-center gap-3 shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-white/30 border-b"
-          style={{ borderColor: SIDEBAR.border, backgroundColor: SIDEBAR.bgElevated }}
+          style={{ borderColor: SIDEBAR.border, backgroundColor: SIDEBAR.headerBg }}
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center shadow-md shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 via-red-600 to-red-900 flex items-center justify-center shadow-lg ring-1 ring-white/20 shrink-0">
             <Flame className="w-5 h-5 text-white" />
           </div>
           <div className="min-w-0 text-left leading-tight">
@@ -88,7 +94,9 @@ export default function SystemsAppShell({
           <Link
             to="/"
             className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-              dashboardActive ? 'bg-red-600 text-white shadow-sm' : 'text-white/80 hover:bg-white/10'
+              dashboardActive
+                ? 'bg-gradient-to-r from-rose-600 to-red-700 text-white shadow-md ring-1 ring-white/10'
+                : 'text-white/78 hover:bg-white/[0.08]'
             }`}
           >
             <LayoutDashboard className="w-4 h-4 shrink-0 opacity-90" />
@@ -97,7 +105,9 @@ export default function SystemsAppShell({
           <Link
             to="/projects/fire_alarm"
             className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-              projectsActive ? 'bg-white/15 text-white' : 'text-white/80 hover:bg-white/10'
+              projectsActive
+                ? 'bg-white/12 text-white ring-1 ring-white/15'
+                : 'text-white/78 hover:bg-white/[0.08]'
             }`}
           >
             <FolderKanban className="w-4 h-4 shrink-0 opacity-90" />
@@ -132,8 +142,9 @@ export default function SystemsAppShell({
                 to={`/projects/${id}`}
                 className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left transition-colors"
                 style={{
-                  backgroundColor: tabActive || inDesigner ? 'rgba(255,255,255,0.1)' : 'transparent',
-                  color: tabActive || inDesigner ? '#fff' : 'rgba(255,255,255,0.75)',
+                  backgroundColor: tabActive || inDesigner ? 'rgba(255,255,255,0.12)' : 'transparent',
+                  color: tabActive || inDesigner ? '#fff' : 'rgba(255,255,255,0.78)',
+                  boxShadow: tabActive || inDesigner ? 'inset 0 1px 0 rgba(255,255,255,0.08)' : undefined,
                 }}
               >
                 <Icon className="w-4 h-4 shrink-0" style={{ color: cfg.theme.primary }} />
@@ -145,8 +156,8 @@ export default function SystemsAppShell({
 
         <div className="p-4 mt-auto border-t shrink-0" style={{ borderColor: SIDEBAR.border }}>
           <div
-            className="rounded-xl border p-4"
-            style={{ backgroundColor: 'rgba(0,0,0,0.2)', borderColor: SIDEBAR.border }}
+            className="rounded-xl border p-4 backdrop-blur-[2px]"
+            style={{ backgroundColor: 'rgba(0,0,0,0.25)', borderColor: SIDEBAR.border }}
           >
             <p className="text-sm font-semibold text-white">Need help getting started?</p>
             <p className="text-xs mt-1.5 leading-relaxed" style={{ color: SIDEBAR.muted }}>
@@ -156,7 +167,7 @@ export default function SystemsAppShell({
               asChild
               variant="outline"
               size="sm"
-              className="mt-3 w-full border-white/25 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+              className="mt-3 w-full border-white/30 bg-white/10 text-white hover:bg-white/18 hover:text-white"
             >
               <Link to="/code-reference">View resources</Link>
             </Button>
@@ -200,7 +211,9 @@ export default function SystemsAppShell({
             </Link>
             <div
               className="w-9 h-9 ml-1 rounded-full text-white text-xs font-bold flex items-center justify-center ring-2 ring-slate-200/80"
-              style={{ backgroundColor: SIDEBAR.bg }}
+              style={{
+                background: `linear-gradient(135deg, ${SIDEBAR.gradientVia} 0%, ${SIDEBAR.gradientFrom} 100%)`,
+              }}
               title={user?.email || 'Account'}
             >
               {(greetingName && greetingName[0]?.toUpperCase()) || '?'}
