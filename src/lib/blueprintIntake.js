@@ -12,6 +12,7 @@
 
 import { base44 } from '@/api/base44Client';
 import { extractPdfMetadataAndText } from '@/lib/documentEngine';
+import { classifyPlanFromText } from '@/lib/planVision';
 
 const OCCUPANCY_GROUPS = ['A', 'B', 'E', 'F', 'H', 'I-1', 'I-2', 'I-3', 'I-4', 'M', 'R-1', 'R-2', 'R-3', 'R-4', 'S', 'High Rise'];
 const SPRINKLER_OPTIONS = ['None', 'Partial', 'Full (NFPA 13)', 'Full (NFPA 13R)', 'Full (NFPA 13D)'];
@@ -39,6 +40,52 @@ const INTAKE_SCHEMA = {
 
 function isPdf(fileUrl, fileType) {
   return fileType === 'application/pdf' || /\.pdf($|\?)/i.test(String(fileUrl || ''));
+}
+
+function sheetNumberFromText(text = '', pageNumber = 1) {
+  const match = String(text).match(/\b([A-Z]{1,3}\d{1,2}(?:\.\d{1,2})?)\b/);
+  return match?.[1] || '';
+}
+
+function sheetTitleFromText(text = '', pageNumber = 1) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  const titleMatch = clean.match(/\b(?:SHEET\s+TITLE|TITLE)\s*[:\-]?\s*([A-Z0-9 /&.'"-]{6,80})/i);
+  if (titleMatch?.[1]) return titleMatch[1].trim().slice(0, 80);
+  const floorMatch = clean.match(/\b(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|1ST|2ND|3RD|4TH|5TH)\s+FLOOR\s+PLAN\b/i);
+  if (floorMatch?.[0]) return floorMatch[0].trim();
+  return `Page ${pageNumber}`;
+}
+
+function buildPlanSheets({ fileUrl, fileType, fileName, pages = [], pageCount = 1 }) {
+  const count = Math.max(1, Number(pageCount) || pages.length || 1);
+  const sourcePages = pages.length
+    ? pages
+    : Array.from({ length: count }, (_, index) => ({ page: index + 1, text: '' }));
+
+  return sourcePages.map((page) => {
+    const pageNumber = Number(page.page) || 1;
+    const sheetText = page.text || '';
+    const suggestedType = classifyPlanFromText(`${fileName || ''} ${sheetText}`);
+    return {
+      id: `sheet-${Date.now()}-${pageNumber}-${Math.random().toString(36).slice(2, 6)}`,
+      file_url: fileUrl,
+      file_type: fileType,
+      file_name: fileName || 'Uploaded blueprint',
+      page_number: pageNumber,
+      page_count: count,
+      preview_url: '',
+      width: page.width || '',
+      height: page.height || '',
+      title: sheetTitleFromText(sheetText, pageNumber),
+      sheet_number: sheetNumberFromText(sheetText, pageNumber),
+      suggested_type: suggestedType,
+      plan_type: 'unassigned',
+      assigned_floor: '',
+      sheet_text: sheetText,
+      source: 'blueprint_intake',
+      uploaded_at: new Date().toISOString(),
+    };
+  });
 }
 
 /** Map a free-text occupancy/use to a valid IBC group token. */
@@ -123,20 +170,23 @@ function normalizeIntake(raw) {
 
 /**
  * @param {string} fileUrl  hosted blueprint url
- * @param {{ fileType?: string }} [opts]
- * @returns {Promise<{ fields: object, pageCount: number, sourceText: string, error?: string }>}
+ * @param {{ fileType?: string, fileName?: string }} [opts]
+ * @returns {Promise<{ fields: object, pageCount: number, sourceText: string, planSheets: object[], error?: string }>}
  */
 export async function extractIntakeFromBlueprint(fileUrl, opts = {}) {
   const fileType = opts.fileType;
+  const fileName = opts.fileName;
   let sourceText = '';
   let pageCount = 1;
+  let pdfPages = [];
 
   if (isPdf(fileUrl, fileType)) {
     try {
       const meta = await extractPdfMetadataAndText(fileUrl);
       pageCount = meta.pageCount || 1;
+      pdfPages = meta.pages || [];
       // Title blocks live on every sheet; the cover/legend usually has the rest.
-      sourceText = (meta.pages || [])
+      sourceText = pdfPages
         .map((p) => `[Sheet ${p.page}] ${p.text}`)
         .join('\n')
         .slice(0, 18000);
@@ -161,8 +211,19 @@ ${sourceText || '(no embedded text — read from the attached image/PDF)'}
       file_urls: [fileUrl],
       response_json_schema: INTAKE_SCHEMA,
     });
-    return { fields: normalizeIntake(llm), pageCount, sourceText };
+    return {
+      fields: normalizeIntake(llm),
+      pageCount,
+      sourceText,
+      planSheets: buildPlanSheets({ fileUrl, fileType, fileName, pages: pdfPages, pageCount }),
+    };
   } catch (e) {
-    return { fields: {}, pageCount, sourceText, error: e?.message || 'AI extraction unavailable' };
+    return {
+      fields: {},
+      pageCount,
+      sourceText,
+      planSheets: buildPlanSheets({ fileUrl, fileType, fileName, pages: pdfPages, pageCount }),
+      error: e?.message || 'AI extraction unavailable',
+    };
   }
 }

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { extractIntakeFromBlueprint } from '@/lib/blueprintIntake';
 import { UploadCloud, Loader2, CheckCircle2, Sparkles, AlertTriangle } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 
 /**
  * Upload-first intake: drop a blueprint (single-page or multi-sheet PDF, or an
@@ -13,6 +14,20 @@ export default function BlueprintIntakeUpload({ onExtracted }) {
   const [phase, setPhase] = useState('idle'); // idle | uploading | reading | done | error
   const [summary, setSummary] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (phase !== 'uploading' && phase !== 'reading') return undefined;
+    const ceiling = phase === 'uploading' ? 72 : 94;
+    const timer = window.setInterval(() => {
+      setProgress((current) => {
+        if (current >= ceiling) return current;
+        return Math.min(ceiling, current + Math.max(0.6, (ceiling - current) * 0.08));
+      });
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [phase]);
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -21,16 +36,23 @@ export default function BlueprintIntakeUpload({ onExtracted }) {
     const ok = file.type === 'application/pdf' || file.type.startsWith('image/');
     if (!ok) { setPhase('error'); setErrorMsg('Choose a PDF or image blueprint.'); return; }
 
+    setFileName(file.name);
+    setProgress(2);
     setPhase('uploading');
     setErrorMsg('');
     try {
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
       if (!file_url) throw new Error('Upload failed.');
+      setProgress(74);
       setPhase('reading');
-      const { fields, pageCount, error } = await extractIntakeFromBlueprint(file_url, { fileType: file.type });
-      onExtracted?.({ fields, fileUrl: file_url, fileType: file.type, pageCount });
+      const { fields, pageCount, planSheets, error } = await extractIntakeFromBlueprint(file_url, {
+        fileType: file.type,
+        fileName: file.name,
+      });
+      setProgress(100);
+      onExtracted?.({ fields, fileUrl: file_url, fileType: file.type, fileName: file.name, pageCount, planSheets });
       const found = Object.keys(fields || {});
-      setSummary({ count: found.length, pageCount, fields });
+      setSummary({ count: found.length, pageCount, fields, sheetCount: planSheets?.length || pageCount || 1 });
       setPhase('done');
       if (error && found.length === 0) { setErrorMsg(error); setPhase('error'); }
     } catch (err) {
@@ -40,6 +62,7 @@ export default function BlueprintIntakeUpload({ onExtracted }) {
   };
 
   const busy = phase === 'uploading' || phase === 'reading';
+  const displayedProgress = Math.max(1, Math.min(100, Math.round(progress || 0)));
 
   const FIELD_LABELS = {
     name: 'Project name', address: 'Address', owner_name: 'Owner', ahj_contact: 'AHJ',
@@ -67,12 +90,29 @@ export default function BlueprintIntakeUpload({ onExtracted }) {
             <input type="file" accept="application/pdf,image/*" className="hidden" disabled={busy} onChange={handleFile} />
           </label>
 
+          {busy && (
+            <div className="mt-3 rounded-lg border border-red-100 bg-white p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-slate-800">{fileName || 'Blueprint'}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {phase === 'uploading'
+                      ? 'Uploading blueprint to project storage...'
+                      : 'AI is reading title blocks, cover sheets, and code notes...'}
+                  </p>
+                </div>
+                <span className="text-[11px] font-mono text-slate-500">{displayedProgress}%</span>
+              </div>
+              <Progress value={displayedProgress} className="mt-2 h-1.5" />
+            </div>
+          )}
+
           {phase === 'done' && summary && (
             <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
               <div className="flex items-center gap-2 text-xs font-medium text-emerald-800">
                 <CheckCircle2 className="w-4 h-4" />
                 Auto-filled {summary.count} field{summary.count === 1 ? '' : 's'}
-                {summary.pageCount > 1 ? ` · ${summary.pageCount}-sheet set attached` : ' · plan attached'}
+                {summary.sheetCount > 1 ? ` · ${summary.sheetCount}-sheet set ready for assignment` : ' · plan attached'}
               </div>
               {summary.count > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">

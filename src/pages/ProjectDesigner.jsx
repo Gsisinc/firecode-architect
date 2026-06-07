@@ -28,6 +28,7 @@ import RiserDiagram from "@/components/designer/RiserDiagram";
 import FireAlarmSimulation from "@/components/designer/FireAlarmSimulation";
 import MarkupsList from "@/components/designer/MarkupsList";
 import ScaleVerificationOverlay from "@/components/designer/ScaleVerificationOverlay";
+import TwoPointCalibration from "@/components/designer/TwoPointCalibration";
 import { downloadDXF } from "@/lib/dxfExport";
 import {
   deriveDetectionGeometry,
@@ -74,7 +75,6 @@ const DocumentWorkspace = lazy(() => import("@/components/designer/DocumentWorks
 export default function ProjectDesigner() {
   const { id: projectId, discipline: disciplineRouteParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const autoDetectRan = useRef(false);
   const disciplineId = normalizeDisciplineId(disciplineRouteParam);
   const disciplineConfig = getDisciplineConfig(disciplineId);
   const queryClient = useQueryClient();
@@ -129,6 +129,7 @@ export default function ProjectDesigner() {
   const [selectedCableType, setSelectedCableType] = useState('');
   const [selectedSheetId, setSelectedSheetId] = useState(null);
   const [showScaleVerify, setShowScaleVerify] = useState(false);
+  const [showManualCalibration, setShowManualCalibration] = useState(false);
 
   // ── Auto-save refs (initialized here, effect runs after saveMutation below) ──
   const autoSaveTimerRef = useRef(null);
@@ -467,6 +468,12 @@ export default function ProjectDesigner() {
     if (!plan || !planUrl) {
       toast.error("Upload a floor plan first", { id: "need-floor-plan" });
       return;
+    }
+    if (!Number(plan.px_per_ft || plan.scale?.px_per_ft)) {
+      toast.warning('Calibrate scale before room detection for accurate room areas and device spacing.', {
+        id: 'calibrate-before-detect',
+        duration: 6500,
+      });
     }
     setAnalyzingFloor(true);
     toast.info("AI is reading blueprint dimensions — step 1 of 2...");
@@ -810,23 +817,18 @@ If unreadable — omit that marker.`,
     setAnalyzingFloor(false);
   };
 
-  // Chain after a blueprint import: when the designer opens with ?autodetect=1
-  // and a plan is present but no rooms yet, run scale + room detection once.
+  // After blueprint intake, open the page-assignment screen first. The user
+  // assigns PDF pages to floors before calibration and room/device placement.
   useEffect(() => {
-    if (autoDetectRan.current) return;
-    if (searchParams.get('autodetect') !== '1') return;
-    if (disciplineId !== 'fire_alarm') return;
-    const plan = pickFloorPlanForCanvas(floorPlans, activeFloor);
-    const planUrl = (plan?.image_url || plan?.file_url || '').trim();
-    if (!planUrl) return; // wait until the plan is loaded
-    autoDetectRan.current = true;
+    if (searchParams.get('step') !== 'assign') return;
+    if (planSheets.length === 0) return;
+    setActiveTab('plans');
+    setSelectedSheetId((current) => current || planSheets[0]?.id || null);
     const sp = new URLSearchParams(searchParams);
-    sp.delete('autodetect');
+    sp.delete('step');
     setSearchParams(sp, { replace: true });
-    if ((rooms || []).length === 0) {
-      handleAnalyzeFloorPlan();
-    }
-  }, [searchParams, floorPlans, rooms, activeFloor, disciplineId, setSearchParams]);
+    toast.info('Assign blueprint pages to floors first. Then open the canvas to calibrate scale.');
+  }, [searchParams, planSheets, setSearchParams]);
 
   const handleAutoPlace = useCallback(() => {
     if (disciplineId !== 'fire_alarm') {
@@ -1287,7 +1289,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
     if (assignedFloor) {
       setActiveFloor(Number(assignedFloor));
       setActiveTab('canvas');
-      toast.success(`Page ${sheet.page_number} is now the plan for floor ${assignedFloor}.`);
+      toast.success(`Page ${sheet.page_number} is now the plan for floor ${assignedFloor}. Calibrate scale next, then detect rooms.`);
     } else {
       setActiveTab('plans');
       toast.success(`Tagged page ${sheet.page_number} as ${finalPlanType}. To show it on the drawing canvas, set plan type to Floor Plan, Fire Alarm, or Architectural and pick a floor.`);
@@ -1342,6 +1344,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
   );
 
   const canvasPxPerFt = useMemo(() => getFloorScale(floorPlans, activeFloor), [floorPlans, activeFloor]);
+  const currentPlanNeedsCalibration = !!currentFloorPlan?.file_url && !Number(currentFloorPlan?.px_per_ft || currentFloorPlan?.scale?.px_per_ft);
 
   useEffect(() => {
     const plan = currentFloorPlan;
@@ -1513,6 +1516,24 @@ Return only zones that are clearly the same kind of object. Do not include the o
           )}
           {activeTab === 'canvas' && (
             <>
+              {currentPlanNeedsCalibration && (
+                <div className="absolute top-4 left-1/2 z-20 w-[min(720px,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/95 p-3 shadow-lg backdrop-blur">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-amber-950">Calibrate this floor plan before detecting rooms.</p>
+                      <p className="text-xs text-amber-800">Scale is needed for room square footage, device spacing, and code checks.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" variant="outline" className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100" onClick={() => setShowScaleVerify(true)}>
+                        <Ruler className="mr-1.5 h-3.5 w-3.5" /> Auto-calibrate
+                      </Button>
+                      <Button type="button" size="sm" className="bg-amber-600 text-white hover:bg-amber-700" onClick={() => setShowManualCalibration(true)}>
+                        Manual scale
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
               <FloorPlanCanvas
                 floorPlanUrl={currentFloorPlan?.image_url || currentFloorPlan?.file_url}
                 floorPlanFileType={currentFloorPlan?.file_type}
@@ -1577,6 +1598,19 @@ Return only zones that are clearly the same kind of object. Do not include the o
                     saveProjectPatch({ floor_plans: nextPlans });
                   }}
                   onClose={() => setShowScaleVerify(false)}
+                />
+              )}
+              {showManualCalibration && (
+                <TwoPointCalibration
+                  canvasRef={canvasRef}
+                  currentFloor={activeFloor}
+                  floorPlans={floorPlans}
+                  onCalibrationSaved={(nextPlans) => {
+                    setLocalFloorPlans(nextPlans);
+                    saveProjectPatch({ floor_plans: nextPlans });
+                    toast.success('Manual scale calibration saved. You can detect rooms now.');
+                  }}
+                  onClose={() => setShowManualCalibration(false)}
                 />
               )}
               <DevicePanel

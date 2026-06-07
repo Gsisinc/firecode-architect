@@ -21,8 +21,33 @@ const SPRINKLER_OPTIONS = ['None', 'Partial', 'Full (NFPA 13)', 'Full (NFPA 13R)
 const CEILING_TYPES = ['smooth_flat', 'sloped', 'beamed', 'open_web_joist'];
 const CEILING_TYPE_LABELS = { smooth_flat: 'Smooth Flat', sloped: 'Sloped', beamed: 'Beamed', open_web_joist: 'Open Web Joist' };
 const COMM_PATHWAYS = ['POTS', 'IP/GSM', 'Fiber'];
+const REQUIRED_INTAKE_FIELDS = ['name', 'address', 'occupancy_group', 'num_floors', 'sprinkler_status', 'total_occupant_load', 'adopted_code_edition', 'ahj_contact'];
+const FIELD_LABELS = {
+  name: 'Project name',
+  address: 'Address',
+  occupancy_group: 'Occupancy group',
+  num_floors: 'Number of floors',
+  sprinkler_status: 'Sprinkler status',
+  total_occupant_load: 'Total occupant load',
+  adopted_code_edition: 'Adopted code edition',
+  ahj_contact: 'AHJ / code official contact',
+};
 
 const defaultFloor = (n) => ({ floor: n, load: 0, sqft: 0, image_url: '' });
+
+function hasRequiredValue(value) {
+  if (value == null) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+  return true;
+}
+
+function missingRequiredFields(form, extractedFieldKeys = [], forceExtractionCoverage = false) {
+  return REQUIRED_INTAKE_FIELDS.filter((field) => {
+    if (!hasRequiredValue(form[field])) return true;
+    return forceExtractionCoverage && !extractedFieldKeys.includes(field);
+  });
+}
 
 export default function ProjectSetup() {
   const { id } = useParams();
@@ -57,11 +82,16 @@ export default function ProjectSetup() {
     occupant_load_per_floor: [defaultFloor(1)],
     gross_sqft_per_floor: [defaultFloor(1)],
     floor_plans: [{ floor_number: 1, image_url: '' }],
+    plan_sheets: [],
   });
 
   const [analysisPreview, setAnalysisPreview] = useState(null);
   const [uploading, setUploading] = useState({});
+  const [blueprintExtractionAttempted, setBlueprintExtractionAttempted] = useState(false);
+  const [blueprintMissingFields, setBlueprintMissingFields] = useState([]);
+  const [blueprintExtractedFieldKeys, setBlueprintExtractedFieldKeys] = useState([]);
   const blueprintImportedRef = useRef(false);
+  const blueprintNeedsAssignmentRef = useRef(false);
 
   const { data: existingProjects = [], isLoading: isLoadingProject } = useQuery({
     queryKey: ['project', id],
@@ -153,8 +183,8 @@ export default function ProjectSetup() {
       } catch {
         /* ignore */
       }
-      const autodetect = isNew && blueprintImportedRef.current && isFireAlarmDiscipline(disc);
-      navigate(`/project/${projectId}/designer/${disc}${autodetect ? '?autodetect=1' : ''}`);
+      const shouldAssign = isNew && blueprintNeedsAssignmentRef.current && isFireAlarmDiscipline(disc);
+      navigate(`/project/${projectId}/designer/${disc}${shouldAssign ? '?step=assign' : ''}`);
     },
     onError: (error) => {
       toast({
@@ -171,6 +201,14 @@ export default function ProjectSetup() {
     const sqfts = Array.from({ length: count }, (_, i) => form.gross_sqft_per_floor[i] || defaultFloor(i + 1));
     const plans = Array.from({ length: count }, (_, i) => form.floor_plans[i] || { floor_number: i + 1, image_url: '' });
     setForm(f => ({ ...f, num_floors: count, occupant_load_per_floor: loads, gross_sqft_per_floor: sqfts, floor_plans: plans }));
+    setBlueprintMissingFields((fields) => fields.filter((field) => field !== 'num_floors'));
+  };
+
+  const setField = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    if (hasRequiredValue(value)) {
+      setBlueprintMissingFields((fields) => fields.filter((candidate) => candidate !== field));
+    }
   };
 
   const handleUpload = async (floorIndex, file) => {
@@ -194,11 +232,15 @@ export default function ProjectSetup() {
     }
   };
 
-  const handleBlueprintExtracted = ({ fields = {}, fileUrl, fileType }) => {
+  const handleBlueprintExtracted = ({ fields = {}, fileUrl, fileType, fileName, planSheets = [] }) => {
     blueprintImportedRef.current = true;
+    setBlueprintExtractionAttempted(true);
+    const isImg = (fileType || '').startsWith('image/');
+    blueprintNeedsAssignmentRef.current = !isImg && (planSheets || []).length > 0;
+    const extractedKeys = Object.keys(fields || {});
+    setBlueprintExtractedFieldKeys(extractedKeys);
     setForm((prev) => {
       const next = { ...prev, ...fields };
-      const isImg = (fileType || '').startsWith('image/');
       const primaryPlan = {
         ...(prev.floor_plans?.[0] || {}),
         floor_number: 1,
@@ -213,10 +255,15 @@ export default function ProjectSetup() {
       next.num_floors = count;
       next.occupant_load_per_floor = Array.from({ length: count }, (_, i) => prev.occupant_load_per_floor[i] || defaultFloor(i + 1));
       next.gross_sqft_per_floor = Array.from({ length: count }, (_, i) => prev.gross_sqft_per_floor[i] || defaultFloor(i + 1));
-      next.floor_plans = Array.from({ length: count }, (_, i) => (i === 0 ? primaryPlan : (prev.floor_plans[i] || { floor_number: i + 1, image_url: '' })));
+      next.floor_plans = Array.from({ length: count }, (_, i) => {
+        if (i === 0 && isImg) return primaryPlan;
+        return prev.floor_plans[i] || { floor_number: i + 1, image_url: '' };
+      });
+      next.plan_sheets = planSheets || [];
+      setBlueprintMissingFields(missingRequiredFields(next, extractedKeys, true));
       return next;
     });
-    toast({ title: 'Blueprint read', description: 'Project details auto-filled from the plan. Review before saving.' });
+    toast({ title: 'Blueprint read', description: 'Project details auto-filled from the plan. Review flagged fields before saving.' });
   };
 
   const runAnalysisPreview = () => {
@@ -230,11 +277,25 @@ export default function ProjectSetup() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (requiredMissing.length > 0) {
+      toast({
+        title: 'Required project info missing',
+        description: `Fill: ${requiredMissing.map((field) => FIELD_LABELS[field] || field).join(', ')}`,
+        variant: 'destructive',
+      });
+      return;
+    }
     saveMutation.mutate(form);
   };
 
   const f = form;
   const isFire = isFireAlarmDiscipline(f.primary_discipline);
+  const requiredMissing = isFire
+    ? Array.from(new Set([...missingRequiredFields(f), ...blueprintMissingFields]))
+    : [];
+  const isMissing = (field) => requiredMissing.includes(field);
+  const missingInputClass = (field, base = 'bg-white border-slate-200') =>
+    `${base} ${isMissing(field) ? 'border-red-300 ring-2 ring-red-200 bg-red-50/40' : ''}`;
   const liveCodeAnalysis = isFire ? determineSystemRequirements(f) : null;
   const chNum = Number(f.default_ceiling_height);
   const ceilingInvalid = !Number.isFinite(chNum) || chNum <= 0;
@@ -290,15 +351,38 @@ export default function ProjectSetup() {
             {/* Upload-first: auto-fill intake from a blueprint */}
             {isNew && <BlueprintIntakeUpload onExtracted={handleBlueprintExtracted} />}
 
+            {isFire && requiredMissing.length > 0 && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 shadow-sm">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+                  <div>
+                    <p className="font-semibold">Required project information is missing or needs confirmation.</p>
+                    <p className="text-xs mt-1 leading-snug">
+                      {blueprintExtractionAttempted
+                        ? `AI found ${blueprintExtractedFieldKeys.length} project field${blueprintExtractedFieldKeys.length === 1 ? '' : 's'} from the blueprint. Fill or confirm these before saving and moving to page assignment:`
+                        : 'Fill these required design/code fields before saving and moving to the designer:'}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {requiredMissing.map((field) => (
+                        <span key={field} className="rounded-full border border-red-200 bg-white px-2 py-0.5 text-[11px] font-medium text-red-700">
+                          {FIELD_LABELS[field] || field}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Project Info */}
             <Section title="Project Information">
               {isFire && <ComplianceNotice />}
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Project Name" required>
-                  <Input value={f.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Oak Creek Office Building" className="bg-white border-slate-200" required />
+                <Field label="Project Name" required missing={isMissing('name')}>
+                  <Input value={f.name} onChange={e => setField('name', e.target.value)} placeholder="e.g., Oak Creek Office Building" className={missingInputClass('name')} required />
                 </Field>
-                <Field label="Address">
-                  <Input value={f.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} placeholder="123 Main St, City, State" className="bg-white border-slate-200" />
+                <Field label="Address" required missing={isMissing('address')}>
+                  <Input value={f.address} onChange={e => setField('address', e.target.value)} placeholder="123 Main St, City, State" className={missingInputClass('address')} />
                 </Field>
                 <Field label="Primary discipline" required>
                   <Select
@@ -322,11 +406,11 @@ export default function ProjectSetup() {
                 </Field>
                 {isFire ? (
                   <>
-                    <Field label="AHJ / code official contact">
-                      <Input value={f.ahj_contact} onChange={e => setForm(p => ({ ...p, ahj_contact: e.target.value }))} className="bg-white border-slate-200" />
+                    <Field label="AHJ / code official contact" required missing={isMissing('ahj_contact')}>
+                      <Input value={f.ahj_contact} onChange={e => setField('ahj_contact', e.target.value)} className={missingInputClass('ahj_contact')} />
                     </Field>
-                    <Field label="Adopted code edition (IBC / NFPA)">
-                      <Input value={f.adopted_code_edition} onChange={e => setForm(p => ({ ...p, adopted_code_edition: e.target.value }))} className="bg-white border-slate-200" />
+                    <Field label="Adopted code edition (IBC / NFPA)" required missing={isMissing('adopted_code_edition')}>
+                      <Input value={f.adopted_code_edition} onChange={e => setField('adopted_code_edition', e.target.value)} className={missingInputClass('adopted_code_edition')} />
                     </Field>
                   </>
                 ) : (
@@ -356,19 +440,19 @@ export default function ProjectSetup() {
                 IBC / NFPA inputs drive code analysis and detector spacing — only for fire alarm projects.
               </p>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Occupancy Group" required>
+                <Field label="Occupancy Group" required missing={isMissing('occupancy_group')}>
                   <Select
                     value={f.occupancy_group || undefined}
-                    onValueChange={(v) => setForm((p) => ({ ...p, occupancy_group: v }))}
+                    onValueChange={(v) => setField('occupancy_group', v)}
                   >
-                    <SelectTrigger className="bg-white border-slate-200"><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectTrigger className={missingInputClass('occupancy_group')}><SelectValue placeholder="Select..." /></SelectTrigger>
                     <SelectContent>
                       {OCCUPANCY_GROUPS.map(g => <SelectItem key={g} value={g}>Group {g}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="Number of Floors" required>
-                  <Input type="number" min={1} max={50} value={f.num_floors} onChange={e => setFloorCount(e.target.value)} className="bg-white border-slate-200" />
+                <Field label="Number of Floors" required missing={isMissing('num_floors')}>
+                  <Input type="number" min={1} max={50} value={f.num_floors} onChange={e => setFloorCount(e.target.value)} className={missingInputClass('num_floors')} />
                 </Field>
                 <Field label="Level of exit discharge (floor #)">
                   <Input
@@ -381,15 +465,15 @@ export default function ProjectSetup() {
                   />
                   <p className="text-[11px] text-slate-500 mt-1">Used with per-floor OL for IBC §907.2.7 “{'>'}100 above/below discharge” (Group M, B).</p>
                 </Field>
-                <Field label="Total Occupant Load">
-                  <Input type="number" min={0} value={f.total_occupant_load} onChange={e => setForm(p => ({ ...p, total_occupant_load: +e.target.value }))} className="bg-white border-slate-200" />
+                <Field label="Total Occupant Load" required missing={isMissing('total_occupant_load')}>
+                  <Input type="number" min={0} value={f.total_occupant_load} onChange={e => setField('total_occupant_load', +e.target.value)} className={missingInputClass('total_occupant_load')} />
                 </Field>
                 <Field label="Total Sleeping Units (if applicable)">
                   <Input type="number" min={0} value={f.total_sleeping_units} onChange={e => setForm(p => ({ ...p, total_sleeping_units: +e.target.value }))} className="bg-white border-slate-200" />
                 </Field>
-                <Field label="Sprinkler Status" required>
-                  <Select value={f.sprinkler_status} onValueChange={v => setForm(p => ({ ...p, sprinkler_status: v }))}>
-                    <SelectTrigger className="bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                <Field label="Sprinkler Status" required missing={isMissing('sprinkler_status')}>
+                  <Select value={f.sprinkler_status} onValueChange={v => setField('sprinkler_status', v)}>
+                    <SelectTrigger className={missingInputClass('sprinkler_status')}><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {SPRINKLER_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                     </SelectContent>
@@ -580,10 +664,14 @@ export default function ProjectSetup() {
               )}
               <Button
                 type="submit"
-                disabled={saveMutation.isPending || !f.name || (isFire && !f.occupancy_group)}
+                disabled={saveMutation.isPending || requiredMissing.length > 0}
                 className="bg-red-600 hover:bg-red-700 text-white gap-2 flex-1"
               >
-                {saveMutation.isPending ? 'Saving...' : 'Save & Open Designer'}
+                {saveMutation.isPending
+                  ? 'Saving...'
+                  : requiredMissing.length > 0
+                    ? `Fill ${requiredMissing.length} required field${requiredMissing.length === 1 ? '' : 's'}`
+                    : 'Save & Open Designer'}
                 <ChevronRight className="w-4 h-4" />
               </Button>
             </div>
@@ -669,11 +757,14 @@ function ComplianceNotice() {
   );
 }
 
-function Field({ label, required, hint, children }) {
+function Field({ label, required, hint, missing, children }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs text-slate-600">{label}{required && <span className="text-red-600 ml-0.5">*</span>}</Label>
+      <Label className={`text-xs ${missing ? 'text-red-700' : 'text-slate-600'}`}>
+        {label}{required && <span className="text-red-600 ml-0.5">*</span>}
+      </Label>
       {children}
+      {missing && <p className="text-[11px] text-red-600 mt-1">Required for design and code compliance. Enter or confirm before saving.</p>}
       {hint && <p className="text-[11px] text-slate-500 mt-1">{hint}</p>}
     </div>
   );
