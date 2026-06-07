@@ -18,22 +18,36 @@ import {
 } from '@/lib/codeEngine';
 import { dataUrlImageFormat } from '@/lib/submittalBranding';
 import { pickFloorPlanForPdfExport, loadPlanUrlAsPngDataUrl } from '@/lib/planImageExport';
-import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
-import { renderCadComposite } from '@/lib/cadRenderer';
-import { renderRiserToDataUrl } from '@/lib/riserSvgRenderer';
+import { renderPdfPageToDataUrl, renderPdfPagesToDataUrls } from '@/lib/documentEngine';
+import { getFloorScale } from '@/lib/designScale';
+import { getTemplate, requiredPlaceholder } from '@/lib/submittalTemplates';
+import {
+  drawVectorFloorPlan,
+  buildFaintUnderlay,
+  computeFloorContentBounds,
+} from '@/lib/vectorFloorPlan';
+import { extractPlanVectorPaths } from '@/lib/pdfVectorExtract';
+import { loadSubmittalLogoWithMetrics } from '@/lib/submittalBranding';
+import {
+  drawDeviceScheduleSheet,
+  drawCalcsSheet,
+  drawComplianceAuditSheet,
+  drawBasisOfDesignSheet,
+  drawZoneScheduleSheet,
+} from '@/lib/submittalSheets';
 
 // ─── Sheet dimensions (mm) ───────────────────────────────────────────────────
 const SHEET_W = 914.4;  // 36"
 const SHEET_H = 609.6;  // 24"
 
-// No separate right title block column — the title block is overlaid directly on the plan image.
-// Drawing area fills the full sheet minus the outer border margin.
-const TB_W = 0;
-const TB_X = SHEET_W;
+// Right title-block column width
+const TB_W = 72;
+const TB_X = SHEET_W - TB_W;
 
+// Drawing area (left of title block)
 const DRAW_X = 8;
 const DRAW_Y = 8;
-const DRAW_W = SHEET_W - DRAW_X - 8;
+const DRAW_W = TB_X - DRAW_X - 4;
 const DRAW_H = SHEET_H - 16;
 
 // Colors
@@ -234,30 +248,167 @@ function drawLegendSymbol(doc, row, x, y, w, h) {
   doc.setLineDashPattern([], 0);
 }
 
-/**
- * drawTitleBlock — intentionally no-op.
- * The title block is now overlaid directly onto the floor plan canvas image
- * at the detected architect's title block location (see cadRenderer.js).
- * This function is kept to avoid changing call sites.
- */
-// eslint-disable-next-line no-unused-vars
-function drawTitleBlock(_doc, _project, _meta, _logoDataUrl, _sheetNo, _sheetTitle, _sheetScale) {
-  // No-op: title block is now overlaid directly onto the floor plan canvas
-  // image at the detected architect's title block location (see cadRenderer.js).
+/** Draw the right-side title block (vertical band). */
+function drawTitleBlock(doc, project, meta, logoDataUrl, sheetNo, sheetTitle, sheetScale = 'NTS') {
+  const x = TB_X;
+  const y = 0;
+  const w = TB_W;
+  const h = SHEET_H;
+
+  // Background
+  doc.setFillColor(250, 251, 252);
+  doc.rect(x, y, w, h, 'F');
+  doc.setDrawColor(...C_DARK);
+  doc.setLineWidth(0.6);
+  doc.line(x, y, x, h);        // left border
+  doc.setLineWidth(0.4);
+  doc.line(x, y + 0.3, x + w, y + 0.3);   // top
+  doc.line(x, h - 0.3, x + w, h - 0.3);   // bottom
+  doc.line(x + w - 0.3, y, x + w - 0.3, h); // right
+
+  let ty = y + 6;
+
+  // Logo area
+  const logoH = 22;
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(...C_LGRAY);
+  doc.setLineWidth(0.2);
+  doc.rect(x + 2, ty, w - 4, logoH, 'FD');
+  if (logoDataUrl) {
+    try {
+      const aspect = 2;
+      const { lw, lh } = { lw: Math.min(w - 8, logoH * aspect), lh: logoH - 4 };
+      const fx = x + 2 + (w - 4 - lw) / 2;
+      doc.addImage(logoDataUrl, dataUrlImageFormat(logoDataUrl), fx, ty + 2, lw, lh);
+    } catch { /* fallback */ }
+  } else {
+    setFont(doc, 7, 'bold', C_GOLD);
+    doc.text(meta?.company_name || 'COMPANY NAME', x + w / 2, ty + logoH / 2 + 1, { align: 'center' });
+    setFont(doc, 5, 'normal', C_GRAY);
+    doc.text('Upload logo in submittal dialog', x + w / 2, ty + logoH / 2 + 5, { align: 'center' });
+  }
+  ty += logoH + 2;
+
+  // Divider + company info
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty);
+  ty += 3;
+  const companyName = meta?.company_name?.trim() || requiredPlaceholder('company_name');
+  setFont(doc, 5.5, 'bold', meta?.company_name?.trim() ? C_DARK : C_RED);
+  doc.text(companyName, x + w / 2, ty, { align: 'center' }); ty += 4;
+  setFont(doc, 5, 'normal', C_GRAY);
+  if (meta?.company_address) { doc.text(meta.company_address, x + w / 2, ty, { align: 'center' }); ty += 3.5; }
+  if (meta?.company_phone)   { doc.text(meta.company_phone,   x + w / 2, ty, { align: 'center' }); ty += 3.5; }
+  const licText = meta?.company_license?.trim() ? `Lic: ${meta.company_license}` : requiredPlaceholder('company_license');
+  setFont(doc, 5, meta?.company_license?.trim() ? 'normal' : 'bold', meta?.company_license?.trim() ? C_GRAY : C_RED);
+  doc.text(licText, x + w / 2, ty, { align: 'center' }); ty += 3.5;
+  ty += 2;
+
+  // Project info block
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
+  const infoRows = [
+    ['PROJECT', project?.name?.trim() || requiredPlaceholder('project_name')],
+    ['OWNER',   project?.owner_name || '—'],
+    ['ADDRESS', project?.address?.trim() || requiredPlaceholder('project_address')],
+    ['AHJ',     project?.ahj_contact || '—'],
+    ['OCC. GRP',`Group ${project?.occupancy_group || '—'}`],
+    ['FLOORS',  String(project?.num_floors || '—')],
+    ['SPRINKLER', project?.sprinkler_status || 'None'],
+  ];
+  infoRows.forEach(([label, value]) => {
+    setFont(doc, 5, 'bold', C_GRAY);
+    doc.text(label, x + 3, ty + 3);
+    setFont(doc, 5, 'normal', C_DARK);
+    const val = doc.splitTextToSize(value, w - 22);
+    doc.text(val[0] || '', x + 20, ty + 3);
+    ty += 4.5;
+  });
+  ty += 1;
+
+  // Revision block
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
+  setFont(doc, 5.5, 'bold', C_DARK);
+  doc.text('REVISIONS', x + w / 2, ty + 3, { align: 'center' }); ty += 5;
+  // Header
+  doc.setFillColor(230, 235, 242);
+  doc.rect(x + 2, ty - 1, w - 4, 5, 'F');
+  setFont(doc, 4.5, 'bold', C_DARK);
+  doc.text('NO', x + 4, ty + 2.5);
+  doc.text('DATE', x + 11, ty + 2.5);
+  doc.text('BY', x + 30, ty + 2.5);
+  doc.text('DESCRIPTION', x + 40, ty + 2.5);
+  ty += 5;
+  const revs = meta?.revisions || [];
+  for (let i = 0; i < 5; i++) {
+    const r = revs[i] || {};
+    doc.setFillColor(i % 2 === 0 ? 248 : 243, 248, 252);
+    doc.rect(x + 2, ty - 1, w - 4, 5, 'F');
+    setFont(doc, 4.5, 'normal', C_DARK);
+    doc.text(r.no || String(i + 1), x + 4, ty + 2.5);
+    doc.text(r.date || '', x + 11, ty + 2.5);
+    doc.text(r.by || '', x + 30, ty + 2.5);
+    const desc = (r.text || '').slice(0, 14);
+    doc.text(desc, x + 40, ty + 2.5);
+    ty += 5;
+  }
+  ty += 2;
+
+  // Stamp box
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
+  setFont(doc, 5.5, 'bold', C_DARK);
+  doc.text('ENGINEER / DESIGNER STAMP', x + w / 2, ty + 3, { align: 'center' }); ty += 5;
+  doc.setDrawColor(...C_RED); doc.setLineWidth(0.3);
+  doc.rect(x + 4, ty, w - 8, 28, 'S');
+  setFont(doc, 5, 'normal', C_GRAY);
+  doc.text('Stamp / Seal', x + w / 2, ty + 10, { align: 'center' });
+  doc.text('(NICET / EOR / AHJ)', x + w / 2, ty + 15, { align: 'center' });
+  if (meta?.designer_name)  { setFont(doc, 5, 'bold', C_DARK); doc.text(meta.designer_name, x + w / 2, ty + 21, { align: 'center' }); }
+  if (meta?.designer_nicet) { setFont(doc, 4.5, 'normal', C_GRAY); doc.text(`NICET ${meta.designer_nicet}`, x + w / 2, ty + 25, { align: 'center' }); }
+  ty += 30;
+
+  // Bottom title panel
+  const bottomH = SHEET_H - ty - 4;
+  const bottomY = ty;
+  doc.setFillColor(15, 23, 42);
+  doc.rect(x + 2, bottomY, w - 4, bottomH, 'F');
+  setFont(doc, 5, 'normal', [150, 160, 180]);
+  doc.text('PROJECT TITLE', x + w / 2, bottomY + 5, { align: 'center' });
+  setFont(doc, 6.5, 'bold', [255, 255, 255]);
+  const titleLines = doc.splitTextToSize((project?.name || '').toUpperCase(), w - 10);
+  titleLines.slice(0, 2).forEach((ln, i) => doc.text(ln, x + w / 2, bottomY + 10 + i * 5, { align: 'center' }));
+  const subtitleY = bottomY + 10 + Math.min(titleLines.length, 2) * 5 + 2;
+  setFont(doc, 5, 'normal', [150, 160, 180]);
+  if (project?.address) { doc.text(project.address.slice(0, 30), x + w / 2, subtitleY, { align: 'center' }); }
+
+  // Sheet number / title at very bottom
+  const snY = SHEET_H - 18;
+  doc.setFillColor(37, 99, 235);
+  doc.rect(x + 2, snY, w - 4, 14, 'F');
+  setFont(doc, 5.5, 'bold', C_WHITE);
+  doc.text(sheetTitle.toUpperCase(), x + w / 2, snY + 5, { align: 'center' });
+  setFont(doc, 5, 'normal', [180, 200, 240]);
+  doc.text(`SHEET SCALE: ${sheetScale}`, x + w / 2, snY + 9, { align: 'center' });
+  setFont(doc, 12, 'bold', C_WHITE);
+  doc.text(sheetNo, x + w / 2, snY + 13.5, { align: 'center' });
+
+  // Draw border around full drawing area
+  doc.setDrawColor(...C_DARK);
+  doc.setLineWidth(0.6);
+  doc.rect(DRAW_X, DRAW_Y, DRAW_W, DRAW_H, 'S');
 }
 
-/** Border / outer frame of the sheet — pure black hairline, CAD engineering style */
+/** Border / outer frame of the sheet */
 function drawSheetBorder(doc, meta) {
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.7);
+  doc.setDrawColor(...C_DARK);
+  doc.setLineWidth(1.0);
   doc.rect(4, 4, SHEET_W - 8, SHEET_H - 8, 'S');
-  doc.setLineWidth(0.2);
+  doc.setLineWidth(0.3);
   doc.rect(6, 6, SHEET_W - 12, SHEET_H - 12, 'S');
-  // Date / project number — bottom strip, small black text
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.5); doc.setTextColor(0, 0, 0);
-  doc.text(`DATE: ${meta?.submittal_date || new Date().toLocaleDateString()}`, 10, SHEET_H - 3);
-  if (meta?.project_number) doc.text(`PROJECT NO: ${meta.project_number}`, 70, SHEET_H - 3);
-  doc.text('100% BID SET', SHEET_W / 2, SHEET_H - 3, { align: 'center' });
+  // Date bottom-left
+  setFont(doc, 5, 'normal', C_GRAY);
+  doc.text(`DATE: ${meta?.submittal_date || new Date().toLocaleDateString()}`, 10, SHEET_H - 4);
+  if (meta?.project_number) doc.text(`PROJECT NO: ${meta.project_number}`, 70, SHEET_H - 4);
+  setFont(doc, 5, 'normal', C_GRAY);
+  doc.text('100% BID SET', SHEET_W / 2, SHEET_H - 4, { align: 'center' });
 }
 
 // ─── FA-0.01: Legend / Abbreviations / General Notes / Drawing Index ─────────
@@ -359,23 +510,17 @@ const GENERAL_NOTES_SOW = [
   'Fire alarm contractor shall verify type and class of all fire alarm equipment (existing and new). Verify all wiring, terminations, relay connection cards and installation points to fire alarm systems, all fire alarm systems, all devices shall all be tested to final acceptance per NFPA 72.',
 ];
 
-export async function generateLegendSheet(doc, project, devices, meta, logoDataUrl) {
-  // Use user-edited general notes from meta when available
-  const customNotes = (meta?.general_notes || '').trim();
-  const notesArray = customNotes
-    ? customNotes.split('\n').filter(Boolean).map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean)
-    : GENERAL_NOTES_FA0;
-
-  const customSeq = (meta?.sequence_of_ops || '').trim();
-  const seqArray = customSeq
-    ? customSeq.split('\n').filter(Boolean).slice(0, 8)
-    : GENERAL_NOTES_SOW;
-
+export async function generateLegendSheet(doc, project, devices, meta, logoDataUrl, template) {
   const W = DRAW_W;
   const baseX = DRAW_X + 2;
+  const tpl = getTemplate(template?.id || template);
+  const legendNo = tpl.sheetNumbers.legend || tpl.sheetNumbers.cover || 'FA0.01';
+  const legendTitle = tpl.id === 'fsm_csc'
+    ? 'FIRE SPRINKLER MONITORING — COVER & LEGEND'
+    : 'FIRE ALARM LEGEND AND GENERAL REQUIREMENTS';
 
   drawSheetBorder(doc, meta);
-  drawTitleBlock(doc, project, meta, logoDataUrl, 'FA0.01', 'FIRE ALARM LEGEND AND GENERAL REQUIREMENTS');
+  drawTitleBlock(doc, project, meta, logoDataUrl, legendNo, legendTitle);
 
   // ── Three-column layout: Legend | Abbreviations | General Notes ──────────
   const colW1 = W * 0.27;
@@ -477,7 +622,7 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
   doc.text('GENERAL NOTES', col3X + colW3 / 2, gy + 5, { align: 'center' });
   gy += headerH + 1;
 
-  notesArray.forEach((note, i) => {
+  GENERAL_NOTES_FA0.forEach((note, i) => {
     if (gy > DRAW_Y + DRAW_H - 24) return;
     const numStr = String(i + 1) + '.';
     const lines = doc.splitTextToSize(note, colW3 - 12);
@@ -496,7 +641,7 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
   doc.setFillColor(255, 251, 235); doc.rect(col3X, gy - 1, colW3, 6, 'F');
   setFont(doc, 6.5, 'bold', [146, 64, 14]);
   doc.text('GENERAL SEQUENCE NOTES', col3X + 2, gy + 4); gy += 7;
-  seqArray.slice(0, 6).forEach((note, i) => {
+  GENERAL_NOTES_SOW.slice(0, 6).forEach((note, i) => {
     if (gy > DRAW_Y + DRAW_H - 10) return;
     const lines = doc.splitTextToSize(`${i + 1}. ${note}`, colW3 - 8);
     setFont(doc, 5, 'normal', C_DARK);
@@ -531,82 +676,157 @@ export async function generateLegendSheet(doc, project, devices, meta, logoDataU
 
 // ─── FA-5.01: Floor Plan Sheet ───────────────────────────────────────────────
 
-export async function generateFloorPlanSheet(doc, project, _rooms, _devices, _layoutZones, floorImg, floorImgW, floorImgH, activeFloor, meta, _logoDataUrl, _markups) {
-  drawSheetBorder(doc, meta);
-  // Note: title block is already baked into floorImg by cadRenderer.js (in-place overlay)
+export async function generateFloorPlanSheet(doc, opts) {
+  const {
+    project, rooms = [], devices = [], wires = [], markups = [],
+    pxPerFt = 10, scaleReliable = true, contentBounds, underlay, vectorBackground,
+    activeFloor, meta, logoDataUrl, template,
+  } = opts;
 
+  const tpl = getTemplate(template?.id || template);
+  const floorLabel = activeFloor === 1 ? '1ST' : activeFloor === 2 ? '2ND' : `${activeFloor}TH`;
+  const sheetNo = tpl.sheetNumbers.floorPlan(activeFloor);
+  const sheetTitle = `${tpl.coverTitle} ${floorLabel} FLOOR PLAN`;
+
+  drawSheetBorder(doc, meta);
+
+  // Reserve right portion for general notes
+  const notesW = 90;
+  const planW = DRAW_W - notesW - 4;
   const planX = DRAW_X + 2;
   const planY = DRAW_Y + 2;
-  const planW = DRAW_W - 4;
   const planH = DRAW_H - 4;
 
-  if (floorImg) {
-    // Fill the full drawing area with the composited plan image (title block overlay included)
-    const iw = Math.max(1, floorImgW);
-    const ih = Math.max(1, floorImgH);
-    const scale = Math.min(planW / iw, planH / ih);
-    const dw = iw * scale;
-    const dh = ih * scale;
-    const dx = planX + (planW - dw) / 2;
-    const dy = planY + (planH - dh) / 2;
-    try { doc.addImage(floorImg, dataUrlImageFormat(floorImg), dx, dy, dw, dh); } catch { /* fallback */ }
+  // Plan area border
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.25);
+  doc.rect(planX, planY, planW, planH, 'S');
+
+  // ── Clean vector redraw of rooms / devices / wires / markups (no screenshot) ──
+  const hasVectorBg = Array.isArray(vectorBackground) && vectorBackground.length > 0;
+  const hasContent = (devices || []).some((d) => d.x != null) || (rooms || []).length > 0 || hasVectorBg;
+  let scaleText = 'AS NOTED';
+  if (hasContent || underlay) {
+    const res = drawVectorFloorPlan(
+      doc,
+      { x: planX + 1, y: planY + 1, w: planW - 2, h: planH - 2 },
+      { template: tpl, rooms, devices, wires, markups, pxPerFt, activeFloor, scaleReliable, contentBounds, underlay, vectorBackground }
+    );
+    scaleText = res.scaleText;
   } else {
-    const banner = { x: planX + planW * 0.1, y: planY + planH * 0.35, w: planW * 0.8, h: planH * 0.3 };
+    // Nothing placed and no plan: a clear, actionable placeholder.
+    const banner = { x: planX + planW * 0.1, y: planY + planH * 0.38, w: planW * 0.8, h: planH * 0.24 };
     doc.setFillColor(254, 243, 199); doc.setDrawColor(217, 119, 6); doc.setLineWidth(0.6);
     doc.rect(banner.x, banner.y, banner.w, banner.h, 'FD');
     setFont(doc, 14, 'bold', [146, 64, 14]);
-    doc.text('NO FLOOR PLAN AVAILABLE FOR THIS FLOOR', banner.x + banner.w / 2, banner.y + 14, { align: 'center' });
+    doc.text('NO PLAN CONTENT FOR THIS FLOOR', banner.x + banner.w / 2, banner.y + 14, { align: 'center' });
     setFont(doc, 9, 'normal', [120, 53, 15]);
     [
-      `Floor ${activeFloor} has no uploaded plan image.`,
-      'Upload a floor plan image or PDF in Project Setup to populate this sheet.',
-    ].forEach((line, i) => doc.text(line, banner.x + 8, banner.y + 30 + i * 7));
+      `Floor ${activeFloor} has no placed devices, rooms, or uploaded plan.`,
+      'Place devices / draw rooms on this floor, or assign a plan page, then re-generate.',
+    ].forEach((line, i) => doc.text(line, banner.x + 8, banner.y + 26 + i * 6.5));
   }
+
+  // Title block (drawn after the plan so it can carry the computed scale)
+  drawTitleBlock(doc, project, meta, logoDataUrl, sheetNo, sheetTitle, scaleText);
+
+  // Floor plan title below
+  const fpLabelY = planY + planH + 3;
+  if (fpLabelY < DRAW_Y + DRAW_H) {
+    const bubbleX = planX + planW / 2 - 50;
+    const bubbleY = fpLabelY - 3;
+    doc.setDrawColor(...C_DARK); doc.setLineWidth(0.4);
+    doc.circle(bubbleX, bubbleY, 3, 'S');
+    doc.line(bubbleX - 3, bubbleY, bubbleX + 3, bubbleY);
+    setFont(doc, 5, 'bold', C_DARK);
+    doc.text('1', bubbleX, bubbleY - 0.5, { align: 'center' });
+    doc.text('FA', bubbleX, bubbleY + 2, { align: 'center' });
+    setFont(doc, 8, 'bold', C_DARK);
+    doc.text(`${tpl.coverTitle} ${floorLabel} FLOOR PLAN`, planX + planW / 2 + 6, fpLabelY, { align: 'left' });
+    setFont(doc, 6, 'normal', C_GRAY);
+    doc.text(`SCALE: ${scaleText}`, planX + planW / 2, fpLabelY + 4, { align: 'center' });
+  }
+
+  // ── Right notes panel ──
+  const nX = planX + planW + 4;
+  const nY = planY;
+  const nH = planH;
+
+  doc.setFillColor(252, 252, 253); doc.rect(nX, nY, notesW, nH, 'F');
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.rect(nX, nY, notesW, nH, 'S');
+
+  doc.setFillColor(30, 41, 59); doc.rect(nX, nY, notesW, 7, 'F');
+  setFont(doc, 7, 'bold', C_WHITE);
+  doc.text('GENERAL REQUIREMENT NOTES', nX + notesW / 2, nY + 5, { align: 'center' });
+  let ny = nY + 9;
+  GENERAL_NOTES_FA0.slice(0, 8).forEach((note, i) => {
+    if (ny > nY + nH - 40) return;
+    const lines = doc.splitTextToSize(`${i + 1}. ${note}`, notesW - 6);
+    setFont(doc, 5, i < 3 ? 'bold' : 'normal', C_DARK);
+    lines.slice(0, 4).forEach((ln, li) => { doc.text(ln, nX + 3, ny + li * 3.5); });
+    ny += Math.min(lines.length, 4) * 3.5 + 2;
+  });
+
+  // Plan notes
+  ny += 2;
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.15); doc.line(nX + 2, ny, nX + notesW - 2, ny); ny += 3;
+  doc.setFillColor(255, 251, 235); doc.rect(nX + 2, ny - 1, notesW - 4, 6, 'F');
+  setFont(doc, 6, 'bold', [146, 64, 14]);
+  doc.text('PLAN NOTES', nX + 3, ny + 4); ny += 8;
+
+  const planNotes = [
+    'Provide fire alarm monitor devices on plate as required by code for the sprinkler riser. Connect to nearest existing fire alarm device.',
+    'Refer to typical for all dwelling units layout floor plan sheets.',
+    'Replace existing fire alarm device with same or different type of device as shown.',
+    'Provide elevator controller, relays and monitor modules as required per AHJ codes.',
+    'Provide cluster/general cabinet above existing fire alarm panel to do cut over from existing panel and NAC panels on floor.',
+  ];
+  planNotes.forEach((note, i) => {
+    if (ny > nY + nH - 30) return;
+    const lines = doc.splitTextToSize(`${(i + 1).toString().padStart(3, '0')}  ${note}`, notesW - 8);
+    setFont(doc, 5.5, 'normal', C_DARK);
+    lines.slice(0, 3).forEach((ln, li) => { doc.text(ln, nX + 3, ny + li * 3.8); });
+    ny += Math.min(lines.length, 3) * 3.8 + 3;
+  });
 }
 
 // ─── FA-5.10: System One-Line Riser + FACP I/O Matrix + Sequence ─────────────
 
-export async function generateRiserSheet(doc, project, devices, _analysisResults, meta, logoDataUrl) {
+export async function generateRiserSheet(doc, project, devices, _analysisResults, meta, logoDataUrl, template) {
+  const tpl = getTemplate(template?.id || template);
+  const riserNo = tpl.sheetNumbers.riser || tpl.sheetNumbers.calcs || 'FA5.10';
+  const riserTitle = tpl.id === 'fsm_csc'
+    ? 'CALCULATIONS · ONE-LINE · DETAILS'
+    : 'FIRE ALARM DIAGRAMS PLAN';
+
   drawSheetBorder(doc, meta);
-  drawTitleBlock(doc, project, meta, logoDataUrl, 'FA5.10', 'FIRE ALARM DIAGRAMS PLAN');
+  drawTitleBlock(doc, project, meta, logoDataUrl, riserNo, riserTitle);
 
   const baseX = DRAW_X + 2;
   const baseY = DRAW_Y + 2;
   const W = DRAW_W - 4;
   const H = DRAW_H - 4;
 
-  // ── TOP: Full-width proper riser diagram (canvas-rendered, matches the Riser tab) ──
-  const riserH = H * 0.62;
-  try {
-    const { dataUrl, width, height } = renderRiserToDataUrl(project, devices);
-    const scale = Math.min((W - 4) / width, (riserH - 4) / height);
-    const dw = width * scale;
-    const dh = height * scale;
-    const dx = baseX + (W - dw) / 2;
-    const dy = baseY;
-    doc.addImage(dataUrl, 'PNG', dx, dy, dw, dh);
-  } catch (err) {
-    // fallback: text placeholder
-    setFont(doc, 9, 'normal', C_GRAY);
-    doc.text('Riser diagram unavailable', baseX + W / 2, baseY + riserH / 2, { align: 'center' });
-  }
+  // Split into left (I/O matrix) and right (one-line riser)
+  const leftW = W * 0.37;
+  const rightX = baseX + leftW + 5;
+  const rightW = W - leftW - 5;
 
-  // ── BOTTOM LEFT: FACP I/O Matrix ─────────────────────────────────────────
-  const bottomY = baseY + riserH + 4;
-  const bottomH = H - riserH - 6;
-  const leftW = W * 0.5;
-  const rightX = baseX + leftW + 4;
-  const rightW = W - leftW - 4;
+  // ── LEFT: FACP I/O Matrix ─────────────────────────────────────────────────
+  drawFacpIOMatrix(doc, baseX, baseY, leftW, H * 0.55, project, devices, meta);
 
-  drawFacpIOMatrix(doc, baseX, bottomY, leftW, bottomH * 0.65, project, devices, meta);
-
-  // ── BOTTOM LEFT BELOW: Battery calc ──────────────────────────────────────
-  const battY = bottomY + bottomH * 0.65 + 3;
-  const battH = bottomH - bottomH * 0.65 - 3;
+  // ── LEFT BELOW: Battery + Code-3 notes ───────────────────────────────────
+  const battY = baseY + H * 0.55 + 4;
+  const battH = H - H * 0.55 - 6;
   drawBatteryCalcBlock(doc, baseX, battY, leftW, battH, devices, meta);
 
-  // ── BOTTOM RIGHT: General Notes ───────────────────────────────────────────
-  drawGeneralNotesSide(doc, rightX, bottomY, rightW, bottomH);
+  // ── RIGHT: System One-Line Riser ──────────────────────────────────────────
+  const riserH = H * 0.7;
+  drawOneLineRiser(doc, rightX, baseY, rightW, riserH, project, devices);
+
+  // ── RIGHT BELOW: General Requirement Notes ───────────────────────────────
+  const gnY = baseY + riserH + 4;
+  const gnH = H - riserH - 6;
+  drawGeneralNotesSide(doc, rightX, gnY, rightW, gnH);
 }
 
 function drawFacpIOMatrix(doc, x, y, w, _h, project, devices, _meta) {
@@ -767,8 +987,7 @@ function drawBatteryCalcBlock(doc, x, y, w, h, devices, _meta) {
   }
 }
 
-// eslint-disable-next-line no-unused-vars
-function drawOneLineRiser_UNUSED(doc, x, y, w, h, project, devices) {
+function drawOneLineRiser(doc, x, y, w, h, project, devices) {
   doc.setFillColor(15, 23, 42); doc.rect(x, y, w, 8, 'F');
   setFont(doc, 8, 'bold', C_WHITE);
   doc.text('FIRE ALARM SYSTEM ONE-LINE DIAGRAM', x + w / 2, y + 5.5, { align: 'center' });
@@ -914,86 +1133,24 @@ export async function runConstructionDrawingPdf({
   devices = [],
   rooms = [],
   wires = [],
+  markups = [],
   floorPlans = [],
   analysisResults,
-  captureRef,
-  canvasRef,
   activeFloor = 1,
   submittalMeta = {},
-  onProgress = null,
+  template,
 }) {
-  const meta    = { ...submittalMeta };
-  const pName   = project?.name || 'Fire Alarm System';
-  const numFloors = Math.max(1, project?.num_floors || 1);
-  // progress helper: total = legend(1) + floors(N) + riser(1)
-  const totalSteps = 1 + numFloors + 1;
-  let stepsDone = 0;
-  const progress = (label) => {
-    stepsDone += 1;
-    onProgress?.(stepsDone, totalSteps, label);
-  };
+  const meta = { ...submittalMeta };
+  const tpl = getTemplate(template?.id || template);
+  const pName = project?.name || 'Fire Alarm System';
 
-  /**
-   * Load a raw plan image for a floor from stored floorPlans array.
-   * Returns { dataUrl, dims } or null.
-   */
-  const loadRawPlanForFloor = async (floor) => {
-    const plan = pickFloorPlanForPdfExport(floorPlans, floor);
-    if (!plan) return null;
-    const imageUrl = (plan.image_url || '').trim();
-    const fileUrl  = (plan.file_url  || '').trim();
-    const pageNum  = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
-    const isPdf    = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl || imageUrl);
-
-    let dataUrl = null;
-    if (isPdf && (fileUrl || imageUrl)) {
-      try {
-        const rendered = await renderPdfPageToDataUrl(fileUrl || imageUrl, pageNum, 2);
-        dataUrl = rendered?.dataUrl || null;
-      } catch { /* fall through */ }
-    }
-    if (!dataUrl && imageUrl && !isPdf) dataUrl = await loadPlanUrlAsPngDataUrl(imageUrl, { maxEdge: 4096 });
-    if (!dataUrl && fileUrl  && !isPdf) dataUrl = await loadPlanUrlAsPngDataUrl(fileUrl,  { maxEdge: 4096 });
-    if (!dataUrl) return null;
-
-    const dims = await new Promise(resolve => {
-      const img = new Image();
-      img.onload  = () => resolve({ width: img.naturalWidth || 4, height: img.naturalHeight || 3 });
-      img.onerror = () => resolve({ width: 4, height: 3 });
-      img.src = dataUrl;
-    });
-    return { dataUrl, dims };
-  };
-
-  /**
-   * Apply CAD composite: white bg + monochrome threshold + title block overlay +
-   * vector device symbols + wires. The title block is detected on the uploaded plan
-   * and replaced in-place with the project's CAD data.
-   */
-  const applyCADComposite = async (rawDataUrl, floor, imgW, imgH) => {
-    if (!rawDataUrl) return rawDataUrl;
-    try {
-      const symbolRadius = Math.max(8, Math.round(Math.min(imgW, imgH) / 100));
-      const floorLabel = floor === 1 ? '1ST' : floor === 2 ? '2ND' : floor === 3 ? '3RD' : `${floor}TH`;
-      const cadCanvas = await renderCadComposite(rawDataUrl, {
-        devices,
-        wires,
-        floor,
-        planNaturalW: imgW,
-        planNaturalH: imgH,
-        symbolRadius,
-        threshold: 210,
-        project,
-        meta,
-        sheetNo:    `FA5.0${floor}`,
-        sheetTitle: `FIRE ALARM ${floorLabel} FLOOR PLAN`,
-      });
-      return cadCanvas.toDataURL('image/png');
-    } catch (err) {
-      console.warn('[PDF] CAD composite failed, using raw plan image:', err?.message);
-      return rawDataUrl;
-    }
-  };
+  // ── Load the ARCHITECTURAL plan raster only (NOT a canvas screenshot) ──
+  // The old pipeline screenshotted the live canvas, which baked in the uploaded
+  // sheet's original title block and produced the messy double-title-block overlay.
+  // We now load the raw uploaded plan purely as a faint underlay and redraw every
+  // device / room / wire / markup as crisp vectors on top, with a fresh title block.
+  let floorImgData = null;
+  let floorImgDims = { width: 4, height: 3 };
 
   const fetchPlanImageAsDataUrl = async (url) => {
     if (!url) return null;
@@ -1012,16 +1169,93 @@ export async function runConstructionDrawingPdf({
     }
   };
 
-  // Pre-load the active floor plan image (same source as the preview)
-  let floorImgData = null;
-  let floorImgDims = { width: 4, height: 3 };
-  const activePlan = await loadRawPlanForFloor(activeFloor);
-  if (activePlan) {
-    floorImgDims = activePlan.dims;
-    floorImgData = await applyCADComposite(activePlan.dataUrl, activeFloor, activePlan.dims.width, activePlan.dims.height);
+  let planFileUrl = '';
+  let planPageNum = 1;
+  let planIsPdf = false;
+  {
+    const plan = pickFloorPlanForPdfExport(floorPlans, activeFloor);
+    if (plan) {
+      const imageUrl = (plan.image_url || '').trim();
+      const fileUrl = (plan.file_url || '').trim();
+      const pageNum = Number(plan.page_number) > 0 ? Number(plan.page_number) : 1;
+      planFileUrl = fileUrl || imageUrl;
+      planPageNum = pageNum;
+      planIsPdf = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl);
+
+      if (imageUrl && !/\.pdf($|\?)/i.test(imageUrl)) {
+        floorImgData = await loadPlanUrlAsPngDataUrl(imageUrl);
+      }
+      if (!floorImgData && fileUrl) {
+        const looksPdf =
+          plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl);
+        if (looksPdf) {
+          try {
+            const rendered = await renderPdfPageToDataUrl(fileUrl, pageNum, 2);
+            floorImgData = rendered?.dataUrl || null;
+          } catch {
+            /* PDF render failed (CORS, corrupt file, etc.) */
+          }
+        } else {
+          floorImgData = await loadPlanUrlAsPngDataUrl(fileUrl);
+        }
+      }
+    }
   }
 
-  // Load logo: prefer hosted URL (small DB field); optional legacy data URL.
+  if (floorImgData) {
+    floorImgDims = await new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth || 4, height: img.naturalHeight || 3 });
+      img.onerror = () => resolve({ width: 4, height: 3 });
+      img.src = floorImgData;
+    });
+  }
+
+  // ── Automatic scale (from detected calibration) + content bounds + underlay ──
+  const pxPerFt = getFloorScale(floorPlans, activeFloor);
+  const planRec = (floorPlans || []).find((p) => Number(p.floor_number) === Number(activeFloor));
+  const scaleReliable = !!(
+    planRec &&
+    (planRec.px_per_ft || planRec.scale?.px_per_ft) &&
+    planRec.scale_source &&
+    planRec.scale_source !== 'default'
+  );
+
+  const imgW = floorImgDims.width;
+  const imgH = floorImgDims.height;
+  const contentBounds = computeFloorContentBounds({ devices, rooms, wires, markups, activeFloor, imgW, imgH });
+
+  // Only use the underlay when device coords plausibly live in the plan image's
+  // pixel space, so the faint architectural lines align with the vector devices.
+  // Otherwise ship a clean pure-vector plan rather than a misaligned one.
+  let underlay = null;
+  let vectorBackground = null;
+  const onFloorDevices = (devices || []).filter(
+    (d) => Number(d.floor ?? activeFloor) === Number(activeFloor) && d.x != null
+  );
+  const coordsInImage =
+    imgW > 4 && imgH > 4 && onFloorDevices.length > 0 &&
+    onFloorDevices.every(
+      (d) => d.x >= -imgW * 0.05 && d.x <= imgW * 1.05 && d.y >= -imgH * 0.05 && d.y <= imgH * 1.05
+    );
+
+  // Prefer a TRUE vector redraw: if the plan is a vector PDF, extract its linework
+  // and redraw it (screened) instead of embedding any raster. Falls back to the
+  // faint raster underlay for scanned/raster plans.
+  if (planIsPdf && planFileUrl && imgW > 4 && (coordsInImage || onFloorDevices.length === 0)) {
+    try {
+      const extracted = await extractPlanVectorPaths(planFileUrl, planPageNum, imgW);
+      if (extracted?.paths?.length) vectorBackground = extracted.paths;
+    } catch {
+      /* fall back to raster underlay */
+    }
+  }
+  if (!vectorBackground && floorImgData && contentBounds && (coordsInImage || onFloorDevices.length === 0)) {
+    underlay = await buildFaintUnderlay(floorImgData, contentBounds, imgW, imgH, { fade: 0.72 });
+  }
+
+  // Load logo: prefer hosted URL (small DB field); optional legacy data URL;
+  // otherwise fall back to the bundled GSIS brand logo (Golden State Integrated Systems).
   let logoDataUrl = null;
   if (meta?.logo_url) {
     logoDataUrl = await fetchPlanImageAsDataUrl(meta.logo_url.trim());
@@ -1029,61 +1263,121 @@ export async function runConstructionDrawingPdf({
   if (!logoDataUrl && meta?.logo_data_url && String(meta.logo_data_url).startsWith('data:')) {
     logoDataUrl = meta.logo_data_url;
   }
+  if (!logoDataUrl) {
+    try {
+      const gsis = await loadSubmittalLogoWithMetrics();
+      logoDataUrl = gsis?.dataUrl || null;
+    } catch { /* logo optional */ }
+  }
+  // Default firm identity to GSIS when not provided.
+  if (!meta.company_name) meta.company_name = 'GOLDEN STATE INTEGRATED SYSTEMS';
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [SHEET_W, SHEET_H] });
 
   // ── Sheet 1: Legend / Abbreviations / General Notes / Drawing Index ──
-  onProgress?.(0, totalSteps, 'Building legend sheet…');
-  await generateLegendSheet(doc, project, devices, meta, logoDataUrl);
-  progress('Legend sheet done');
+  await generateLegendSheet(doc, project, devices, meta, logoDataUrl, tpl);
 
-  // ── One floor-plan sheet per floor (batched to avoid OOM on large projects) ──
-  // Process floors in batches of 5 — render, add to PDF, then release canvas memory
-  const BATCH_SIZE = 5;
-  for (let batchStart = 1; batchStart <= numFloors; batchStart += BATCH_SIZE) {
-    const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, numFloors);
-
-    for (let floor = batchStart; floor <= batchEnd; floor++) {
-      onProgress?.(stepsDone, totalSteps, `Rendering floor ${floor} of ${numFloors}…`);
-
-      // Capture image for this floor
-      let thisFloorImg = null;
-      let thisFloorDims = { width: 4, height: 3 };
-
-      if (floor === activeFloor && floorImgData) {
-        // Reuse the already-composited active floor image
-        thisFloorImg  = floorImgData;
-        thisFloorDims = floorImgDims;
-      } else {
-        const rawPlan = await loadRawPlanForFloor(floor);
-        if (rawPlan) {
-          thisFloorDims = rawPlan.dims;
-          thisFloorImg  = await applyCADComposite(rawPlan.dataUrl, floor, rawPlan.dims.width, rawPlan.dims.height);
-        }
-      }
-
-      doc.addPage([SHEET_W, SHEET_H], 'landscape');
-      await generateFloorPlanSheet(
-        doc, project, rooms, devices, [],
-        thisFloorImg, thisFloorDims.width, thisFloorDims.height,
-        floor, meta, logoDataUrl, []
-      );
-
-      // Release memory — let GC collect the potentially large data URL
-      thisFloorImg = null;
-      progress(`Floor ${floor} done`);
-    }
-
-    // Yield to the event loop between batches so the browser stays responsive
-    await new Promise(r => setTimeout(r, 0));
-  }
-
-  // ── Final sheet: System One-Line Riser + FACP I/O + Battery ──
-  onProgress?.(stepsDone, totalSteps, 'Building riser/matrix sheet…');
+  // ── Sheet 2: Floor Plan (clean vector redraw + faint underlay) ──
   doc.addPage([SHEET_W, SHEET_H], 'landscape');
-  await generateRiserSheet(doc, project, devices, analysisResults, meta, logoDataUrl);
-  progress('Riser sheet done');
+  await generateFloorPlanSheet(doc, {
+    project, rooms, devices, wires, markups,
+    pxPerFt, scaleReliable, contentBounds, underlay, vectorBackground,
+    activeFloor, meta, logoDataUrl, template: tpl,
+  });
+
+  // ── Sheet 3: System One-Line Riser + FACP I/O + Battery ──
+  doc.addPage([SHEET_W, SHEET_H], 'landscape');
+  await generateRiserSheet(doc, project, devices, analysisResults, meta, logoDataUrl, tpl);
+
+  // ── Supplemental submittal sheets (NFPA 72 §7.3 package) ──
+  const sheetCtx = {
+    project, meta, logoDataUrl, devices, rooms, pxPerFt, activeFloor,
+    drawSheetBorder, drawTitleBlock,
+    layout: { DRAW_X, DRAW_Y, DRAW_W, DRAW_H },
+  };
+
+  doc.addPage([SHEET_W, SHEET_H], 'landscape');
+  drawBasisOfDesignSheet(doc, { ...sheetCtx, sheetNo: 'FA0.02' });
+
+  doc.addPage([SHEET_W, SHEET_H], 'landscape');
+  drawDeviceScheduleSheet(doc, { ...sheetCtx, sheetNo: 'FA6.01' });
+
+  doc.addPage([SHEET_W, SHEET_H], 'landscape');
+  drawZoneScheduleSheet(doc, { ...sheetCtx, sheetNo: 'FA6.02' });
+
+  doc.addPage([SHEET_W, SHEET_H], 'landscape');
+  drawCalcsSheet(doc, { ...sheetCtx, sheetNo: 'FA6.03' });
+
+  doc.addPage([SHEET_W, SHEET_H], 'landscape');
+  drawComplianceAuditSheet(doc, { ...sheetCtx, sheetNo: 'FA6.04' });
+
+  // ── Cut-sheet appendix: uploaded manufacturer datasheets (letter pages) ──
+  const cutSheets = Array.isArray(meta.cut_sheets) ? meta.cut_sheets : [];
+  if (cutSheets.length) {
+    await appendCutSheets(doc, cutSheets);
+  }
 
   const fileName = `${(pName).replace(/\s+/g, '_')}_Construction_Drawings.pdf`;
   doc.save(fileName);
+}
+
+/**
+ * Append uploaded manufacturer cut sheets (PDF or image) as letter-size pages
+ * behind the drawing set. PDFs are rendered page-by-page via pdf.js; images are
+ * embedded directly. Each page gets a header band identifying the device.
+ * @param {import('jspdf').jsPDF} doc
+ * @param {Array<{name?:string,url?:string,file_url?:string,image_url?:string,file_type?:string}>} cutSheets
+ */
+async function appendCutSheets(doc, cutSheets) {
+  const PW = 215.9;   // letter width mm
+  const PH = 279.4;   // letter height mm
+  const margin = 10;
+  const headerH = 10;
+
+  const imgDims = (dataUrl) => new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => resolve({ w: im.naturalWidth || 850, h: im.naturalHeight || 1100 });
+    im.onerror = () => resolve({ w: 850, h: 1100 });
+    im.src = dataUrl;
+  });
+
+  for (const cs of cutSheets) {
+    const url = String(cs.url || cs.file_url || cs.image_url || '').trim();
+    if (!url) continue;
+    const name = cs.name || 'Cut Sheet';
+    const isPdf = cs.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(url);
+
+    let pages = [];
+    if (isPdf) {
+      try {
+        const r = await renderPdfPagesToDataUrls(url, 2);
+        pages = (r.pages || []).map((p) => ({ dataUrl: p.dataUrl, w: p.width, h: p.height }));
+      } catch { pages = []; }
+    } else {
+      const d = await loadPlanUrlAsPngDataUrl(url);
+      if (d) { const dim = await imgDims(d); pages = [{ dataUrl: d, w: dim.w, h: dim.h }]; }
+    }
+    if (!pages.length) continue;
+
+    pages.forEach((pg, i) => {
+      doc.addPage([PW, PH], 'portrait');
+      doc.setFillColor(30, 41, 59);
+      doc.rect(0, 0, PW, headerH, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(255, 255, 255);
+      const label = `CUT SHEET — ${String(name).slice(0, 64)}${pages.length > 1 ? `  (p.${i + 1}/${pages.length})` : ''}`;
+      doc.text(label, margin, 6.8);
+      const availW = PW - margin * 2;
+      const availH = PH - headerH - margin * 1.5;
+      const iw = pg.w || 1;
+      const ih = pg.h || 1;
+      const sc = Math.min(availW / iw, availH / ih);
+      const dw = iw * sc;
+      const dh = ih * sc;
+      try {
+        doc.addImage(pg.dataUrl, dataUrlImageFormat(pg.dataUrl), (PW - dw) / 2, headerH + 5, dw, dh);
+      } catch { /* skip bad page */ }
+    });
+  }
 }
