@@ -5,7 +5,7 @@
  * data URL. Used by the PDF generator to embed the proper CAD riser diagram.
  */
 
-import { buildRiserModel, SLC_DEVICE_GROUPS, NAC_DEVICE_GROUPS, AUX_DEVICE_GROUPS } from './riserModel';
+import { buildRiserModel, SLC_DEVICE_GROUPS, NAC_DEVICE_GROUPS, AUX_DEVICE_GROUPS } from './riserModel.js';
 
 const C = {
   black: '#000000', dark: '#1a1a1a', gray: '#555555',

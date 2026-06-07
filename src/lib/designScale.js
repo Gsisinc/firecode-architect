@@ -1,4 +1,4 @@
-import { polygonAreaSqft, isPolygonRoom } from './polygonRooms';
+import { polygonAreaSqft, isPolygonRoom } from './polygonRooms.js';
 
 export const DEFAULT_PX_PER_FT = 10;
 

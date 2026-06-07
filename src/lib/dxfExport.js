@@ -5,7 +5,7 @@
  * and circuit paths (as polylines).
  */
 
-import { DEFAULT_PX_PER_FT, getFloorScale } from "./designScale";
+import { DEFAULT_PX_PER_FT, getFloorScale } from "./designScale.js";
 
 const DEVICE_LAYERS = {
   smoke_detector:   { layer: "FA-SMKE", color: 1 },  // red
