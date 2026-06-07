@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
@@ -12,6 +12,7 @@ import { determineSystemRequirements } from '@/lib/codeEngine';
 import { CODE_SAFETY_DISCLAIMER } from '@/lib/productInfo';
 import { DISCIPLINE_SETUP_FIELD_DEFAULTS, isFireAlarmDiscipline } from '@/lib/disciplineSetupDefaults';
 import DisciplineDesignFields from '@/components/project-setup/DisciplineDesignFields';
+import BlueprintIntakeUpload from '@/components/project-setup/BlueprintIntakeUpload';
 import { Flame, ArrowLeft, Upload, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -60,6 +61,7 @@ export default function ProjectSetup() {
 
   const [analysisPreview, setAnalysisPreview] = useState(null);
   const [uploading, setUploading] = useState({});
+  const blueprintImportedRef = useRef(false);
 
   const { data: existingProjects = [], isLoading: isLoadingProject } = useQuery({
     queryKey: ['project', id],
@@ -151,7 +153,8 @@ export default function ProjectSetup() {
       } catch {
         /* ignore */
       }
-      navigate(`/project/${projectId}/designer/${disc}`);
+      const autodetect = isNew && blueprintImportedRef.current && isFireAlarmDiscipline(disc);
+      navigate(`/project/${projectId}/designer/${disc}${autodetect ? '?autodetect=1' : ''}`);
     },
     onError: (error) => {
       toast({
@@ -189,6 +192,31 @@ export default function ProjectSetup() {
     } finally {
       setUploading(u => ({ ...u, [floorIndex]: false }));
     }
+  };
+
+  const handleBlueprintExtracted = ({ fields = {}, fileUrl, fileType }) => {
+    blueprintImportedRef.current = true;
+    setForm((prev) => {
+      const next = { ...prev, ...fields };
+      const isImg = (fileType || '').startsWith('image/');
+      const primaryPlan = {
+        ...(prev.floor_plans?.[0] || {}),
+        floor_number: 1,
+        image_url: isImg ? fileUrl : (prev.floor_plans?.[0]?.image_url || ''),
+        file_url: fileUrl,
+        file_type: fileType,
+        page_number: 1,
+      };
+      const count = fields.num_floors && fields.num_floors !== prev.num_floors
+        ? Math.max(1, Math.min(50, fields.num_floors))
+        : prev.num_floors;
+      next.num_floors = count;
+      next.occupant_load_per_floor = Array.from({ length: count }, (_, i) => prev.occupant_load_per_floor[i] || defaultFloor(i + 1));
+      next.gross_sqft_per_floor = Array.from({ length: count }, (_, i) => prev.gross_sqft_per_floor[i] || defaultFloor(i + 1));
+      next.floor_plans = Array.from({ length: count }, (_, i) => (i === 0 ? primaryPlan : (prev.floor_plans[i] || { floor_number: i + 1, image_url: '' })));
+      return next;
+    });
+    toast({ title: 'Blueprint read', description: 'Project details auto-filled from the plan. Review before saving.' });
   };
 
   const runAnalysisPreview = () => {
@@ -258,6 +286,9 @@ export default function ProjectSetup() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left: Form */}
           <div className="lg:col-span-2 space-y-6">
+
+            {/* Upload-first: auto-fill intake from a blueprint */}
+            {isNew && <BlueprintIntakeUpload onExtracted={handleBlueprintExtracted} />}
 
             {/* Project Info */}
             <Section title="Project Information">

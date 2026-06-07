@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { getDisciplineConfig, normalizeDisciplineId } from "@/lib/disciplines";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -73,6 +73,8 @@ const DocumentWorkspace = lazy(() => import("@/components/designer/DocumentWorks
 
 export default function ProjectDesigner() {
   const { id: projectId, discipline: disciplineRouteParam } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoDetectRan = useRef(false);
   const disciplineId = normalizeDisciplineId(disciplineRouteParam);
   const disciplineConfig = getDisciplineConfig(disciplineId);
   const queryClient = useQueryClient();
@@ -801,6 +803,24 @@ If unreadable — omit that marker.`,
     }
     setAnalyzingFloor(false);
   };
+
+  // Chain after a blueprint import: when the designer opens with ?autodetect=1
+  // and a plan is present but no rooms yet, run scale + room detection once.
+  useEffect(() => {
+    if (autoDetectRan.current) return;
+    if (searchParams.get('autodetect') !== '1') return;
+    if (disciplineId !== 'fire_alarm') return;
+    const plan = pickFloorPlanForCanvas(floorPlans, activeFloor);
+    const planUrl = (plan?.image_url || plan?.file_url || '').trim();
+    if (!planUrl) return; // wait until the plan is loaded
+    autoDetectRan.current = true;
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('autodetect');
+    setSearchParams(sp, { replace: true });
+    if ((rooms || []).length === 0) {
+      handleAnalyzeFloorPlan();
+    }
+  }, [searchParams, floorPlans, rooms, activeFloor, disciplineId, setSearchParams]);
 
   const handleAutoPlace = useCallback(() => {
     if (disciplineId !== 'fire_alarm') {
