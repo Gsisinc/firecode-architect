@@ -255,8 +255,8 @@ function drawTitleBlock(doc, project, meta, logoDataUrl, sheetNo, sheetTitle, sh
   const w = TB_W;
   const h = SHEET_H;
 
-  // Background
-  doc.setFillColor(250, 251, 252);
+  // Background — clean white (no tinted fill)
+  doc.setFillColor(255, 255, 255);
   doc.rect(x, y, w, h, 'F');
   doc.setDrawColor(...C_DARK);
   doc.setLineWidth(0.6);
@@ -328,67 +328,87 @@ function drawTitleBlock(doc, project, meta, logoDataUrl, sheetNo, sheetTitle, sh
   doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
   setFont(doc, 5.5, 'bold', C_DARK);
   doc.text('REVISIONS', x + w / 2, ty + 3, { align: 'center' }); ty += 5;
-  // Header
-  doc.setFillColor(230, 235, 242);
-  doc.rect(x + 2, ty - 1, w - 4, 5, 'F');
-  setFont(doc, 4.5, 'bold', C_DARK);
-  doc.text('NO', x + 4, ty + 2.5);
+  // Header (clean — thin rule, no fill)
+  setFont(doc, 4.5, 'bold', C_GRAY);
+  doc.text('NO', x + 3, ty + 2.5);
   doc.text('DATE', x + 11, ty + 2.5);
-  doc.text('BY', x + 30, ty + 2.5);
-  doc.text('DESCRIPTION', x + 40, ty + 2.5);
-  ty += 5;
+  doc.text('BY', x + 28, ty + 2.5);
+  doc.text('DESCRIPTION', x + 38, ty + 2.5);
+  ty += 3.5;
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.15); doc.line(x + 2, ty, x + w - 2, ty);
+  ty += 3.5;
   const revs = meta?.revisions || [];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 4; i++) {
     const r = revs[i] || {};
-    doc.setFillColor(i % 2 === 0 ? 248 : 243, 248, 252);
-    doc.rect(x + 2, ty - 1, w - 4, 5, 'F');
-    setFont(doc, 4.5, 'normal', C_DARK);
-    doc.text(r.no || String(i + 1), x + 4, ty + 2.5);
-    doc.text(r.date || '', x + 11, ty + 2.5);
-    doc.text(r.by || '', x + 30, ty + 2.5);
-    const desc = (r.text || '').slice(0, 14);
-    doc.text(desc, x + 40, ty + 2.5);
-    ty += 5;
+    setFont(doc, 4.4, 'normal', C_DARK);
+    doc.text(r.no || String(i + 1), x + 3, ty);
+    doc.text((r.date || '').slice(0, 9), x + 11, ty);
+    doc.text((r.by || '').slice(0, 4), x + 28, ty);
+    doc.text((r.text || '').slice(0, 13), x + 38, ty);
+    ty += 1.5;
+    doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.1); doc.line(x + 2, ty, x + w - 2, ty);
+    ty += 3.5;
   }
   ty += 2;
 
-  // Stamp box
+  // Stamp box (thin neutral border — no red fill)
   doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 1;
-  setFont(doc, 5.5, 'bold', C_DARK);
+  setFont(doc, 5.2, 'bold', C_DARK);
   doc.text('ENGINEER / DESIGNER STAMP', x + w / 2, ty + 3, { align: 'center' }); ty += 5;
-  doc.setDrawColor(...C_RED); doc.setLineWidth(0.3);
-  doc.rect(x + 4, ty, w - 8, 28, 'S');
-  setFont(doc, 5, 'normal', C_GRAY);
-  doc.text('Stamp / Seal', x + w / 2, ty + 10, { align: 'center' });
-  doc.text('(NICET / EOR / AHJ)', x + w / 2, ty + 15, { align: 'center' });
-  if (meta?.designer_name)  { setFont(doc, 5, 'bold', C_DARK); doc.text(meta.designer_name, x + w / 2, ty + 21, { align: 'center' }); }
-  if (meta?.designer_nicet) { setFont(doc, 4.5, 'normal', C_GRAY); doc.text(`NICET ${meta.designer_nicet}`, x + w / 2, ty + 25, { align: 'center' }); }
-  ty += 30;
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.25);
+  doc.rect(x + 4, ty, w - 8, 26, 'S');
+  setFont(doc, 4.8, 'normal', C_GRAY);
+  doc.text('Stamp / Seal', x + w / 2, ty + 9, { align: 'center' });
+  doc.text('(NICET / EOR / AHJ)', x + w / 2, ty + 13, { align: 'center' });
+  if (meta?.designer_name)  { setFont(doc, 5, 'bold', C_DARK); doc.text(meta.designer_name, x + w / 2, ty + 19, { align: 'center' }); }
+  if (meta?.designer_nicet) { setFont(doc, 4.4, 'normal', C_GRAY); doc.text(`NICET ${meta.designer_nicet}`, x + w / 2, ty + 23, { align: 'center' }); }
+  ty += 28;
 
-  // Bottom title panel
-  const bottomH = SHEET_H - ty - 4;
-  const bottomY = ty;
-  doc.setFillColor(15, 23, 42);
-  doc.rect(x + 2, bottomY, w - 4, bottomH, 'F');
-  setFont(doc, 5, 'normal', [150, 160, 180]);
-  doc.text('PROJECT TITLE', x + w / 2, bottomY + 5, { align: 'center' });
-  setFont(doc, 6.5, 'bold', [255, 255, 255]);
-  const titleLines = doc.splitTextToSize((project?.name || '').toUpperCase(), w - 10);
-  titleLines.slice(0, 2).forEach((ln, i) => doc.text(ln, x + w / 2, bottomY + 10 + i * 5, { align: 'center' }));
-  const subtitleY = bottomY + 10 + Math.min(titleLines.length, 2) * 5 + 2;
-  setFont(doc, 5, 'normal', [150, 160, 180]);
-  if (project?.address) { doc.text(project.address.slice(0, 30), x + w / 2, subtitleY, { align: 'center' }); }
+  // Project title — plain black text on white (no paint block)
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.2); doc.line(x + 2, ty, x + w - 2, ty); ty += 4;
+  setFont(doc, 4.6, 'bold', C_GRAY);
+  doc.text('PROJECT TITLE', x + 3, ty); ty += 4.5;
+  setFont(doc, 7, 'bold', C_DARK);
+  doc.splitTextToSize((project?.name || '—').toUpperCase(), w - 8).slice(0, 4).forEach((ln) => {
+    doc.text(ln, x + 3, ty); ty += 4.2;
+  });
 
-  // Sheet number / title at very bottom
-  const snY = SHEET_H - 18;
-  doc.setFillColor(37, 99, 235);
-  doc.rect(x + 2, snY, w - 4, 14, 'F');
-  setFont(doc, 5.5, 'bold', C_WHITE);
-  doc.text(sheetTitle.toUpperCase(), x + w / 2, snY + 5, { align: 'center' });
-  setFont(doc, 5, 'normal', [180, 200, 240]);
-  doc.text(`SHEET SCALE: ${sheetScale}`, x + w / 2, snY + 9, { align: 'center' });
-  setFont(doc, 12, 'bold', C_WHITE);
-  doc.text(sheetNo, x + w / 2, snY + 13.5, { align: 'center' });
+  // ── Bottom-anchored cells (built upward): sheet no · meta grid · sheet title · issue ──
+  const m = meta || {};
+  const gx2 = x + w - 3;
+  let by = SHEET_H - 4;
+
+  // Sheet number (large, in a thin-bordered cell)
+  const snH = 16;
+  by -= snH;
+  doc.setDrawColor(...C_DARK); doc.setLineWidth(0.4);
+  doc.rect(x + 3, by, w - 6, snH, 'S');
+  setFont(doc, 4.4, 'bold', C_GRAY);
+  doc.text('SHEET NUMBER', x + 4, by + 4);
+  setFont(doc, 16, 'bold', C_DARK);
+  doc.text(String(sheetNo), x + w / 2, by + 12.5, { align: 'center' });
+
+  // Drawn / checked / job / scale grid
+  by -= 16;
+  setFont(doc, 4.4, 'normal', C_DARK);
+  doc.text('DRAWN', x + 3, by + 3);   doc.text(String(m.prepared_by || m.drawn_by || '—').slice(0, 12), gx2, by + 3, { align: 'right' });
+  doc.text('CHECKED', x + 3, by + 6.5); doc.text(String(m.checked_by || '—').slice(0, 12), gx2, by + 6.5, { align: 'right' });
+  doc.text('JOB NO', x + 3, by + 10);  doc.text(String(m.project_number || project?.project_number || '—').slice(0, 12), gx2, by + 10, { align: 'right' });
+  doc.text('SCALE', x + 3, by + 13.5); doc.text(String(sheetScale).slice(0, 14), gx2, by + 13.5, { align: 'right' });
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.15); doc.line(x + 2, by - 1, x + w - 2, by - 1);
+
+  // Sheet title
+  by -= 15;
+  setFont(doc, 4.4, 'bold', C_GRAY);
+  doc.text('SHEET TITLE', x + 3, by + 3);
+  setFont(doc, 7.5, 'bold', C_DARK);
+  doc.splitTextToSize(String(sheetTitle).toUpperCase(), w - 8).slice(0, 2).forEach((ln, i) => doc.text(ln, x + 3, by + 8 + i * 4.4));
+  doc.setDrawColor(...C_LGRAY); doc.setLineWidth(0.15); doc.line(x + 2, by - 1, x + w - 2, by - 1);
+
+  // Issue line
+  by -= 7;
+  setFont(doc, 5.2, 'bold', C_DARK);
+  doc.text(String(m.issue_text || '100% BID SET'), x + w / 2, by + 3.5, { align: 'center' });
 
   // Draw border around full drawing area
   doc.setDrawColor(...C_DARK);

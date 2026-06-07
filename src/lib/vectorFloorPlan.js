@@ -229,7 +229,7 @@ export function drawVectorFloorPlan(doc, area, opts) {
   if (Array.isArray(vectorBackground) && vectorBackground.length) {
     doc.setLineCap('butt');
     doc.setLineJoin('miter');
-    doc.setDrawColor(78, 78, 82);
+    doc.setDrawColor(35, 35, 35);
     for (const p of vectorBackground) {
       const pts = p.pts;
       if (!pts || pts.length < 2) continue;
@@ -245,7 +245,8 @@ export function drawVectorFloorPlan(doc, area, opts) {
         px = nx;
         py = ny;
       }
-      doc.setLineWidth(Math.max(0.2, Math.min(0.7, (p.lineWidth || 1) * fit * 1.4)));
+      // Thin crisp black linework — match the baseline CAD look (not heavy).
+      doc.setLineWidth(Math.max(0.1, Math.min(0.32, (p.lineWidth || 1) * fit)));
       try {
         doc.lines(deltas, x0, y0, [1, 1], 'S', p.closed === true);
       } catch {
@@ -296,23 +297,23 @@ export function drawVectorFloorPlan(doc, area, opts) {
   // ── Markups ──
   fMarkups.forEach((mu) => drawMarkup(doc, mu, X, Y, fit));
 
-  // ── Devices ── (drawn larger and in FA red so they pop on the plan)
-  const FA_RED = [193, 18, 31];
-  const symSize = Math.max(4.5, Math.min(9, 20 * fit));
+  // ── Devices ── small red symbols (like the baseline), not oversized
+  const FA_RED = [200, 30, 30];
+  const symSize = Math.max(3, Math.min(5, 13 * fit));
   fDevices.forEach((device) => {
     const sym = symbolForDevice(template, device.type, device.subtype);
     const isNotif = NOTIFICATION_TYPES.includes(device.type);
     drawDeviceSymbol(doc, sym, X(device.x), Y(device.y), symSize, FA_RED);
     // candela tag for notification devices
     if (showLabels && isNotif && device.candela) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(4.4);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(3.4);
       doc.setTextColor(...FA_RED);
       doc.text(`${device.candela}cd`, X(device.x) + symSize * 0.6, Y(device.y) - symSize * 0.5);
     }
     if (showLabels && device.address) {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(4);
+      doc.setFontSize(3.4);
       doc.setTextColor(...DEVICE_INK);
       doc.text(String(device.address), X(device.x), Y(device.y) + symSize * 0.55 + 2.4, { align: 'center' });
     }
