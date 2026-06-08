@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { determineSystemRequirements } from '@/lib/codeEngine';
 import { CODE_SAFETY_DISCLAIMER } from '@/lib/productInfo';
 import { DISCIPLINE_SETUP_FIELD_DEFAULTS, isFireAlarmDiscipline } from '@/lib/disciplineSetupDefaults';
+import { writeProjectBackup } from '@/lib/projectBackup';
 import DisciplineDesignFields from '@/components/project-setup/DisciplineDesignFields';
 import BlueprintIntakeUpload from '@/components/project-setup/BlueprintIntakeUpload';
 import { Flame, ArrowLeft, Upload, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
@@ -182,6 +183,17 @@ export default function ProjectSetup() {
         localStorage.setItem(SYSTEMS_LAST_PROJECT_KEY, projectId);
       } catch {
         /* ignore */
+      }
+      // Base44 can silently strip nested arrays (plan_sheets/floor_plans) on
+      // create. Mirror the imported sheets into the same localStorage backup the
+      // designer reads, so the designer restores them even if the server dropped
+      // them — otherwise the user lands on an empty canvas asking to re-upload.
+      const importedSheets = variables.plan_sheets || [];
+      if (projectId && importedSheets.length > 0) {
+        writeProjectBackup(projectId, {
+          plan_sheets: importedSheets,
+          floor_plans: variables.floor_plans || [],
+        });
       }
       const shouldAssign = isNew && blueprintNeedsAssignmentRef.current && isFireAlarmDiscipline(disc);
       navigate(`/project/${projectId}/designer/${disc}${shouldAssign ? '?step=assign' : ''}`);
