@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan, Ruler, ShieldCheck } from "lucide-react";
+import { Calculator, Package, Grid3x3, ClipboardList, Battery, FileDown, ChevronRight, ChevronLeft, Zap, BookOpen, MessageSquare, Loader2, Scan, Ruler, ShieldCheck, Copy } from "lucide-react";
 
 import DesignerSidebar from "@/components/designer/DesignerSidebar";
 import DesignerTopBar from "@/components/designer/DesignerTopBar";
@@ -1309,6 +1309,43 @@ Return only zones that are clearly the same kind of object. Do not include the o
     toast.success(`Cleared assignment for page ${sheet.page_number}`);
   };
 
+  // One drawing often covers several identical floors (e.g. floors 5–11 share a
+  // typical plan but the set only includes one sheet). Duplicating makes an
+  // independent, unassigned copy of the page so each floor can get its own
+  // assignment while pointing at the same source file/page.
+  const handleDuplicateSheet = async (sheet) => {
+    if (!sheet) return;
+    const baseLabel = sheet.title || sheet.sheet_number || `Page ${sheet.page_number}`;
+    const copy = {
+      ...sheet,
+      id: `sheet-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      title: `${baseLabel} (copy)`,
+      assigned_floor: '',
+      plan_type: 'unassigned',
+      source: 'duplicate',
+      uploaded_at: new Date().toISOString(),
+    };
+    const idx = planSheets.findIndex((candidate) => candidate.id === sheet.id);
+    const nextSheets = [...planSheets];
+    nextSheets.splice(idx >= 0 ? idx + 1 : nextSheets.length, 0, copy);
+    setLocalPlanSheets(nextSheets);
+    setSelectedSheetId(copy.id);
+    await saveProjectPatch({ plan_sheets: nextSheets });
+    toast.success('Duplicated sheet — assign this copy to its own floor.');
+  };
+
+  const handleRenameSheet = async (sheet, nextTitle) => {
+    if (!sheet) return;
+    const title = String(nextTitle || '').trim();
+    if (!title || title === sheet.title) return;
+    const nextSheets = planSheets.map((candidate) => (
+      candidate.id === sheet.id ? { ...candidate, title } : candidate
+    ));
+    setLocalPlanSheets(nextSheets);
+    await saveProjectPatch({ plan_sheets: nextSheets });
+    toast.success('Sheet renamed.');
+  };
+
   const handlePlanVisionAnalyze = async (sheet) => {
     if (!sheet) return;
     setPlanVisionLoading(true);
@@ -1507,6 +1544,8 @@ Return only zones that are clearly the same kind of object. Do not include the o
               onCustomPlanTypeChange={setCustomPlanType}
               onAssign={handleAssignSheet}
               onClearAssignment={handleClearSheetAssignment}
+              onDuplicateSheet={handleDuplicateSheet}
+              onRenameSheet={handleRenameSheet}
               onContinueToCanvas={() => setActiveTab('canvas')}
               activeFloor={activeFloor}
               onFloorFocus={setActiveFloor}
@@ -1881,6 +1920,8 @@ function PlansPanel({
   onCustomPlanTypeChange,
   onAssign,
   onClearAssignment,
+  onDuplicateSheet,
+  onRenameSheet,
   onContinueToCanvas,
   activeFloor,
   onFloorFocus,
@@ -1891,7 +1932,12 @@ function PlansPanel({
   const [targetType, setTargetType] = useState('Architectural');
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
   const assignedCount = sheets.filter((sheet) => sheet.assigned_floor).length;
+
+  React.useEffect(() => {
+    setNameDraft(selectedSheet?.title || '');
+  }, [selectedSheet?.id, selectedSheet?.title]);
 
   React.useEffect(() => {
     if (selectedSheet?.suggested_type && planTypes.includes(selectedSheet.suggested_type)) {
@@ -2010,6 +2056,30 @@ function PlansPanel({
                 <h3 className="font-semibold text-slate-900">Assign Sheet</h3>
                 <p className="text-xs text-slate-500 mt-1">
                   Pick the sheet page, then assign it to a floor and plan type. PDF pages are no longer automatically treated as floors.
+                </p>
+              </div>
+              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <label className="text-xs font-medium text-slate-600">Sheet name</label>
+                <div className="flex gap-2">
+                  <input
+                    value={nameDraft}
+                    onChange={(event) => setNameDraft(event.target.value)}
+                    onBlur={() => onRenameSheet?.(selectedSheet, nameDraft)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); onRenameSheet?.(selectedSheet, nameDraft); } }}
+                    placeholder="e.g. Typical floor plan"
+                    className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full text-xs"
+                  onClick={() => onDuplicateSheet?.(selectedSheet)}
+                >
+                  <Copy className="mr-2 h-3.5 w-3.5" /> Duplicate this page
+                </Button>
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  Same drawing covers several identical floors (e.g. floors 5–11)? Duplicate it once per floor, rename each copy, then assign each to its own floor.
                 </p>
               </div>
               <div className="space-y-2">
