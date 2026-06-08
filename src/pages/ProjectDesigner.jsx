@@ -107,6 +107,7 @@ export default function ProjectDesigner() {
   const [pendingRoom, setPendingRoom] = useState(null); // { x, y, width, height }
   const [pendingRoomName, setPendingRoomName] = useState('');
   const [pendingRoomType, setPendingRoomType] = useState('office');
+  const [pendingRoomArea, setPendingRoomArea] = useState('');
   const [scaleDialogOpen, setScaleDialogOpen] = useState(false);
   const [pendingScalePixels, setPendingScalePixels] = useState(0);
   const [scaleFeetInput, setScaleFeetInput] = useState('');
@@ -1121,9 +1122,21 @@ Return only zones that are clearly the same kind of object. Do not include the o
     setPendingRoomType('office');
   };
 
+  // Seed the editable area with the computed value each time a room is drawn so
+  // the user can either accept it or type the area printed on the plan.
+  useEffect(() => {
+    if (!pendingRoom) return;
+    const computed = roomSqft(pendingRoom, getFloorScale(floorPlans, activeFloor));
+    setPendingRoomArea(computed ? String(computed) : '');
+  }, [pendingRoom, floorPlans, activeFloor]);
+
   const handleRoomNameConfirm = () => {
     if (!pendingRoom) return;
     const normalizedType = normalizeManualRoomType(pendingRoomType);
+    const computedSqft = roomSqft(pendingRoom, getFloorScale(floorPlans, activeFloor));
+    const overrideSqft = Number(pendingRoomArea);
+    const useOverride = Number.isFinite(overrideSqft) && overrideSqft > 0
+      && Math.round(overrideSqft) !== Math.round(computedSqft);
     const newRoom = {
       id: `room-${Date.now()}-${Math.random().toString(36).substr(2,6)}`,
       floor: activeFloor,
@@ -1131,13 +1144,17 @@ Return only zones that are clearly the same kind of object. Do not include the o
       room_type: normalizedType,
       user_room_kind: pendingRoomType,
       ...pendingRoom,
-      sqft: roomSqft(pendingRoom, getFloorScale(floorPlans, activeFloor)),
+      sqft: useOverride ? Math.round(overrideSqft) : computedSqft,
+      ...(useOverride
+        ? { area_source: 'manual_entry', area_sqft_manual: Math.round(overrideSqft) }
+        : {}),
       ceiling_height: project?.default_ceiling_height || 9,
       ceiling_type: project?.default_ceiling_type || 'smooth_flat',
     };
     setLocalRooms([...rooms, newRoom]);
     setPendingRoom(null);
     setPendingRoomName('');
+    setPendingRoomArea('');
   };
 
   const handleScaleLineComplete = useCallback(({ drawnPixels }) => {
@@ -1857,8 +1874,27 @@ Return only zones that are clearly the same kind of object. Do not include the o
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Area (sf)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={1}
+                value={pendingRoomArea}
+                onChange={(e) => setPendingRoomArea(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleRoomNameConfirm();
+                  if (e.key === 'Escape') setPendingRoom(null);
+                }}
+                placeholder="e.g. 126"
+                className="h-9"
+              />
+              <p className="text-[10px] text-slate-400 leading-snug">
+                Defaults to the calculated area. If the scale isn't calibrated this will be off — type the area printed on the plan (e.g. <span className="font-medium text-slate-500">126 SF</span>) to override it, or calibrate the scale for accurate areas everywhere.
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-2 pt-1">
-              <Button variant="outline" size="sm" type="button" onClick={() => setPendingRoom(null)}>
+              <Button variant="outline" size="sm" type="button" onClick={() => { setPendingRoom(null); setPendingRoomArea(''); }}>
                 Cancel
               </Button>
               <Button size="sm" className="bg-orange-500 hover:bg-orange-600 text-white" type="button" onClick={handleRoomNameConfirm}>
