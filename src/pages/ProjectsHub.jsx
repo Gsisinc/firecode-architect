@@ -1,7 +1,8 @@
-import { useMemo, useCallback, useEffect } from 'react';
+import { useMemo, useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useOutletContext, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,6 +13,8 @@ import {
   FileBarChart,
   FolderPlus,
   ShieldOff,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_IDS } from '@/lib/disciplines';
 import { getProjectPrimaryDiscipline, SYSTEMS_LAST_PROJECT_KEY } from '@/lib/projectDiscipline';
@@ -40,10 +43,40 @@ export default function ProjectsHub() {
 
   const discipline = DISC_ORDER.includes(disciplineParam) ? disciplineParam : DISCIPLINE_IDS.FIRE_ALARM;
 
+  const queryClient = useQueryClient();
+  const [menuFor, setMenuFor] = useState(null); // project id whose menu is open
+
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: () => base44.entities.Project.list('-updated_date', 100),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (projectId) => base44.entities.Project.delete(projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      toast.success('Project deleted');
+    },
+    onError: (error) => {
+      toast.error(`Could not delete project: ${error?.message || 'Unknown error'}`);
+    },
+    onSettled: () => setMenuFor(null),
+  });
+
+  useEffect(() => {
+    if (!menuFor) return undefined;
+    const close = () => setMenuFor(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [menuFor]);
+
+  const requestDelete = useCallback((project) => {
+    setMenuFor(null);
+    const ok = window.confirm(
+      `Delete "${project.name || 'Untitled project'}"? This permanently removes the project, its floor plans, rooms, and devices. This cannot be undone.`
+    );
+    if (ok) deleteMutation.mutate(project.id);
+  }, [deleteMutation]);
 
   const dc = DISCIPLINES[discipline];
 
@@ -192,12 +225,56 @@ export default function ProjectsHub() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {filtered.map((p) => (
-            <button
+            <div
               key={p.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => openProject(p)}
-              className="group text-left rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm hover:shadow-md hover:border-slate-300 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1e3a5f]/40"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openProject(p);
+                }
+              }}
+              className="group relative text-left rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm hover:shadow-md hover:border-slate-300 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1e3a5f]/40"
             >
+              {/* Kebab menu (delete) */}
+              <div className="absolute top-2 right-2 z-10">
+                <button
+                  type="button"
+                  aria-label="Project actions"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuFor((cur) => (cur === p.id ? null : p.id));
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-slate-500 shadow-sm ring-1 ring-slate-200 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-white hover:text-slate-700 transition-opacity"
+                >
+                  {deleteMutation.isPending && deleteMutation.variables === p.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <MoreVertical className="h-4 w-4" />
+                  )}
+                </button>
+                {menuFor === p.id && (
+                  <div
+                    className="absolute right-0 mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        requestDelete(p);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete project
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div className="aspect-[4/3] bg-slate-100 border-b border-slate-100 max-h-56">
                 <DashboardProjectMiniature project={p} projectId={p.id} disciplineId={discipline} />
               </div>
@@ -206,7 +283,6 @@ export default function ProjectsHub() {
                   <h3 className="font-semibold text-[15px] leading-snug" style={{ color: NAVY }}>
                     {p.name || 'Untitled project'}
                   </h3>
-                  <MoreVertical className="w-4 h-4 text-slate-400 shrink-0 opacity-0 group-hover:opacity-100" aria-hidden />
                 </div>
                 <p className="text-xs text-slate-500 mt-2">
                   Last updated{' '}
@@ -220,7 +296,7 @@ export default function ProjectsHub() {
                   <span className="text-slate-400">Comments: 0</span>
                 </div>
               </div>
-            </button>
+            </div>
           ))}
 
           <button
