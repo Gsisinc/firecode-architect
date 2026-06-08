@@ -858,7 +858,20 @@ If unreadable — omit that marker.`,
       return;
     }
 
-    const analysis = analysisResults || determineSystemRequirements(project);
+    // Re-derive requirements from the live project so code-mandated flags
+    // (e.g. high-rise voice evac) are authoritative even if a stale
+    // analysis_results was saved before these rules existed.
+    const freshReq = determineSystemRequirements(project);
+    const analysis = analysisResults
+      ? {
+          ...analysisResults,
+          // Voice evac is a hard code requirement — never let stale data downgrade it.
+          voiceEvacRequired: analysisResults.voiceEvacRequired || freshReq.voiceEvacRequired,
+          fireAlarmRequired: analysisResults.fireAlarmRequired || analysisResults.fire_alarm_required || freshReq.fireAlarmRequired,
+          notificationApplianceType:
+            (analysisResults.voiceEvacRequired || freshReq.voiceEvacRequired) ? 'speaker_strobe' : (analysisResults.notificationApplianceType || freshReq.notificationApplianceType),
+        }
+      : freshReq;
     if (!analysisResults) setAnalysisResults(analysis);
 
     const ceilingPayload = {
