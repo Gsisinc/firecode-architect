@@ -1,5 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DISCIPLINE_IDS, DISCIPLINES } from '@/lib/disciplines';
+import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
+
+// Cache rendered PDF thumbnails across cards/renders so we only rasterize once.
+const pdfThumbCache = new Map(); // `${url}#${page}` -> dataUrl
+
+function isPdfSource(url, type) {
+  return type === 'application/pdf' || /\.pdf($|\?)/i.test(String(url || ''));
+}
 
 function hashSeed(str) {
   let h = 0;
@@ -21,6 +29,46 @@ export function getFirstFloorPlanPreviewUrl(project) {
     const url = typeof fp?.image_url === 'string' ? fp.image_url.trim() : '';
     if (url) return url;
   }
+  return null;
+}
+
+/**
+ * Best available preview for a project card. Prefers a ready raster image, then
+ * a plan-sheet preview, then a PDF page we can rasterize on the fly — so
+ * blueprint-imported (PDF) projects show an actual page instead of a placeholder.
+ */
+export function getProjectPreviewSource(project) {
+  const floorPlans = Array.isArray(project?.floor_plans) ? project.floor_plans : [];
+  const sheets = Array.isArray(project?.plan_sheets) ? project.plan_sheets : [];
+
+  // 1) A direct raster image already on a floor plan.
+  for (const fp of floorPlans) {
+    const img = (typeof fp?.image_url === 'string' && fp.image_url.trim())
+      || (typeof fp?.rendered_image_url === 'string' && fp.rendered_image_url.trim()) || '';
+    if (img && !isPdfSource(img, fp?.file_type)) return { kind: 'image', url: img };
+  }
+
+  // 2) A pre-rendered plan-sheet preview.
+  for (const sheet of sheets) {
+    const pv = typeof sheet?.preview_url === 'string' ? sheet.preview_url.trim() : '';
+    if (pv) return { kind: 'image', url: pv };
+  }
+
+  // 3) A PDF page we can rasterize — prefer an assigned floor plan, then any sheet.
+  for (const fp of floorPlans) {
+    if (fp?.file_url && isPdfSource(fp.file_url, fp.file_type)) {
+      return { kind: 'pdf', url: fp.file_url, page: Number(fp.page_number) || 1 };
+    }
+  }
+  for (const sheet of sheets) {
+    if (sheet?.file_url && isPdfSource(sheet.file_url, sheet.file_type)) {
+      return { kind: 'pdf', url: sheet.file_url, page: Number(sheet.page_number) || 1 };
+    }
+    if (sheet?.file_url && (sheet.file_type || '').startsWith('image/')) {
+      return { kind: 'image', url: sheet.file_url };
+    }
+  }
+
   return null;
 }
 
@@ -112,14 +160,47 @@ function SvgFallback({ projectId, disciplineId }) {
  * otherwise discipline SVG placeholder.
  */
 export default function DashboardProjectMiniature({ project, projectId, disciplineId }) {
-  const planUrl = getFirstFloorPlanPreviewUrl(project);
+  const source = useMemo(() => getProjectPreviewSource(project), [project]);
+  const [imgUrl, setImgUrl] = useState(source?.kind === 'image' ? source.url : null);
   const [imgFailed, setImgFailed] = useState(false);
 
-  if (planUrl && !imgFailed) {
+  useEffect(() => {
+    let cancelled = false;
+    setImgFailed(false);
+    if (!source) {
+      setImgUrl(null);
+      return undefined;
+    }
+    if (source.kind === 'image') {
+      setImgUrl(source.url);
+      return undefined;
+    }
+    // PDF: rasterize the page (cached) for the thumbnail.
+    const key = `${source.url}#${source.page}`;
+    if (pdfThumbCache.has(key)) {
+      setImgUrl(pdfThumbCache.get(key));
+      return undefined;
+    }
+    setImgUrl(null);
+    renderPdfPageToDataUrl(source.url, source.page, 0.8)
+      .then((rendered) => {
+        if (cancelled) return;
+        pdfThumbCache.set(key, rendered.dataUrl);
+        setImgUrl(rendered.dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setImgFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  if (imgUrl && !imgFailed) {
     return (
       <div className="w-full h-full min-h-[8rem] bg-slate-200 relative overflow-hidden flex items-center justify-center">
         <img
-          src={planUrl}
+          src={imgUrl}
           alt=""
           className="w-full h-full min-h-[8rem] object-cover object-center"
           loading="lazy"
