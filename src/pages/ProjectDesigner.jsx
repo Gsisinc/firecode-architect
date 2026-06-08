@@ -38,7 +38,7 @@ import {
 } from "@/lib/floorPlanDetection";
 import { normalizeBlueprintExtractedEquipment } from "@/lib/blueprintEquipmentExtraction";
 import { detectRoomsFromImage } from "@/lib/roomAutoDetect";
-import { getFloorScale, roomSqft, updateFloorPlanScale, updateFloorPlanManualCalibration } from "@/lib/designScale";
+import { getFloorScale, roomSqft, updateFloorPlanScale, updateFloorPlanManualCalibration, getProjectCalibratedScale } from "@/lib/designScale";
 import { MANUAL_ROOM_TYPE_OPTIONS, normalizeManualRoomType } from "@/lib/manualRoomTypes";
 import { placeFireAlarmDevicesWithOpenAI } from "@/lib/openaiDevicePlacement";
 import { extractPdfTextHintsForPlan } from "@/lib/pdfPlanTextHints";
@@ -1181,7 +1181,7 @@ Return only zones that are clearly the same kind of object. Do not include the o
     });
     try {
       await saveProjectPatch({ floor_plans: nextPlans });
-      toast.success(`Scale saved: ${(pendingScalePixels / feet).toFixed(2)} pixels per foot. Room areas use this for sq ft.`);
+      toast.success(`Scale saved: ${(pendingScalePixels / feet).toFixed(2)} px/ft — applied to the whole blueprint. Recalibrate any floor that uses a different scale.`);
     } catch (e) {
       toast.error(e?.message || 'Save failed');
     }
@@ -1409,7 +1409,12 @@ Return only zones that are clearly the same kind of object. Do not include the o
   );
 
   const canvasPxPerFt = useMemo(() => getFloorScale(floorPlans, activeFloor), [floorPlans, activeFloor]);
-  const currentPlanNeedsCalibration = !!currentFloorPlan?.file_url && !Number(currentFloorPlan?.px_per_ft || currentFloorPlan?.scale?.px_per_ft);
+  // A deliberate calibration on any floor applies to the whole blueprint, so the
+  // banner only shows when nothing on the project has been calibrated yet.
+  const projectCalibratedScale = useMemo(() => getProjectCalibratedScale(floorPlans), [floorPlans]);
+  const currentPlanNeedsCalibration = !!currentFloorPlan?.file_url
+    && !Number(currentFloorPlan?.px_per_ft || currentFloorPlan?.scale?.px_per_ft)
+    && !projectCalibratedScale;
 
   useEffect(() => {
     const plan = currentFloorPlan;
