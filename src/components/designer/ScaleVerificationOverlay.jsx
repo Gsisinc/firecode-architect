@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { renderPdfPageToDataUrl } from '@/lib/documentEngine';
 import { pickFloorPlanForCanvas } from '@/lib/planImageExport';
 import { getFloorScale, updateFloorPlanManualCalibration } from '@/lib/designScale';
+import { uploadDataUrlForVision } from '@/lib/visionImage';
 import { deriveDetectionGeometry } from '@/lib/floorPlanDetection';
 import { useBlueprintEditorStore } from '@/stores/blueprintEditorStore';
 import TwoPointCalibration from './TwoPointCalibration';
@@ -34,44 +35,6 @@ const ROOM_COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
   '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#14b8a6',
 ];
-
-const LLM_IMAGE_MAX_DIM = 2000;
-const LLM_IMAGE_QUALITY = 0.82;
-
-function downscaleToJpeg(dataUrl, maxDim = LLM_IMAGE_MAX_DIM, quality = LLM_IMAGE_QUALITY) {
-  return new Promise((resolve) => {
-    try {
-      const img = new Image();
-      img.onload = () => {
-        const longEdge = Math.max(img.naturalWidth, img.naturalHeight) || maxDim;
-        const ratio = Math.min(1, maxDim / longEdge);
-        const w = Math.max(1, Math.round(img.naturalWidth * ratio));
-        const h = Math.max(1, Math.round(img.naturalHeight * ratio));
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = () => resolve(null);
-      img.src = dataUrl;
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
-async function uploadDataUrlForVision(dataUrl, name) {
-  const jpeg = await downscaleToJpeg(dataUrl);
-  const res = await fetch(jpeg || dataUrl);
-  const blob = await res.blob();
-  const file = new File([blob], name, { type: blob.type || 'image/jpeg' });
-  const { file_url } = await base44.integrations.Core.UploadFile({ file });
-  return file_url;
-}
 
 // ─── main component ───────────────────────────────────────────────────────────
 

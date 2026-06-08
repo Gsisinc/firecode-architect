@@ -45,6 +45,7 @@ import { extractPdfTextHintsForPlan } from "@/lib/pdfPlanTextHints";
 import { useBlueprintEditorStore } from "@/stores/blueprintEditorStore";
 import { mergeGeneratedDevices } from "@/lib/designValidation";
 import { renderPdfPageToDataUrl } from "@/lib/documentEngine";
+import { prepareVisionUrl } from "@/lib/visionImage";
 import { analyzeUploadedSheet, classifyPlanFromText } from "@/lib/planVision";
 import { pickFloorPlanForCanvas } from "@/lib/planImageExport";
 import { nudgeDevicesOutOfBlockedZones, normalizeDetectedLayoutZones, mergeLayoutZones, suggestFacpPlacementPx } from "@/lib/layoutZones";
@@ -498,11 +499,16 @@ export default function ProjectDesigner() {
     const imgW = imgEl.naturalWidth || 1000;
     const imgH = imgEl.naturalHeight || 800;
 
-    // The AI rejects data: URLs ("Invalid file attachment"). For PDF plans, send
-    // the HOSTED url instead — prompts use 0–1 ratios, so the AI's own render
-    // resolution doesn't matter. Image plans already use a hosted url.
+    // The AI rejects data: URLs and chokes on large/multi-page PDFs (the 10 MB
+    // cap). Send a compact, hosted JPEG of the rendered page instead — this is
+    // what makes room/scale/symbol detection reliable on big plan sets.
     const planIsPdf = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(String(plan.file_url || plan.image_url || ''));
-    const visionUrl = planIsPdf ? (plan.file_url || plan.image_url) : (plan.image_url || plan.file_url || analysisImageUrl);
+    let visionUrl = await prepareVisionUrl({
+      renderedDataUrl: planIsPdf ? analysisImageUrl : undefined,
+      hostedUrl: plan.image_url || plan.file_url || analysisImageUrl,
+      name: `floor-${activeFloor}-detect.jpg`,
+    });
+    if (!visionUrl) visionUrl = plan.image_url || plan.file_url || analysisImageUrl;
 
     const applyDetectedRooms = (detectedRooms, detectedLayoutZones, geometryPatch, successMessage, devicesForSaveOverride = null) => {
       const newRooms = [...rooms.filter(r => r.floor !== activeFloor), ...detectedRooms];
@@ -1042,6 +1048,11 @@ If unreadable — omit that marker.`,
         const renderedPage = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
         analysisImageUrl = renderedPage.dataUrl;
       }
+      const zoneVisionUrl = (await prepareVisionUrl({
+        renderedDataUrl: analysisImageUrl,
+        hostedUrl: plan.image_url || plan.file_url || analysisImageUrl,
+        name: `floor-${activeFloor}-zones.jpg`,
+      })) || analysisImageUrl;
       const zoneType = seedZone.zone_type || seedZone.type || 'rack';
       const metaLabel = zoneType.replace(/_/g, ' ');
       const result = await base44.integrations.Core.InvokeLLM({
@@ -1050,7 +1061,7 @@ If unreadable — omit that marker.`,
 Find other visually similar ${metaLabel} zones on the same drawing. Look for repeated shapes, parallel rows, fixture/rack blocks, aisle corridors, or similar geometry matching the marked example.
 
 Return only zones that are clearly the same kind of object. Do not include the original marked rectangle unless needed for context.`,
-        file_urls: [analysisImageUrl],
+        file_urls: [zoneVisionUrl],
         response_json_schema: {
           type: "object",
           properties: {
