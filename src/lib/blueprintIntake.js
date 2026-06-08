@@ -11,8 +11,24 @@
  */
 
 import { base44 } from '@/api/base44Client';
-import { extractPdfMetadataAndText } from '@/lib/documentEngine';
+import { extractPdfMetadataAndText, renderPdfPageToDataUrl } from '@/lib/documentEngine';
 import { classifyPlanFromText } from '@/lib/planVision';
+
+// The LLM file processor rejects raw files over ~10 MB. Multi-sheet plan sets are
+// routinely 30–100 MB, so we never hand the LLM the original file. Instead we
+// rasterize only the most informative sheets to small JPEGs (and downscale big
+// images) and send those — keeps every payload well under the limit while still
+// letting the AI read title blocks, cover sheets, and code notes.
+const LLM_IMAGE_MAX_DIM = 2000; // px on the long edge of each rendered sheet
+const LLM_IMAGE_QUALITY = 0.82; // JPEG quality for rendered sheets
+const LLM_MAX_PAGES = 4; // how many sheets we send to the AI per set
+
+// Keywords that mark a sheet as worth sending to the AI (cover / title / code data).
+const INFORMATIVE_KEYWORDS = [
+  'occupancy', 'occupant load', 'sprinkler', 'nfpa', 'ibc', 'code', 'project',
+  'owner', 'address', 'general notes', 'cover', 'title', 'scope', 'fire alarm',
+  'building', 'stories', 'story', 'edition',
+];
 
 const OCCUPANCY_GROUPS = ['A', 'B', 'E', 'F', 'H', 'I-1', 'I-2', 'I-3', 'I-4', 'M', 'R-1', 'R-2', 'R-3', 'R-4', 'S', 'High Rise'];
 const SPRINKLER_OPTIONS = ['None', 'Partial', 'Full (NFPA 13)', 'Full (NFPA 13R)', 'Full (NFPA 13D)'];
@@ -168,6 +184,106 @@ function normalizeIntake(raw) {
   return out;
 }
 
+/** Convert a data URL to a File and upload it, returning the hosted url (or null). */
+async function uploadDataUrl(dataUrl, name) {
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const file = new File([blob], name, { type: blob.type || 'image/jpeg' });
+    const { file_url } = await base44.integrations.Core.UploadFile({ file });
+    return file_url || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Re-encode a (possibly large) image data URL to a downscaled JPEG data URL. */
+function downscaleToJpeg(dataUrl, maxDim = LLM_IMAGE_MAX_DIM, quality = LLM_IMAGE_QUALITY) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const longEdge = Math.max(img.naturalWidth, img.naturalHeight) || maxDim;
+        const ratio = Math.min(1, maxDim / longEdge);
+        const w = Math.max(1, Math.round(img.naturalWidth * ratio));
+        const h = Math.max(1, Math.round(img.naturalHeight * ratio));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/** Pick the sheets most likely to carry intake data (cover, title block, code notes). */
+function pickInformativePages(pages = []) {
+  if (!pages.length) return [1];
+  const scored = pages.map((p) => {
+    const text = String(p.text || '').toLowerCase();
+    let score = 0;
+    for (const kw of INFORMATIVE_KEYWORDS) if (text.includes(kw)) score += 1;
+    return { page: Number(p.page) || 1, score };
+  });
+  // Always include the cover (page 1); then the highest-scoring remaining sheets.
+  const chosen = new Set([1]);
+  scored
+    .filter((s) => s.page !== 1)
+    .sort((a, b) => b.score - a.score)
+    .forEach((s) => {
+      if (chosen.size < LLM_MAX_PAGES && s.score > 0) chosen.add(s.page);
+    });
+  return Array.from(chosen).sort((a, b) => a - b).slice(0, LLM_MAX_PAGES);
+}
+
+/**
+ * Build a small set of image URLs for the LLM that stay under the file-size cap,
+ * regardless of how large the original plan set is.
+ */
+async function buildLlmFileUrls(fileUrl, fileType, pdfPages) {
+  // PDFs: rasterize the informative sheets to compact JPEGs.
+  if (isPdf(fileUrl, fileType)) {
+    const targetPages = pickInformativePages(pdfPages);
+    const urls = [];
+    for (const pageNumber of targetPages) {
+      try {
+        const meta = pdfPages.find((p) => Number(p.page) === pageNumber);
+        const naturalWidth = Number(meta?.width) || 1700;
+        // Render slightly above target so text stays legible, then downscale to cap size.
+        const scale = Math.min(3, Math.max(1.5, (LLM_IMAGE_MAX_DIM * 1.2) / naturalWidth));
+        const { dataUrl } = await renderPdfPageToDataUrl(fileUrl, pageNumber, scale);
+        const jpeg = await downscaleToJpeg(dataUrl);
+        const hosted = await uploadDataUrl(jpeg || dataUrl, `intake-sheet-${pageNumber}.jpg`);
+        if (hosted) urls.push(hosted);
+      } catch {
+        /* skip a page that fails to render */
+      }
+    }
+    return urls;
+  }
+
+  // Images: downscale to a JPEG so even a 100 MB photo fits under the cap.
+  try {
+    const jpeg = await downscaleToJpeg(fileUrl);
+    if (jpeg) {
+      const hosted = await uploadDataUrl(jpeg, 'intake-image.jpg');
+      if (hosted) return [hosted];
+    }
+  } catch {
+    /* fall back to original below */
+  }
+  return [fileUrl];
+}
+
 /**
  * @param {string} fileUrl  hosted blueprint url
  * @param {{ fileType?: string, fileName?: string }} [opts]
@@ -205,17 +321,31 @@ EMBEDDED SHEET TEXT:
 ${sourceText || '(no embedded text — read from the attached image/PDF)'}
 `;
 
+  // Never send the raw (possibly 100 MB) file to the LLM — it caps at ~10 MB.
+  // Send compact rendered sheets instead so extraction works at any file size.
+  let llmFileUrls = [fileUrl];
+  try {
+    const built = await buildLlmFileUrls(fileUrl, fileType, pdfPages);
+    if (built.length) llmFileUrls = built;
+  } catch {
+    /* fall back to the original url */
+  }
+
   try {
     const llm = await base44.integrations.Core.InvokeLLM({
       prompt,
-      file_urls: [fileUrl],
+      file_urls: llmFileUrls,
       response_json_schema: INTAKE_SCHEMA,
     });
+    const fields = normalizeIntake(llm);
     return {
-      fields: normalizeIntake(llm),
+      fields,
       pageCount,
       sourceText,
       planSheets: buildPlanSheets({ fileUrl, fileType, fileName, pages: pdfPages, pageCount }),
+      ...(Object.keys(fields).length === 0
+        ? { error: 'AI could not read any project details from this plan — fill the flagged fields below.' }
+        : {}),
     };
   } catch (e) {
     return {

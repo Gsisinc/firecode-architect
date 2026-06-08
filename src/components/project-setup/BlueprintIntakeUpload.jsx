@@ -50,7 +50,7 @@ export default function BlueprintIntakeUpload({ onExtracted }) {
         fileName: file.name,
       });
       setProgress(100);
-      onExtracted?.({ fields, fileUrl: file_url, fileType: file.type, fileName: file.name, pageCount, planSheets });
+      onExtracted?.({ fields, fileUrl: file_url, fileType: file.type, fileName: file.name, pageCount, planSheets, error });
       const found = Object.keys(fields || {});
       setSummary({ count: found.length, pageCount, fields, sheetCount: planSheets?.length || pageCount || 1 });
       setPhase('done');

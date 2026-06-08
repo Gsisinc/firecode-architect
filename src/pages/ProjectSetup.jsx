@@ -232,7 +232,7 @@ export default function ProjectSetup() {
     }
   };
 
-  const handleBlueprintExtracted = ({ fields = {}, fileUrl, fileType, fileName, planSheets = [] }) => {
+  const handleBlueprintExtracted = ({ fields = {}, fileUrl, fileType, fileName, planSheets = [], error }) => {
     blueprintImportedRef.current = true;
     setBlueprintExtractionAttempted(true);
     const isImg = (fileType || '').startsWith('image/');
@@ -263,7 +263,19 @@ export default function ProjectSetup() {
       setBlueprintMissingFields(missingRequiredFields(next, extractedKeys, true));
       return next;
     });
-    toast({ title: 'Blueprint read', description: 'Project details auto-filled from the plan. Review flagged fields before saving.' });
+    const foundCount = extractedKeys.length;
+    if (foundCount > 0) {
+      toast({
+        title: `Blueprint read — ${foundCount} field${foundCount === 1 ? '' : 's'} auto-filled`,
+        description: 'Review flagged fields below before saving.',
+      });
+    } else {
+      toast({
+        title: 'Blueprint attached, but no project details were read',
+        description: error || 'Fill the flagged fields below manually before saving.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const runAnalysisPreview = () => {
