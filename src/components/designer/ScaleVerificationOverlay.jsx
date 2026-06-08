@@ -35,6 +35,44 @@ const ROOM_COLORS = [
   '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#14b8a6',
 ];
 
+const LLM_IMAGE_MAX_DIM = 2000;
+const LLM_IMAGE_QUALITY = 0.82;
+
+function downscaleToJpeg(dataUrl, maxDim = LLM_IMAGE_MAX_DIM, quality = LLM_IMAGE_QUALITY) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const longEdge = Math.max(img.naturalWidth, img.naturalHeight) || maxDim;
+        const ratio = Math.min(1, maxDim / longEdge);
+        const w = Math.max(1, Math.round(img.naturalWidth * ratio));
+        const h = Math.max(1, Math.round(img.naturalHeight * ratio));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function uploadDataUrlForVision(dataUrl, name) {
+  const jpeg = await downscaleToJpeg(dataUrl);
+  const res = await fetch(jpeg || dataUrl);
+  const blob = await res.blob();
+  const file = new File([blob], name, { type: blob.type || 'image/jpeg' });
+  const { file_url } = await base44.integrations.Core.UploadFile({ file });
+  return file_url;
+}
+
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function ScaleVerificationOverlay({
@@ -241,12 +279,15 @@ export default function ScaleVerificationOverlay({
     try {
       let analysisImageUrl = plan.rendered_image_url || plan.image_url || plan.file_url;
       const planIsPdf = plan.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(analysisImageUrl || '');
+      let visionUrl = analysisImageUrl;
       if (planIsPdf) {
         const rendered = await renderPdfPageToDataUrl(plan.file_url || plan.image_url, plan.page_number || 1, 2);
         analysisImageUrl = rendered.dataUrl;
+        visionUrl = await uploadDataUrlForVision(rendered.dataUrl, `scale-floor-${currentFloor}-page-${plan.page_number || 1}.jpg`);
+      } else if (analysisImageUrl?.startsWith?.('data:')) {
+        visionUrl = await uploadDataUrlForVision(analysisImageUrl, `scale-floor-${currentFloor}.jpg`);
       }
-      // The AI rejects data: URLs. For PDFs send the hosted url (prompt uses ratios).
-      const visionUrl = planIsPdf ? (plan.file_url || plan.image_url) : (plan.image_url || plan.file_url || analysisImageUrl);
+      if (!visionUrl) throw new Error('Could not prepare a calibration image for AI analysis.');
 
       // Load image dimensions
       const imgEl = new window.Image();
