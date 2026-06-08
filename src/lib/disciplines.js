@@ -45,6 +45,7 @@ export const DISCIPLINES = {
       { type: 'horn', symbol: 'H', prefix: 'HN', label: 'Horn Only', color: '#ef4444', shape: 'diamond', defaultCircuitType: 'NAC', nfpa: 'NFPA 170 audible notification appliance / NFPA 72 ch. 18' },
       { type: 'strobe', symbol: 'CD', prefix: 'STR', label: 'Strobe Only', color: '#7c3aed', shape: 'circle', defaultCircuitType: 'NAC', nfpa: 'NFPA 170 visual notification appliance / NFPA 72 §18.5' },
       { type: 'speaker', symbol: 'SP', prefix: 'SP', label: 'Speaker', color: '#0891b2', shape: 'speaker', defaultCircuitType: 'NAC', nfpa: 'NFPA 170 speaker notification appliance / NFPA 72 ch. 18' },
+      { type: 'speaker_strobe', symbol: 'SS', prefix: 'SPS', label: 'Speaker-Strobe (voice evac)', color: '#7c3aed', shape: 'hex', defaultCircuitType: 'NAC', nfpa: 'NFPA 170 speaker-strobe / IBC §907.5.2.3 — required device in voice-evac buildings' },
       { type: 'duct_detector', symbol: 'D', prefix: 'DD', label: 'Duct Smoke Detector', color: '#4f46e5', shape: 'rect', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 duct detector / NFPA 72 §17.7.5' },
       { type: 'beam_detector', symbol: 'B', prefix: 'BD', label: 'Beam Smoke Detector', color: '#7c3aed', shape: 'circle', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 beam detector / NFPA 72 §17.7' },
       { type: 'waterflow_switch', symbol: 'WF', prefix: 'WF', label: 'Waterflow Switch', color: '#059669', shape: 'diamond', defaultCircuitType: 'SLC', nfpa: 'NFPA 170 sprinkler waterflow / NFPA 72 §17.16' },

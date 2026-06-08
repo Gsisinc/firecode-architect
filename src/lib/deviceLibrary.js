@@ -80,6 +80,12 @@ export const DEVICE_LIBRARY = {
     description: 'Speaker / speaker-strobe, voice evac',
     csfm: '7125-1653:0537', standby_mA: 0, alarm_mA: 30, verify: true,
   },
+  speakerstrobe_spsrkled: {
+    key: 'speaker_strobe', maker: 'System Sensor', model: 'SPSRKLED (red)',
+    description: 'Speaker-strobe (voice evac), selectable candela',
+    csfm: '7125-1653:0537', standby_mA: 0, alarm_mA: 95,
+    candela: [15, 30, 75, 95, 110, 135, 185], backbox: 'Single gang', verify: true,
+  },
 };
 
 /** Generic fallback when a device type has no catalog entry. */

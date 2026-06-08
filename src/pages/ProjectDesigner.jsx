@@ -58,6 +58,9 @@ import {
   calculatePullStationPlacement,
   calculateStrobePlacement,
   calculateHornPlacement,
+  calculateSpeakerStrobePlacement,
+  calculateParkingGarageNotification,
+  isParkingGarageRoom,
   calculateElevatorRecallDetectors,
   calculateSprinklerMonitoring,
   assignSprinklerMonitoringPositions,
@@ -647,6 +650,14 @@ Use decimal ratios (e.g. 0.184). Omit a field if unreadable.`,
       },
     };
 
+    // Embedded PDF text (room tags + square footages) read straight from the
+    // drawing — lets the model name rooms and read printed areas instead of
+    // guessing (brief item 6 / FA-004 P8 PDF room-label extraction).
+    const embeddedSheetText = String(plan.sheet_text || "").replace(/\s+/g, " ").trim();
+    const roomTextHints = embeddedSheetText
+      ? `\n\nEMBEDDED SHEET TEXT (extracted directly from the PDF). Use these printed room names/numbers and square-footage callouts to label rooms and fill area_sqft — match each printed label to the nearest enclosed space. Prefer printed SF over derived SF when present:\n"""${embeddedSheetText.slice(0, 3500)}"""`
+      : "";
+
     const buildRoomPassPrompt = () => `You are analyzing a floor plan image that is exactly ${imgW} pixels wide by ${imgH} pixels tall.
 Scale already established: ${pxPerFt.toFixed(2)} px/ft.
 
@@ -677,7 +688,7 @@ kitchen, laundry, community_room, common_area, office, conference_room, sales_fl
 stockroom, storage, mechanical_room, electrical, it_room, janitor, garage
 
 Also identify layout_zones for aisles, rack rows, or large obstructions.
-Exclude: title block, sheet border, north arrow, exterior areas outside walls.`;
+Exclude: title block, sheet border, north arrow, exterior areas outside walls.${roomTextHints}`;
 
     const invokeRoomsPass = (modelSlug) =>
       base44.integrations.Core.InvokeLLM({
@@ -860,30 +871,42 @@ If unreadable — omit that marker.`,
     const activeFloorZones = layoutZones.filter((zone) => zone.floor === activeFloor);
     const facpPt = suggestFacpPlacementPx(floorRooms, activeFloorZones, activeFloor);
 
-    // Smoke detectors — codeEngine returns camelCase (fireAlarmRequired)
+    // Smoke detectors — codeEngine returns camelCase (fireAlarmRequired).
+    // calculateSmokeDetectorPlacement self-excludes heat-detector rooms
+    // (electrical/generator/pump/mechanical/trash/garage…) per NFPA 72 §17.8.
     const needsAlarm = analysis.fireAlarmRequired || analysis.fire_alarm_required;
+    const voiceEvac = !!analysis.voiceEvacRequired;
     if (needsAlarm) {
-      const smokeRooms = rooms.filter(
-        (r) => r.floor === activeFloor && r.room_type !== "bathroom" && r.room_type !== "kitchen" && r.room_type !== "garage"
-      );
-      generatedDevices.push(...calculateSmokeDetectorPlacement(smokeRooms, ceilingPayload));
+      generatedDevices.push(...calculateSmokeDetectorPlacement(floorRooms, ceilingPayload));
       generatedDevices.push(...calculateDuctDetectorPlacement(project, floorRooms, activeFloor, analysis));
     }
 
-    // Heat detectors
+    // Heat detectors — placed in every heat-required room (NFPA 72 §17.8)
     generatedDevices.push(...calculateHeatDetectorPlacement(floorRooms, ceilingPayload));
 
     // Pull stations
     generatedDevices.push(...calculatePullStationPlacement(floorRooms, analysis));
 
-    // Strobes
+    // Notification appliances. Voice-evac buildings (incl. all high-rise) MUST
+    // use speaker-strobes everywhere — never plain strobe or horn-strobe.
     if (needsAlarm) {
-      generatedDevices.push(...calculateStrobePlacement(floorRooms));
-    }
-
-    // Horn/strobes
-    if (needsAlarm) {
-      generatedDevices.push(...calculateHornPlacement(floorRooms));
+      const garageRooms = floorRooms.filter(isParkingGarageRoom);
+      const nonGarageRooms = floorRooms.filter((r) => !isParkingGarageRoom(r));
+      if (voiceEvac) {
+        generatedDevices.push(...calculateSpeakerStrobePlacement(nonGarageRooms));
+      } else {
+        generatedDevices.push(...calculateStrobePlacement(nonGarageRooms));
+        generatedDevices.push(...calculateHornPlacement(nonGarageRooms));
+      }
+      // Parking garage — egress-path NAC (≤50 ft + exits), not per bay.
+      if (garageRooms.length) {
+        generatedDevices.push(
+          ...calculateParkingGarageNotification(garageRooms, {
+            pxPerFt: getFloorScale(floorPlans, activeFloor),
+            deviceType: voiceEvac ? "speaker_strobe" : "strobe",
+          })
+        );
+      }
     }
 
     // Elevator recall (supervisory lobby / MR / shaft detectors)
@@ -891,13 +914,24 @@ If unreadable — omit that marker.`,
     generatedDevices.push(...elevDevices);
 
     const sprinklerOk = ['Full (NFPA 13)', 'Full (NFPA 13R)', 'Partial'].includes(project.sprinkler_status || '');
+    const riserConfirmed = !!project.riser_location_confirmed;
     if (sprinklerOk) {
       const sprinklerDevices = assignSprinklerMonitoringPositions(
         calculateSprinklerMonitoring(project).filter((d) => d.floor === activeFloor),
         floorRooms
       );
-      generatedDevices.push(...sprinklerDevices);
-      generatedDevices.push(...attachSprinklerMonitorModules(sprinklerDevices));
+      // Without a plumbing/sprinkler drawing the riser location is a guess; flag
+      // flow/tamper/PIV/OSY monitor modules as unconfirmed (NFPA 72 §17.12/§17.16).
+      const tagUnconfirmed = (list) =>
+        riserConfirmed
+          ? list
+          : list.map((d) => ({
+              ...d,
+              unconfirmed: true,
+              note: `${d.note ? d.note + " " : ""}UNCONFIRMED — verify riser/valve location against plumbing/sprinkler drawings.`,
+            }));
+      generatedDevices.push(...tagUnconfirmed(sprinklerDevices));
+      generatedDevices.push(...tagUnconfirmed(attachSprinklerMonitorModules(sprinklerDevices)));
     }
 
     // Elevator interface / shunt modules at panel cluster (floor 1)
@@ -972,6 +1006,8 @@ If unreadable — omit that marker.`,
                 ? "HS"
                 : d.type === "strobe"
                   ? "STR"
+                  : d.type === "speaker_strobe"
+                    ? "SPS"
                   : d.type === "waterflow_switch"
                     ? "WF"
                     : d.type === "valve_tamper"
@@ -994,7 +1030,20 @@ If unreadable — omit that marker.`,
     const otherDisc = storedDevices.filter((d) => (d.discipline || 'fire_alarm') !== 'fire_alarm');
     setLocalDevices([...otherDisc, ...mergedFire]);
     toast.success(`Auto-placed ${generatedDevices.length} generated devices on floor ${activeFloor}; manual devices were preserved`);
-  }, [project, rooms, storedDevices, activeFloor, analysisResults, layoutZones, disciplineId]);
+
+    // ── Design-gap prompts (FA-004 §6.3 / §8.1, R-23 / R-24) ──────────────
+    if (needsAlarm) {
+      if (voiceEvac) {
+        toast.info("Voice-evacuation building: all notification appliances placed as speaker-strobes (no plain strobes / horn-strobes) per IBC §907.5.2.3.", { duration: 7000 });
+      }
+      if (!(Number(project.air_handling_units) >= 1)) {
+        toast.warning("AHU data missing — duct smoke detectors are required on every AHU >2,000 CFM (NFPA 72 §17.7.5). Enter AHU count/CFM in project setup or place duct detectors manually before submittal.", { duration: 9000 });
+      }
+      if (sprinklerOk && !riserConfirmed) {
+        toast.warning("Sprinkler riser location unconfirmed — flow/tamper monitor modules flagged. Verify against plumbing/sprinkler drawings (NFPA 72 §17.12 / §17.16).", { duration: 9000 });
+      }
+    }
+  }, [project, rooms, storedDevices, activeFloor, analysisResults, layoutZones, disciplineId, floorPlans]);
 
   const handleUpdateDevice = (deviceId, updates) => {
     const updated = storedDevices.map((d) => {

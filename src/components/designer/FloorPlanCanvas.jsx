@@ -68,7 +68,7 @@ function drawInstructionSpecIcon(ctx, device, selected) {
   ctx.restore();
 }
 const GRID_SIZE = 20;
-const NOTIFICATION_TYPES = ['horn_strobe', 'strobe', 'speaker', 'horn'];
+const NOTIFICATION_TYPES = ['horn_strobe', 'strobe', 'speaker', 'speaker_strobe', 'horn'];
 
 // NFPA 170-aligned fire alarm plan symbols. The symbols use common plan lettering and geometry
 // while preserving app-specific coloring for readability on uploaded drawings.
@@ -148,6 +148,17 @@ const NFPA_SYMBOLS = {
       drawSymbolText(ctx, 'SP', x, y, r, '#0891b2');
     },
   },
+  // Voice-evac speaker-strobe (NFPA 170 'SPS'): rectangle + lightning bolt.
+  speaker_strobe: rectSymbol('SS', '#7c3aed', 2.2, 1.5, (ctx, x, y, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r * 0.2, y - r * 0.7);
+    ctx.lineTo(x - r * 0.15, y);
+    ctx.lineTo(x + r * 0.15, y);
+    ctx.lineTo(x - r * 0.2, y + r * 0.7);
+    ctx.strokeStyle = '#7c3aed';
+    ctx.lineWidth = 0.9;
+    ctx.stroke();
+  }),
   facp: rectSymbol('FACP', '#dc2626', 3, 1.8, (ctx, x, y, r) => {
     const w = r * 3;
     const h = r * 1.8;

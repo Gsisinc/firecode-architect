@@ -318,6 +318,30 @@ export function determineSystemRequirements(projectData) {
   result.mechanicalHvacDrawingReviewRequired = result.fireAlarmRequired;
   result.highBayCeilingReviewRequired = (projectData.default_ceiling_height || 0) >= HIGH_BAY_SMOKE_CEILING_FT;
 
+  // ── High-rise → Voice Evacuation (IBC §403.1, §907.5.2.3 / FA-005 R-01, R-02) ──
+  // High-rise = highest occupied floor > 75 ft above FD vehicle access. At a
+  // typical ~10 ft/floor that's roughly 8+ stories. When the building is
+  // high-rise and a fire alarm is required, the system MUST be voice-evac and
+  // EVERY notification appliance must be a speaker-strobe (no horn-strobe / plain
+  // strobe). This is the hard rule the field test flagged as missing for R-2.
+  const floorsNum = Number(num_floors) || 0;
+  const ceilingFt = Number(projectData.default_ceiling_height) > 0 ? Number(projectData.default_ceiling_height) : 10;
+  const estBuildingHeightFt = floorsNum * ceilingFt;
+  const isHighRise = occupancy_group === 'High Rise' || estBuildingHeightFt > 75 || floorsNum >= 8;
+  result.highRise = isHighRise;
+  result.estimatedBuildingHeightFt = estBuildingHeightFt;
+  if (isHighRise && result.fireAlarmRequired) {
+    result.voiceEvacRequired = true;
+    result.smokeDetectionRequired = true;
+    result.fireCommandCenterRequired = true;
+    result.firefighterCommRequired = true;
+    result.notificationDevices = { ...result.notificationDevices, horns: false, strobes: true, speakers: true };
+    result.specialNotes.push('High-rise (occupied floor > 75 ft): Voice Evacuation Addressable FA required — ALL notification appliances must be speaker-strobes; horn-strobes and plain strobes are prohibited (IBC §403.1, §907.5.2.3; NFPA 72 §24).');
+    result.codeReferences.push('IBC §403.1', 'IBC §907.5.2.3', 'NFPA 72 §24');
+  }
+  // Single source of truth for which NAC appliance the placement engine uses.
+  result.notificationApplianceType = result.voiceEvacRequired ? 'speaker_strobe' : 'horn_strobe';
+
   return result;
 }
 
@@ -459,11 +483,58 @@ function calculateSlopedCeilingSpacing(angleInDegrees) {
   return Math.round(spacing * 10) / 10;
 }
 
-/** Rooms where smoke detectors are excluded per NFPA 72 */
+/**
+ * NFPA 72 §17.8 / FA-004 §4.1 / FA-005 §2.2 — rooms where ambient conditions
+ * (heat, dust, exhaust, moisture, combustion) make spot smoke detectors
+ * inappropriate and a HEAT detector is required instead. This mapping is the #1
+ * code-compliance fix from field testing: smoke detectors were being placed in
+ * electrical, generator, fire-pump, mechanical, and trash rooms.
+ */
+const HEAT_DETECTOR_ROOM_RULES = [
+  { match: ['electrical', 'switchgear', 'mcc', 'ev elec', 'ev_elec', 'ev charging', 'ev charg'], reason: 'Electrical/switchgear — dust, heat, electrical interference (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['generator', 'genset', 'gen room', 'gen_room'], reason: 'Generator room — combustion exhaust, high ambient temp (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['fire pump', 'fire_pump', 'firepump', 'pump room', 'pump_room'], reason: 'Fire pump room — heat/exhaust/wet environment (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['mechanical', 'boiler', 'mech room', 'mech_room', 'mechroom'], reason: 'Mechanical/boiler — steam, high heat, dust (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['elevator machine', 'machine room', 'elevator equipment', 'emr'], reason: 'Elevator machine room — heat/oil; required for Phase I recall (heat detector)', code: 'NFPA 72 §21.3 + §17.8' },
+  { match: ['telecom', 'idf', 'mdf'], reason: 'Telecom/IDF — electronic equipment, cooling, dust (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['trash', 'refuse', 'compactor', 'garbage'], reason: 'Trash/refuse — dust and debris (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['kitchen', 'cook', 'galley'], reason: 'Kitchen — grease, steam, cooking smoke; never SD over cooking (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['laundry'], reason: 'Laundry — lint, steam, heat (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['loading dock', 'loading_dock'], reason: 'Loading dock — vehicle exhaust (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['paint', 'spray booth'], reason: 'Paint/spray booth — flammable vapors (heat detector)', code: 'NFPA 72 §17.8' },
+  { match: ['attic', 'crawl'], reason: 'Attic/crawl space — particulates, temp extremes (heat detector)', code: 'NFPA 72 §17.8' },
+];
+
+/** Returns the matching heat-detector rule for a room, or null. */
+export function heatDetectorRuleForRoom(room) {
+  const name = `${room?.room_type || ''} ${room?.user_room_kind || ''} ${room?.name || ''}`.toLowerCase();
+  // Parking garage (open or enclosed) → heat: vehicle exhaust/CO false-alarms SD.
+  if (isParkingGarageRoom(room)) {
+    return { reason: 'Parking garage — vehicle exhaust/CO; SD will false-alarm (heat detector)', code: 'NFPA 72 §17.8' };
+  }
+  for (const rule of HEAT_DETECTOR_ROOM_RULES) {
+    if (rule.match.some((kw) => name.includes(kw))) return rule;
+  }
+  return null;
+}
+
+/** True when a room must use a heat detector instead of a smoke detector. */
+export function roomRequiresHeatDetector(room) {
+  if (room?.use_heat_detector) return true;
+  return !!heatDetectorRuleForRoom(room);
+}
+
+/** True for enclosed/open parking garage rooms (NAC + detector special handling). */
+export function isParkingGarageRoom(room) {
+  const name = (room?.room_type || room?.user_room_kind || room?.name || '').toLowerCase();
+  return (name.includes('garage') || name.includes('parking')) && !name.includes('bike');
+}
+
+/** Rooms where smoke detectors are excluded (heat-required rooms + wet rooms). */
 function shouldExcludeSmokeDetector(room) {
-  const excluded = ['bathroom', 'shower', 'kitchen', 'garage', 'cooking'];
-  const roomType = (room.room_type || room.name || '').toLowerCase();
-  return excluded.some(ex => roomType.includes(ex));
+  const name = (room?.room_type || room?.user_room_kind || room?.name || '').toLowerCase();
+  if (name.includes('bathroom') || name.includes('shower') || name.includes('restroom')) return true;
+  return roomRequiresHeatDetector(room);
 }
 
 // ─── HEAT DETECTOR PLACEMENT ─────────────────────────────────────────────────
@@ -478,12 +549,16 @@ export function calculateHeatDetectorPlacement(rooms, ceilingData = {}) {
     const ceilingHeight = resolveRoomCeilingFt(room, cd);
     const roomName = (room.room_type || room.name || '').toLowerCase();
     const isKitchen = roomName.includes('kitchen') || roomName.includes('cook');
-    const isGarage = roomName.includes('garage');
 
-    // Only place heat detectors in rooms that need them
-    if (!isKitchen && !isGarage && !room.use_heat_detector) return;
+    // Place heat detectors in every room the classification table flags (NFPA
+    // 72 §17.8): electrical, generator, fire pump, mechanical/boiler, trash,
+    // elevator machine, telecom, laundry, loading dock, kitchen, parking garage…
+    const rule = room.use_heat_detector
+      ? { reason: 'Marked as heat-detector room', code: 'NFPA 72 §17.8' }
+      : heatDetectorRuleForRoom(room);
+    if (!rule) return;
 
-    // NFPA 72 §17.6.3 - Ceiling height correction factors
+    // NFPA 72 §17.8 - 50 ft on-center / 25 ft from wall (≈2,500 SF); reduce for height
     const maxSpacing = getHeatDetectorSpacing(ceilingHeight, 'ror');
     const maxCoverage = maxSpacing * maxSpacing;
 
@@ -517,7 +592,8 @@ export function calculateHeatDetectorPlacement(rooms, ceilingData = {}) {
           zone: `F${room.floor}-Z1`,
           circuit: 'SLC-1',
           temp_rating: tempRating,
-          codeRef: 'NFPA 72 §17.6',
+          codeRef: rule.code || 'NFPA 72 §17.8',
+          note: rule.reason,
         });
         addressCounter++;
       }
@@ -686,6 +762,141 @@ export function calculateCandela(sqft, isCorridor = false) {
   if (sqft <= 9600) return 95;
   if (sqft <= 12800) return 110;
   return 135; // Larger rooms need multiple devices
+}
+
+// ─── SPEAKER-STROBE (VOICE EVAC) ─────────────────────────────────────────────
+
+/**
+ * NFPA 72 §18.5 + §24 / IBC §907.5.2.3 — speaker-strobe notification for
+ * voice-evacuation systems. When voice evac is required, EVERY NAC appliance is
+ * a speaker-strobe (this replaces strobe + horn-strobe, never both).
+ */
+export function calculateSpeakerStrobePlacement(rooms = []) {
+  const devices = [];
+  rooms.forEach((room) => {
+    const roomName = (room.room_type || room.name || '').toLowerCase();
+    // Strobes not required inside the stair/elevator shaft itself.
+    if (roomName.includes('stair') || roomName.includes('elevator shaft')) return;
+    const sqft = room.sqft || (room.width * room.height) || 100;
+    const isCorridor = roomName.includes('corridor') || roomName.includes('hall');
+    const candela = calculateCandela(sqft, isCorridor);
+    devices.push({
+      id: `SPS-${room.id}`,
+      type: 'speaker_strobe',
+      subtype: isCorridor ? 'wall_speaker_strobe_15cd' : 'wall_speaker_strobe',
+      symbol: 'SS',
+      x: room.x + (room.width || 0) * 0.1,
+      y: room.y + (room.height || 0) * 0.1,
+      address: '1-NAC',
+      label: `SPS-${candela}cd`,
+      room_id: room.id,
+      floor: room.floor,
+      candela,
+      mounting_height: '80"-96" AFF (strobe lens centerline)',
+      zone: `F${room.floor}-NAC`,
+      circuit: `NAC-${room.floor}`,
+      sync_required: true,
+      codeRef: 'IBC §907.5.2.3 / NFPA 72 §18.5 + §24',
+      note: 'Voice-evac building: speaker-strobe required (no plain strobe or horn-strobe).',
+    });
+  });
+  return devices;
+}
+
+/**
+ * Parking garage notification — egress-path based, NOT area-per-bay
+ * (NFPA 72 §18.5.4 / FA-004 §6.1). Field test placed 2 devices in 13,748 SF;
+ * correct count is 10–12. Places appliances ≤50 ft along drive aisles and adds
+ * lanes so no point is more than ~100 ft from a device. Ceiling-pendant mount.
+ * @param {Array} garageRooms parking-garage rooms on the floor
+ * @param {{ pxPerFt:number, deviceType?:('speaker_strobe'|'strobe') }} opts
+ */
+export function calculateParkingGarageNotification(garageRooms = [], opts = {}) {
+  const pxPerFt = Number(opts.pxPerFt) > 0 ? Number(opts.pxPerFt) : 10;
+  const isVoice = opts.deviceType !== 'strobe';
+  const spacingPx = 50 * pxPerFt;       // ≤50 ft along egress path
+  const lanePitchPx = 100 * pxPerFt;    // ≤100 ft visibility across the bay
+  const devices = [];
+  let seq = 1;
+
+  const pushDevice = (room, x, y, atExit) => {
+    devices.push({
+      id: `GAR-NAC-F${room.floor}-${seq}`,
+      type: isVoice ? 'speaker_strobe' : 'strobe',
+      subtype: atExit
+        ? (isVoice ? 'wall_speaker_strobe' : 'wall_strobe')
+        : (isVoice ? 'ceiling_speaker_strobe' : 'ceiling_strobe'),
+      symbol: isVoice ? 'SS' : 'CD',
+      x: Math.round(x),
+      y: Math.round(y),
+      address: '1-NAC',
+      label: `${isVoice ? 'SPS' : 'STR'}-GAR-${atExit ? 'EX' : 'AISLE'}-${seq}`,
+      room_id: room.id,
+      floor: room.floor,
+      candela: 110,
+      mounting_height: atExit
+        ? '80"-96" AFF at exit door'
+        : 'Ceiling pendant — above vehicle roofline for visibility',
+      zone: `F${room.floor}-NAC-GAR`,
+      circuit: `NAC-${room.floor}`,
+      sync_required: true,
+      codeRef: 'NFPA 72 §18.5.4 / FA-004 §6.1',
+      note: atExit
+        ? 'Speaker-strobe at garage exit/ramp/stair — confirm exact exit door locations.'
+        : 'Garage NAC along egress path at ≤50 ft (not per bay). Confirm drive-aisle paths.',
+    });
+    seq++;
+  };
+
+  garageRooms.forEach((room) => {
+    const w = room.width || 0;
+    const h = room.height || 0;
+    if (w <= 0 || h <= 0) return;
+    const horizontal = w >= h;
+    const longPx = horizontal ? w : h;
+    const shortPx = horizontal ? h : w;
+    const lanes = Math.max(1, Math.ceil(shortPx / lanePitchPx));
+    const perLane = Math.max(2, Math.ceil(longPx / spacingPx) + 1);
+
+    // Drive-aisle devices spaced ≤50 ft along egress.
+    for (let lane = 0; lane < lanes; lane++) {
+      const laneFrac = (lane + 0.5) / lanes;
+      for (let i = 0; i < perLane; i++) {
+        const frac = perLane === 1 ? 0.5 : i / (perLane - 1);
+        const alongPx = frac * longPx;
+        const x = horizontal ? room.x + alongPx : room.x + laneFrac * shortPx;
+        const y = horizontal ? room.y + laneFrac * shortPx : room.y + alongPx;
+        pushDevice(room, x, y, false);
+      }
+    }
+
+    // A speaker-strobe at every exit door (stair/ramp). Exit count is unknown
+    // without an egress drawing, so estimate from perimeter and place evenly
+    // around the walls (NFPA 72 §18.5.4 / FA-004 §6.1: "at every exit door").
+    const perimeterFt = (2 * (w + h)) / pxPerFt;
+    const exitCount = Math.min(6, Math.max(2, Math.round(perimeterFt / 150)));
+    const corners = [
+      { x: room.x, y: room.y },
+      { x: room.x + w, y: room.y },
+      { x: room.x + w, y: room.y + h },
+      { x: room.x, y: room.y + h },
+    ];
+    const perim = [w, h, w, h];
+    const total = perim.reduce((a, b) => a + b, 0);
+    for (let e = 0; e < exitCount; e++) {
+      let target = (e / exitCount) * total;
+      let side = 0;
+      while (side < 4 && target > perim[side]) { target -= perim[side]; side += 1; }
+      side = Math.min(side, 3);
+      const t = perim[side] > 0 ? target / perim[side] : 0;
+      const next = corners[(side + 1) % 4];
+      const x = corners[side].x + (next.x - corners[side].x) * t;
+      const y = corners[side].y + (next.y - corners[side].y) * t;
+      pushDevice(room, x, y, true);
+    }
+  });
+
+  return devices;
 }
 
 // ─── HORN PLACEMENT ─────────────────────────────────────────────────────────
@@ -1064,7 +1275,7 @@ export function calculateNacLoading(deviceList = []) {
   const circuits = {};
 
   deviceList.forEach(device => {
-    if (!['horn_strobe', 'horn', 'strobe', 'speaker'].includes(device.type)) return;
+    if (!['horn_strobe', 'horn', 'strobe', 'speaker', 'speaker_strobe'].includes(device.type)) return;
     const floorNum = device.floor || 1;
     // Each floor gets its own NAC circuit (GSIS Guide §8.2 rule of thumb)
     const circuitId = device.circuit || `NAC-${floorNum}`;
